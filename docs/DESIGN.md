@@ -119,6 +119,18 @@ sail state); crew NPCs aboard are client-simulated from the ship's seed. Co-op f
 players crew each other's ships and hunt NPC convoys together. PvP only in opt-in
 contested waters.
 
+**Who sails where:** shared rooms need an invite (claimed on the dash → room +
+token, exactly Moorstead's structure). **Guests always sail a private solo world**
+(IndexedDB save, no relay connection) — the guest door is a demo, not a back door
+into the shared sea.
+
+**Encounter gait:** the open-sea fair current (up to 12x) dies away when another
+ship is within hailing range — `encounterGait` in `earth.js` ramps every hull back
+to human speed inside ~400 m (from ~1600 m out), symmetrically, since both crews
+compute it from the same mutual distance. Without this, two ships at full gait
+would close at ~200 m/s and never meet. Applies equally to player contacts and
+future NPC merchants; `main.js` keeps the contact list (empty until Phase 2/4).
+
 ## What ports from Moorstead
 
 | Moorstead system | Becomes |

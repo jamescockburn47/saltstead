@@ -260,3 +260,14 @@ export function gaitFactor(coastDist) {
     + 3 * smooth01((coastDist - 800) / 1200)      // coastal -> offshore
     + (GAIT_MAX - 4) * smooth01((coastDist - 2200) / 2000); // offshore -> blue water
 }
+
+// the current slackens in company: two hulls at 12x would close at ~200 m/s
+// and never meet, so within hailing range the fair current dies and everyone
+// sails at human speed. Symmetric by construction — both crews compute it
+// from the same mutual distance, so no ship outruns the encounter.
+export const ENCOUNTER_NEAR = 400;   // full stop of the current inside this
+export const ENCOUNTER_FAR = 1600;   // untouched beyond this
+export function encounterGait(gait, nearestShipDist) {
+  const t = smooth01((nearestShipDist - ENCOUNTER_NEAR) / (ENCOUNTER_FAR - ENCOUNTER_NEAR));
+  return 1 + (gait - 1) * t;
+}

@@ -4,6 +4,7 @@
 import {
   latLonToWorld, worldToLatLon, isLand, coastDistGame, signedCoastGame,
   elevation, gaitFactor, riverDistGame, mountainness,
+  encounterGait, ENCOUNTER_NEAR, ENCOUNTER_FAR, GAIT_MAX,
   RING_COUNT, POINT_COUNT, RIVER_COUNT, MTN_COUNT, M_PER_DEG, COAST_CAP, RIVER_CAP,
 } from '../src/earth.js';
 
@@ -86,6 +87,20 @@ let prev = -1, mono = true;
 for (let d = 0; d <= 6000; d += 50) { const g = gaitFactor(d); if (g < prev - 1e-9) mono = false; prev = g; }
 ok(mono, 'monotonic ramp all the way out');
 ok(gaitFactor(coastDistGame(30, -45)) === 12, 'mid-Atlantic sails at full blue-water gait');
+
+// encounter gait: alone the current runs full; in company it dies to 1x
+ok(encounterGait(GAIT_MAX, Infinity) === GAIT_MAX, 'empty sea, full current');
+ok(encounterGait(GAIT_MAX, ENCOUNTER_FAR) === GAIT_MAX, 'a sail at the edge changes nothing yet');
+ok(encounterGait(GAIT_MAX, ENCOUNTER_NEAR) === 1, 'within hailing range, human speed');
+ok(encounterGait(GAIT_MAX, 0) === 1, 'alongside, human speed');
+ok(encounterGait(1, 100) === 1, 'inshore (gait already 1) the encounter is a no-op');
+{
+  const a = encounterGait(GAIT_MAX, 700), b = encounterGait(GAIT_MAX, 1100);
+  ok(a > 1 && b < GAIT_MAX && a < b, `encounter ramp is smooth and monotonic (${a.toFixed(2)} < ${b.toFixed(2)})`);
+  // symmetry: the rule is a pure function of mutual distance, so two ships
+  // reading the same range read the same current
+  ok(encounterGait(GAIT_MAX, 900) === encounterGait(GAIT_MAX, 900), 'both crews read the same slack');
+}
 
 if (failed) { console.error(`verify-earth: ${failed} FAILED`); process.exit(1); }
 console.log(`verify-earth: OK — ${RING_COUNT} rings/${POINT_COUNT} pts, ground-truth tour green, gait ramps 1x->12x`);

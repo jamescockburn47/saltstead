@@ -21,6 +21,7 @@ import { bootTitle } from './title.js';
 import { loadGame, saveGame, snapshotSave } from './save.js';
 import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
+  encounterGait, ENCOUNTER_FAR,
 } from './earth.js';
 
 const POS_NAMES = [
@@ -70,6 +71,9 @@ class Game {
     this.coastDist = COAST_CAP;
     this.geoClock = 0;
     this.aground = false;
+    // other ships at sea ({x, z} world coords) — multiplayer peers and NPC
+    // merchants land here; the encounter gait reads it every frame
+    this.contacts = [];
     const sloop = buildSloop();
     this.shipGroup = sloop.group;
     this.shipGroup.rotation.order = 'YXZ';
@@ -210,7 +214,13 @@ class Game {
       const ll = worldToLatLon(this.ship.x, this.ship.z);
       this.coastDist = coastDistGame(ll.lat, ll.lon);
     }
-    const gait = gaitFactor(this.coastDist);
+    // meeting another ship kills the fair current — you slow to hailing speed
+    let contactDist = Infinity;
+    for (const c of this.contacts) {
+      contactDist = Math.min(contactDist, Math.hypot(c.x - this.ship.x, c.z - this.ship.z));
+    }
+    const gait = encounterGait(gaitFactor(this.coastDist), contactDist);
+    this.shipSighted = contactDist < ENCOUNTER_FAR;
 
     const px = this.ship.x, pz = this.ship.z;
     stepShip(this.ship, this.wind, dt, SLOOP, gait);
@@ -323,8 +333,14 @@ class Game {
     this.hud.latlon.textContent =
       `${Math.abs(ll.lat).toFixed(2)}\u00b0${ll.lat >= 0 ? 'N' : 'S'} `
       + `${Math.abs(ll.lon).toFixed(2)}\u00b0${ll.lon >= 0 ? 'E' : 'W'}`;
-    this.hud.gait.style.display = gait > 1.3 ? 'block' : 'none';
-    if (gait > 1.3) this.hud.gait.textContent = `OPEN SEA \u2014 fair current \u00d7${gait.toFixed(1)}`;
+    this.hud.gait.style.display = (gait > 1.3 || this.shipSighted) ? 'block' : 'none';
+    if (this.shipSighted) {
+      this.hud.gait.textContent = gait > 1.3
+        ? `SAIL HO \u2014 current slackens \u00d7${gait.toFixed(1)}`
+        : 'SAIL HO \u2014 hailing speed';
+    } else if (gait > 1.3) {
+      this.hud.gait.textContent = `OPEN SEA \u2014 fair current \u00d7${gait.toFixed(1)}`;
+    }
     this.maps.update(ll.lat, ll.lon, this.ship.yaw);
     this.hud.hint.textContent = this.aground
       ? 'AGROUND \u2014 steer for deeper water'
