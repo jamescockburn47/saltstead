@@ -43,7 +43,7 @@ function toTyped(b64, Ctor) {
 }
 
 const MASK = b64ToBytes(MASK_B64);
-function maskLand(lat, lon) {
+export function maskLand(lat, lon) {
   const col = Math.min(MASK_W - 1, Math.max(0, Math.round((lon + 180) / (360 / MASK_W) - 0.5)));
   const row = Math.min(MASK_H - 1, Math.max(0, Math.round((90 - lat) / (180 / MASK_H) - 0.5)));
   const bit = row * MASK_W + col;
@@ -176,10 +176,10 @@ export function isLand(lat, lon) {
   return v;
 }
 
-export const COAST_CAP = 5 * M_PER_DEG;
+export const COAST_CAP = 10 * M_PER_DEG;
 
 export function coastDistGame(lat, lon) {
-  const d = nearestDeg(LAND, lat, lon, 20);
+  const d = nearestDeg(LAND, lat, lon, 40);
   return d === null ? COAST_CAP : Math.min(COAST_CAP, d * M_PER_DEG);
 }
 
@@ -250,8 +250,13 @@ export function elevation(lat, lon) {
   return h;
 }
 
-// open-sea gait: 1x inshore, ramping to 4x between 800 m and 2000 m offshore
+// open-sea gait, two stages: 1x inshore so harbours and coastlines are sailed
+// at human scale, 4x once clear of the coast, then a second ramp to 12x in
+// true blue water so an ocean crossing is minutes, not a tea break.
+const smooth01 = (t) => { const c = Math.max(0, Math.min(1, t)); return c * c * (3 - 2 * c); };
+export const GAIT_MAX = 12;
 export function gaitFactor(coastDist) {
-  const t = Math.max(0, Math.min(1, (coastDist - 800) / 1200));
-  return 1 + 3 * t * t * (3 - 2 * t);
+  return 1
+    + 3 * smooth01((coastDist - 800) / 1200)      // coastal -> offshore
+    + (GAIT_MAX - 4) * smooth01((coastDist - 2200) / 2000); // offshore -> blue water
 }

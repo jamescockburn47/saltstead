@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "node scripts/deploy.mjs",
-    "verify": "node scripts/verify-waves.mjs && node scripts/verify-sailing.mjs && node scripts/verify-shipframe.mjs && node scripts/verify-ship.mjs && node scripts/verify-foam.mjs && node scripts/verify-wood.mjs && node scripts/verify-legends.mjs && node scripts/verify-earth.mjs && node scripts/verify-terraingen.mjs && node scripts/verify-sky.mjs && node scripts/verify-light.mjs",
+    "verify": "node scripts/verify-waves.mjs && node scripts/verify-sailing.mjs && node scripts/verify-shipframe.mjs && node scripts/verify-ship.mjs && node scripts/verify-foam.mjs && node scripts/verify-wood.mjs && node scripts/verify-legends.mjs && node scripts/verify-earth.mjs && node scripts/verify-chart.mjs && node scripts/verify-terraingen.mjs && node scripts/verify-sky.mjs && node scripts/verify-light.mjs",
     "verify:waves": "node scripts/verify-waves.mjs",
     "verify:sailing": "node scripts/verify-sailing.mjs",
     "verify:shipframe": "node scripts/verify-shipframe.mjs",
@@ -18,6 +18,7 @@
     "verify:wood": "node scripts/verify-wood.mjs",
     "verify:legends": "node scripts/verify-legends.mjs",
     "verify:earth": "node scripts/verify-earth.mjs",
+    "verify:chart": "node scripts/verify-chart.mjs",
     "verify:terraingen": "node scripts/verify-terraingen.mjs",
     "verify:sky": "node scripts/verify-sky.mjs",
     "verify:light": "node scripts/verify-light.mjs"

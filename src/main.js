@@ -16,6 +16,7 @@ import { TerrainLayer } from './terrain.js';
 import { Sky } from './sky.js';
 import { DAY_LENGTH, solarState, lunarState, moonPhase } from './skymath.js';
 import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness } from './lightrig.js';
+import { MapUI } from './mapui.js';
 import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
 } from './earth.js';
@@ -102,6 +103,8 @@ class Game {
       latlon: document.getElementById('latlon'),
       gait: document.getElementById('gaitbadge'),
     };
+
+    this.maps = new MapUI();
 
     this.applyQuality(localStorage['saltstead-gfx'] === 'plain' ? 'plain' : 'fine');
 
@@ -300,13 +303,14 @@ class Game {
       + `${Math.abs(ll.lon).toFixed(2)}\u00b0${ll.lon >= 0 ? 'E' : 'W'}`;
     this.hud.gait.style.display = gait > 1.3 ? 'block' : 'none';
     if (gait > 1.3) this.hud.gait.textContent = `OPEN SEA \u2014 fair current \u00d7${gait.toFixed(1)}`;
+    this.maps.update(ll.lat, ll.lon, this.ship.yaw);
     this.hud.hint.textContent = this.aground
       ? 'AGROUND \u2014 steer for deeper water'
       : this.mode === 'helm'
-        ? 'A/D — steer · W/S — sheet in / ease · E — leave the helm'
+        ? 'A/D — steer · W/S — sheet in / ease · E — leave the helm · M — chart'
         : nearHelm(this.cap.x, this.cap.z)
           ? 'E — take the helm'
-          : 'WASD — walk the deck · drag — look · wheel — zoom';
+          : 'WASD — walk the deck · drag — look · wheel — zoom · M — chart';
     // a nudge toward good trim, teaching by whisper not tutorial
     const err = Math.abs(this.ship.trim - optimalTrim(rel));
     this.hud.trim.style.background = err < 0.12 ? '#7fd48a' : err < 0.3 ? '#e8c46a' : '#d47a6a';
