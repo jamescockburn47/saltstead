@@ -74,10 +74,19 @@ export class MapUI {
     this.worldWrap.style.display = this.worldOpen ? 'flex' : 'none';
   }
 
-  // called each frame; lat/lon/yaw are the SHIP's
-  update(lat, lon, yaw) {
+  // called each frame; lat/lon/yaw are the SHIP's, digSite the treasure X
+  update(lat, lon, yaw, digSite = null) {
+    this.digSite = digSite;
     this.updateMini(lat, lon, yaw);
     if (this.worldOpen) this.updateWorld(lat, lon, yaw);
+  }
+
+  drawX(ctx, x, y, s = 5) {
+    ctx.strokeStyle = BLOOD; ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(x - s, y - s); ctx.lineTo(x + s, y + s);
+    ctx.moveTo(x + s, y - s); ctx.lineTo(x - s, y + s);
+    ctx.stroke();
   }
 
   updateMini(lat, lon, yaw) {
@@ -96,6 +105,11 @@ export class MapUI {
       if (p.x >= 0 && p.x < LOCAL_N && p.y >= 0 && p.y < LOCAL_N)
         drawLegend(ctx, p.x * k, p.y * k, L.kind);
     }
+    if (this.digSite) {
+      const p = chartXY(this.digSite.lat, this.digSite.lon, this.localView);
+      if (p.x >= 0 && p.x < LOCAL_N && p.y >= 0 && p.y < LOCAL_N)
+        this.drawX(ctx, p.x * k, p.y * k, 6);
+    }
     const s = chartXY(lat, lon, this.localView);
     drawShip(ctx, s.x * k, s.y * k, yaw);
   }
@@ -112,6 +126,12 @@ export class MapUI {
       drawLegend(ctx, p.x, p.y, L.kind);
       ctx.fillStyle = INK;
       ctx.fillText(L.name, p.x + 6, p.y + 3);
+    }
+    if (this.digSite) {
+      const p = chartXY(this.digSite.lat, this.digSite.lon, view);
+      this.drawX(ctx, p.x, p.y, 6);
+      ctx.fillStyle = BLOOD;
+      ctx.fillText('the dig', p.x + 8, p.y + 3);
     }
     const s = chartXY(lat, lon, view);
     drawShip(ctx, s.x, s.y, yaw, 1.4);

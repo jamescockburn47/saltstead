@@ -19,6 +19,9 @@ import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness } from './
 import { MapUI } from './mapui.js';
 import { bootTitle } from './title.js';
 import { loadGame, saveGame, snapshotSave } from './save.js';
+import { MerchantLayer } from './merchantlayer.js';
+import { canBoard, lootRoll, chestRoll } from './plunder.js';
+import { findDigSite, digDist, DIG_RADIUS, DIG_TIME } from './treasure.js';
 import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
   encounterGait, ENCOUNTER_FAR,
@@ -59,10 +62,17 @@ class Game {
     this.ship = newShipState(spawn.x, spawn.z);
     this.ship.yaw = 0.5; // bow toward the Jamaican coast
     this.ship.trim = 0.5;
+    this.gold = 0;
+    this.treasureMap = null;   // { seed, lat, lon } — the X on the charts
+    this.digTimer = 0;
+    this.lootSeed = 1;         // rolls forward with every prize taken
     if (save) {
       this.ship.x = save.ship.x; this.ship.z = save.ship.z;
       this.ship.yaw = save.ship.yaw; this.ship.trim = save.ship.trim;
       this.dayStart = save.skyT; // the voyage resumes under the same sky
+      this.gold = save.gold;
+      this.treasureMap = save.map;
+      this.lootSeed = save.lootSeed;
     }
     this.saveClock = 12; // first autosave soon after boarding
     document.addEventListener('visibilitychange', () => {
@@ -74,6 +84,8 @@ class Game {
     // other ships at sea ({x, z} world coords) — multiplayer peers and NPC
     // merchants land here; the encounter gait reads it every frame
     this.contacts = [];
+    this.merchants = new MerchantLayer(this.scene);
+    this.toast = { text: '', until: 0 };
     const sloop = buildSloop();
     this.shipGroup = sloop.group;
     this.shipGroup.rotation.order = 'YXZ';
@@ -90,7 +102,7 @@ class Game {
     this.cam = { yaw: Math.PI * 0.85, pitch: 0.32, dist: 8, targetDist: 8 };
 
     this.keys = new Set();
-    addEventListener('keydown', (e) => { this.keys.add(e.code); if (e.code === 'KeyE') this.toggleHelm(); });
+    addEventListener('keydown', (e) => { this.keys.add(e.code); if (e.code === 'KeyE') this.onE(); });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     this.dragging = false;
     const el = this.renderer.domElement;
@@ -119,6 +131,8 @@ class Game {
       hint: document.getElementById('hint'),
       latlon: document.getElementById('latlon'),
       gait: document.getElementById('gaitbadge'),
+      gold: document.getElementById('gold'),
+      toast: document.getElementById('toast'),
     };
 
     this.maps = new MapUI();
@@ -132,8 +146,12 @@ class Game {
 
   // the one-slot solo save (save.js); fire-and-forget, losses cost seconds
   persist() {
-    saveGame(snapshotSave(this.ship, this.t + this.dayStart)).catch(() => {});
+    saveGame(snapshotSave(this.ship, this.t + this.dayStart, {
+      gold: this.gold, map: this.treasureMap, lootSeed: this.lootSeed,
+    })).catch(() => {});
   }
+
+  say(text, secs = 5) { this.toast = { text, until: this.t + secs }; }
 
   // Moorstead's two-tier rig (invariant 5): Fine = ACES + PCFSoft shadows +
   // water glitter/fresnel; Plain = library defaults, amps parked at 0.
@@ -182,6 +200,36 @@ class Game {
     }
   }
 
+  // E is contextual: prize alongside > longboat dig > the helm
+  onE() {
+    if (this.boardable) { this.boardPrize(); return; }
+    if (this.digReady && this.digTimer <= 0) {
+      this.digTimer = DIG_TIME;
+      this.say('The longboat pulls for the shore\u2026');
+      return;
+    }
+    this.toggleHelm();
+  }
+
+  boardPrize() {
+    const prize = this.boardable;
+    this.merchants.strip(prize.id);
+    const roll = lootRoll(this.lootSeed);
+    this.gold += roll.gold;
+    let msg = `Boarded! ${roll.gold} doubloons in her hold`;
+    if (roll.map && !this.treasureMap) {
+      const ll = worldToLatLon(this.ship.x, this.ship.z);
+      const site = findDigSite(this.lootSeed, ll.lat, ll.lon);
+      if (site) {
+        this.treasureMap = { seed: this.lootSeed, lat: site.lat, lon: site.lon };
+        msg += ' \u2014 and a TREASURE MAP in the master\u2019s cabin (M for the chart)';
+      }
+    }
+    this.lootSeed++;
+    this.say(msg, 7);
+    this.persist();
+  }
+
   frame() {
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.last) / 1000);
@@ -214,13 +262,39 @@ class Game {
       const ll = worldToLatLon(this.ship.x, this.ship.z);
       this.coastDist = coastDistGame(ll.lat, ll.lon);
     }
+    // the trade lanes live: merchants stream, sail, flee, and count as contacts
+    this.merchants.update(t, dt, this.ship.x, this.ship.z, this.wind.from);
+    const allContacts = this.contacts.concat(this.merchants.contacts());
+
     // meeting another ship kills the fair current — you slow to hailing speed
     let contactDist = Infinity;
-    for (const c of this.contacts) {
+    for (const c of allContacts) {
       contactDist = Math.min(contactDist, Math.hypot(c.x - this.ship.x, c.z - this.ship.z));
     }
     const gait = encounterGait(gaitFactor(this.coastDist), contactDist);
     this.shipSighted = contactDist < ENCOUNTER_FAR;
+
+    // boarding window: alongside a prize with speed matched
+    const prize = this.merchants.nearestPrize(this.ship.x, this.ship.z);
+    this.boardable = (prize && canBoard(prize.dist, this.ship.speed * gait - prize.m.speed))
+      ? prize : null;
+
+    // the dig: anchored in the cove, the crew does the shovel work
+    this.digReady = false;
+    if (this.treasureMap) {
+      const dd = digDist(this.ship.x, this.ship.z, this.treasureMap);
+      this.digReady = dd < DIG_RADIUS && this.ship.speed < 1;
+      if (this.digTimer > 0) {
+        this.digTimer -= dt;
+        if (this.digTimer <= 0) {
+          const pay = chestRoll(this.treasureMap.seed);
+          this.gold += pay;
+          this.treasureMap = null;
+          this.say(`The crew strikes wood \u2014 a chest of ${pay} doubloons!`, 8);
+          this.persist();
+        }
+      }
+    }
 
     const px = this.ship.x, pz = this.ship.z;
     stepShip(this.ship, this.wind, dt, SLOOP, gait);
@@ -341,14 +415,23 @@ class Game {
     } else if (gait > 1.3) {
       this.hud.gait.textContent = `OPEN SEA \u2014 fair current \u00d7${gait.toFixed(1)}`;
     }
-    this.maps.update(ll.lat, ll.lon, this.ship.yaw);
-    this.hud.hint.textContent = this.aground
-      ? 'AGROUND \u2014 steer for deeper water'
-      : this.mode === 'helm'
-        ? 'A/D — steer · W/S — sheet in / ease · E — leave the helm · M — chart'
-        : nearHelm(this.cap.x, this.cap.z)
-          ? 'E — take the helm'
-          : 'WASD — walk the deck · drag — look · wheel — zoom · M — chart';
+    this.maps.update(ll.lat, ll.lon, this.ship.yaw, this.treasureMap);
+    this.hud.gold.textContent = this.gold;
+    this.hud.hint.textContent = this.boardable
+      ? 'E \u2014 BOARD HER!'
+      : this.digTimer > 0
+        ? 'The crew is digging\u2026'
+        : this.digReady
+          ? 'E \u2014 send the longboat to dig'
+          : this.aground
+            ? 'AGROUND \u2014 steer for deeper water'
+            : this.mode === 'helm'
+              ? 'A/D — steer · W/S — sheet in / ease · E — leave the helm · M — chart'
+              : nearHelm(this.cap.x, this.cap.z)
+                ? 'E — take the helm'
+                : 'WASD — walk the deck · drag — look · wheel — zoom · M — chart';
+    this.hud.toast.style.display = t < this.toast.until ? 'block' : 'none';
+    if (t < this.toast.until) this.hud.toast.textContent = this.toast.text;
     // a nudge toward good trim, teaching by whisper not tutorial
     const err = Math.abs(this.ship.trim - optimalTrim(rel));
     this.hud.trim.style.background = err < 0.12 ? '#7fd48a' : err < 0.3 ? '#e8c46a' : '#d47a6a';

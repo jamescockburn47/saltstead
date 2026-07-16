@@ -6,11 +6,16 @@ export const SAVE_VERSION = 1;
 const DB = 'saltstead', STORE = 'meta', KEY = 'game';
 
 // ---- pure ----
-export function snapshotSave(ship, skyT) {
+// loot: { gold, map, lootSeed } — additive fields, version stays 1 (older
+// saves simply read as a poor pirate with no map)
+export function snapshotSave(ship, skyT, loot = {}) {
   return {
     version: SAVE_VERSION,
     ship: { x: ship.x, z: ship.z, yaw: ship.yaw, trim: ship.trim },
     skyT,
+    gold: loot.gold || 0,
+    map: loot.map || null,
+    lootSeed: loot.lootSeed || 1,
     savedAt: Date.now(),
   };
 }
@@ -21,10 +26,15 @@ export function acceptSave(meta) {
   if (typeof meta.version !== 'number' || meta.version > SAVE_VERSION) return null;
   const s = meta.ship;
   if (!s || ![s.x, s.z, s.yaw, s.trim].every(Number.isFinite)) return null;
+  const m = meta.map;
+  const mapOK = m && Number.isFinite(m.lat) && Number.isFinite(m.lon) && Number.isFinite(m.seed);
   return {
     version: meta.version,
     ship: { x: s.x, z: s.z, yaw: s.yaw, trim: Math.max(0, Math.min(1, s.trim)) },
     skyT: Number.isFinite(meta.skyT) ? meta.skyT : 0,
+    gold: Number.isFinite(meta.gold) && meta.gold >= 0 ? Math.round(meta.gold) : 0,
+    map: mapOK ? { seed: m.seed, lat: m.lat, lon: m.lon } : null,
+    lootSeed: Number.isFinite(meta.lootSeed) && meta.lootSeed >= 1 ? meta.lootSeed : 1,
     savedAt: meta.savedAt || 0,
   };
 }

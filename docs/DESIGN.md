@@ -62,6 +62,68 @@ where money is *spent* — taverns (recruit crew, buy rumours/treasure maps), sh
 (upgrades/repairs), hideouts (stash loot). On-foot exploration supports the sea game;
 it never pays directly.
 
+## Sea battles (the design; cannons land in Phase 2b)
+
+The fight is **positioning, not aiming**. Third-person + low-poly means the skill
+expression is the same one sailing already trains: wind, angle, timing.
+
+1. **The chase is half the battle.** Encounter gait (in) means every fight starts
+   with both ships at human speed inside ~400 m. Escape is always a legal outcome —
+   outsail the pursuer to 1600 m and the current carries you away.
+2. **Broadsides, not turrets.** Guns fire perpendicular to the hull in a fixed arc;
+   you TURN the ship to bear. One key fires the ready side; reload is long (crew
+   quality shortens it). Range ~250 m, damage falls off; chain shot (rig damage,
+   slows them) vs round shot (hull damage, sinks them) is the tactical choice —
+   slow a runner first, then pound or board.
+3. **Damage is states, not hitpoints-on-screen**: sails torn (speed drops), rudder
+   sprung (turn rate drops), hull holed (listing, slow flooding), mast down (dead in
+   the water). Each state is visible on the low-poly model — the enemy TELLS you how
+   hurt she is by how she sails.
+4. **Boarding is the payday.** Sinking a prize sends most of her cargo to the bottom
+   (a fraction floats as salvage). To take her whole: come alongside (<25 m),
+   matched speed, grapple, and the crews fight it out as an autobattle weighted by
+   crew size/quality/intimidation — the player's job was DELIVERING the boarding, not
+   button-mashing it. Strike-the-colours: badly outmatched merchants surrender
+   without a fight (intimidation is a stat that grows with notoriety).
+5. **NPC crew fight the guns.** The player steers and calls the moment; the crew
+   (visible on deck) runs the reload dance. Crew losses in boarding actions are the
+   real cost of recklessness.
+6. **Multiplayer**: co-op broadsides against navy convoys first; PvP only in opt-in
+   contested waters (the same rule as the identity section).
+
+## The plunder economy
+
+How gold ENTERS the world (sources, in intended order of discovery):
+
+1. **Merchantmen** — the bread and butter. Deterministic spawns along real trade
+   lanes; they flee, they're slower but stubborn, they carry coin + cargo. Boarding
+   one is the tutorial for the whole game.
+2. **Treasure maps → X marks the spot.** Maps come from boarded prizes, tavern
+   rumour purchases, and legendary hunts. Each map deterministically picks a REAL
+   islet/cove (seeded search of the coastline tables — same seed, same island for
+   everyone) and inks an X on the captain's charts. Anchor in the cove, send the
+   longboat (the crew digs — the land-earns-nothing rule holds: the gold was buried
+   by pirates, i.e. it originated at sea), and the chest pays several prizes' worth.
+   Maps are the game's compass: they point players AT the world.
+3. **Wreck salvage** — real wreck sites (the 1715 Plate Fleet legend is the
+   flagship) + procedural storm wrecks; diving pays in salvage sold at port.
+4. **Cargo running** — honest(ish) freight between ports for players who want a
+   quiet life between fights; prices vary by port so routes matter.
+5. **Bounties & convoy raids** — posted at havens against notorious pirates (PvE
+   and, in contested waters, PvP) and against escorted navy convoys — the endgame
+   source, needs co-op.
+
+How gold LEAVES the world (sinks, so the economy doesn't inflate):
+
+- **Ship tiers** (the era ladder — the big aspirational sink), **repairs** (battle
+  damage costs), **crew wages + recruitment** (bigger ships need bigger payrolls),
+  **charts/rumours/maps** (information is purchasable), **port fees** in havens,
+  and **insurance-free loss**: sink, and cargo aboard is gone.
+
+Growth loop: bigger ship → bigger prizes sail your waters (spawn tables key off
+hull tier) → bigger scores → bigger ship. Notoriety rises with income and raises
+navy heat — the difficulty curve is the economy's own thermostat.
+
 ## Third person
 
 You look down on your captain and your ship — the object of the whole progression

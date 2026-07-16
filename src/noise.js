@@ -8,6 +8,14 @@ export function hash2f(x, z) {
   return (h >>> 0) / 4294967296;
 }
 
+// a true [0,1) roll for loot tables and spawn dice: hash2f empirically lands
+// in [0, 0.5) (fine for interpolated noise, which only needs relative
+// variation), so double it. hash2f itself must NEVER change — the whole
+// terrain's determinism hangs off it (invariant 6).
+export function unit2(x, z) {
+  return Math.min(0.999999, hash2f(x, z) * 2);
+}
+
 export function valueNoise2(x, z) {
   const ix = Math.floor(x), iz = Math.floor(z);
   const fx = x - ix, fz = z - iz;

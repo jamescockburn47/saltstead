@@ -58,12 +58,22 @@ const fakeStorage = () => {
 // ---- solo save: snapshot -> accept round-trip ----
 {
   const ship = { x: -34121.5, z: -7929.1, yaw: 0.62, trim: 0.55, speed: 6 };
-  const meta = snapshotSave(ship, 1234.5);
+  const loot = { gold: 340, map: { seed: 3, lat: 18.05, lon: -76.9 }, lootSeed: 4 };
+  const meta = snapshotSave(ship, 1234.5, loot);
   const back = acceptSave(meta);
   ok(back !== null, 'own snapshot is accepted');
   ok(back.ship.x === ship.x && back.ship.yaw === ship.yaw && back.skyT === 1234.5,
     'position, heading and sky survive the round-trip');
   ok(!('speed' in back.ship), 'speed is not persisted (you resume becalmed)');
+  ok(back.gold === 340 && back.lootSeed === 4, 'the purse survives the round-trip');
+  ok(back.map && back.map.lat === 18.05 && back.map.seed === 3, 'the treasure map survives');
+  const bare = acceptSave(snapshotSave(ship, 0));
+  ok(bare.gold === 0 && bare.map === null && bare.lootSeed === 1,
+    'a lootless save reads as a poor pirate (additive fields, invariant 1)');
+  const badMap = acceptSave({ ...meta, map: { lat: 'x' } });
+  ok(badMap && badMap.map === null && badMap.gold === 340, 'a mangled map is dropped, not fatal');
+  const badGold = acceptSave({ ...meta, gold: -50 });
+  ok(badGold && badGold.gold === 0, 'negative gold refused');
 
   ok(acceptSave(null) === null, 'no save = null');
   ok(acceptSave({}) === null, 'junk = null');
