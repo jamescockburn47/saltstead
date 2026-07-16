@@ -1,8 +1,11 @@
 // verify-shipframe: the moving-deck frame maths (DESIGN.md risk 1).
 // Local<->world must round-trip exactly, the deck clamp must hold, and the
 // helm must be a reachable spot ON the deck.
-import { DECK, HELM, frameFor, localToWorld, worldToLocal, clampToDeck, nearHelm } from '../src/shipframe.js';
-import { SLOOP, BRIG } from '../src/shipphysics.js';
+import {
+  DECK, HELM, frameFor, localToWorld, worldToLocal, clampToDeck, nearHelm,
+  gunPosts, crewPosts,
+} from '../src/shipframe.js';
+import { SLOOP, BRIG, SPECS } from '../src/shipphysics.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -56,5 +59,29 @@ ok(!nearHelm(0, DECK.maxZ - 0.3), 'the bow is not the helm');
   ok(!nearHelm(0, b.deck.maxZ - 0.3, 1.5, b.helm), 'her bow is not her helm');
 }
 
+// gun posts: however many guns a rung carries, every post sits INSIDE the
+// hull, ordered bow to stern, with clear water between the muzzles
+for (const [name, spec] of Object.entries(SPECS)) {
+  const F = frameFor(spec);
+  for (const n of [1, 2, 3, 4, 6]) {
+    const posts = gunPosts(F.deck, F.scale, n);
+    ok(posts.length === n, `${name}: ${n} guns get ${n} posts`);
+    ok(posts.every((z) => z > F.deck.minZ && z < F.deck.maxZ),
+      `${name}: all ${n} posts inside the deck`);
+    for (let i = 1; i < posts.length; i++) {
+      ok(posts[i] < posts[i - 1], `${name}: posts run bow to stern`);
+      ok(posts[i - 1] - posts[i] > 0.5, `${name}: muzzles don't touch`);
+    }
+  }
+  // crew stations stand on the deck too
+  for (const p of crewPosts(F.deck, 5, 3)) {
+    ok(p.x > F.deck.minX && p.x < F.deck.maxX && p.z > F.deck.minZ && p.z < F.deck.maxZ,
+      `${name}: crew stations on the deck`);
+  }
+}
+// deterministic
+ok(JSON.stringify(crewPosts(DECK, 4, 7)) === JSON.stringify(crewPosts(DECK, 4, 7)),
+  'crew stations deterministic');
+
 if (failed) { console.error(`verify-shipframe: ${failed} FAILED`); process.exit(1); }
-console.log('verify-shipframe: OK — frame round-trips, deck clamp holds, helm reachable');
+console.log('verify-shipframe: OK — frame round-trips, deck clamp holds, helm reachable, guns + crew on deck');

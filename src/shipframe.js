@@ -28,6 +28,34 @@ export function frameFor(spec) {
   };
 }
 
+// Where the broadside lives: deck-local z posts for n guns a side, spaced
+// down the waist and ALWAYS inside the hull, however many guns the rung
+// carries. ship.js plants the visible cannon here and main.js muzzlePos
+// fires from the same posts — one truth, two readers.
+export function gunPosts(deck, scale, n) {
+  if (n <= 1) return [0.5 * scale];
+  const fwd = deck.maxZ * 0.55, aft = deck.minZ * 0.72;
+  const posts = [];
+  for (let i = 0; i < n; i++) posts.push(fwd + (aft - fwd) * (i / (n - 1)));
+  return posts;
+}
+
+// Deterministic stations for n visible hands about a deck (NPC crews, prize
+// crews): staggered port/starboard down the waist, clear of the rails.
+export function crewPosts(deck, n, seed = 0) {
+  const posts = [];
+  const span = deck.maxZ * 0.7 - deck.minZ * 0.6;
+  for (let i = 0; i < n; i++) {
+    const u = n === 1 ? 0.5 : i / (n - 1);
+    const wob = Math.sin((i + 1) * 12.9898 + seed * 78.233) * 0.5 + 0.5; // cheap unit hash
+    posts.push({
+      x: (i % 2 ? 0.45 : -0.45) * deck.maxX * (0.6 + 0.4 * wob),
+      z: deck.minZ * 0.6 + span * u,
+    });
+  }
+  return posts;
+}
+
 // yaw-only frame: walking happens on the yaw frame (the deck stays flat
 // underfoot); pitch/roll is applied visually by the scene graph on top.
 export function localToWorld(ship, lx, ly, lz) {

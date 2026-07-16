@@ -4,22 +4,47 @@
 // and exposes them as contacts for the encounter gait and the boarding check.
 
 import * as THREE from 'three';
-import { buildSloop } from './ship.js';
+import { buildShip, buildHand } from './ship.js';
 import { waveHeight } from './waves.js';
+import { SCHOONER, CORVETTE, FRIGATE } from './shipphysics.js';
+import { frameFor, crewPosts } from './shipframe.js';
 import {
-  cellMerchants, stepMerchant, activeCells, zoneDerelicts, ACTIVE_R, TYPES,
+  cellMerchants, stepMerchant, activeCells, zoneDerelicts, ACTIVE_R,
 } from './merchants.js';
 import { newHullState, applyShot, speedFactor, isSinking, salvageValue, SINK_TIME } from './combat.js';
 import { zoneOf } from './legendfx.js';
+
+// what each trade SAILS — real rungs of the same ladder the player climbs,
+// so a lane full of ships is a lane full of different silhouettes:
+//   trader    a schooner, quick and unarmed
+//   indiaman  a three-masted square-rigger with a castle — the payday LOOKS it
+//   navy      a corvette with a visible broadside — the threat LOOKS it
+//   derelict  a schooner gone grey, sails struck
+const NPC_HULLS = {
+  trader:   { spec: SCHOONER, masts: 2, guns: 0 },
+  indiaman: { spec: FRIGATE, masts: 3, square: true, guns: 2, castle: true },
+  navy:     { spec: CORVETTE, masts: 2, square: true, guns: 3 },
+  derelict: { spec: SCHOONER, masts: 2, guns: 0 },
+};
+// hands visible about her deck (the derelict's whole point is nobody's home)
+const NPC_HANDS = { trader: 2, indiaman: 4, navy: 5, derelict: 0 };
 
 // tint a freshly built hull for its trade: the navy paints, the dead fade
 function tintShip(group, type) {
   if (type !== 'navy' && type !== 'derelict') return;
   group.traverse((o) => {
     if (!o.isMesh || !o.material || !o.material.color) return;
+    if (o.material.isMeshBasicMaterial) return; // the lantern keeps her flame
     if (type === 'navy') o.material.color.multiply(new THREE.Color(0.55, 0.62, 0.85));
     else o.material.color.lerp(new THREE.Color(0x6a6f72), 0.55); // weathered grey
   });
+}
+
+// a deterministic per-id number for crew scatter
+function idHash(id) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;
+  return h;
 }
 
 export class MerchantLayer {
@@ -53,13 +78,25 @@ export class MerchantLayer {
       if (this.live.has(spec.id) || this.sunk.has(spec.id)) continue;
       if (Math.hypot(spec.x - px, spec.z - pz) > ACTIVE_R) continue;
       const m = { ...spec, looted: this.looted.has(spec.id) };
-      const sloop = buildSloop();
-      sloop.group.scale.setScalar(TYPES[m.type].scale);
-      tintShip(sloop.group, m.type);
-      this.scene.add(sloop.group);
+      const def = NPC_HULLS[m.type] || NPC_HULLS.trader;
+      const built = buildShip(def);
+      tintShip(built.group, m.type);
+      // hands about her deck — tinted AFTER, so the shared shirt materials
+      // never take the navy's paint
+      const seed = idHash(m.id);
+      const F = frameFor(def.spec);
+      for (const [i, p] of crewPosts(F.deck, NPC_HANDS[m.type] || 0, seed).entries()) {
+        const hand = buildHand(seed + i);
+        hand.scale.setScalar(F.scale > 1.6 ? 1.15 : 1); // big decks, honest-size people
+        hand.position.set(p.x, F.deck.y, p.z);
+        hand.rotation.y = ((seed + i * 37) % 7) - 3;
+        built.group.add(hand);
+      }
+      this.scene.add(built.group);
       this.live.set(spec.id, {
-        m, group: sloop.group, setSail: sloop.setSail,
-        setLantern: sloop.setLantern, dmg: newHullState(), sinkT: null,
+        m, group: built.group, setSail: built.setSail,
+        setLantern: built.setLantern, dmg: newHullState(), sinkT: null,
+        draft: def.spec.draft, spec: def.spec,
       });
     }
     // step + stream out
@@ -73,7 +110,7 @@ export class MerchantLayer {
       if (e.sinkT !== null) {
         e.sinkT += dt;
         const u = Math.min(1, e.sinkT / SINK_TIME);
-        const y = waveHeight(e.m.x, e.m.z, t) - 0.45 - u * u * 5;
+        const y = waveHeight(e.m.x, e.m.z, t) - e.draft - u * u * 7;
         e.group.position.set(e.m.x, y, e.m.z);
         e.group.rotation.set(0.5 * u, e.m.yaw, 0.25 * u);
         e.setSail(e.m.yaw, 0, windFrom, 0);
@@ -86,7 +123,7 @@ export class MerchantLayer {
         continue;
       }
       stepMerchant(e.m, px, pz, dt, speedFactor(e.dmg), shoal);
-      const y = waveHeight(e.m.x, e.m.z, t) - 0.45;
+      const y = waveHeight(e.m.x, e.m.z, t) - e.draft;
       e.group.position.set(e.m.x, y, e.m.z);
       e.group.rotation.set(0, e.m.yaw, (1 - e.dmg.hull) * 0.12); // holed, she lists
       const dead = e.m.looted || e.m.type === 'derelict';
@@ -138,25 +175,38 @@ export class MerchantLayer {
     return best;
   }
 
+  // she's holed through: the sinking starts, salvage floats off
+  startSinking(id, e) {
+    e.sinkT = 0;
+    this.looted.add(id); // her berth in the spawn table stays empty
+    if (!e.m.looted) {
+      // most of the cargo goes down with her; a fraction floats
+      const gold = salvageValue(e.m.purse || 100);
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.9, 0.6, 0.9),
+        new THREE.MeshPhongMaterial({ color: 0x7a5a34, flatShading: true }));
+      this.scene.add(mesh);
+      this.flotsam.push({ x: e.m.x, z: e.m.z, gold, mesh });
+    }
+  }
+
   // a broadside lands on her: apply the shot, start the sinking if holed
   // through. Returns { sinking, dmg } or null if she's gone.
   applyShotTo(id, kind) {
     const e = this.live.get(id);
     if (!e || e.sinkT !== null) return null;
     applyShot(e.dmg, kind);
-    if (isSinking(e.dmg)) {
-      e.sinkT = 0;
-      this.looted.add(id); // her berth in the spawn table stays empty
-      if (!e.m.looted) {
-        // most of the cargo goes down with her; a fraction floats
-        const gold = salvageValue(e.m.purse || 100);
-        const mesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.9, 0.6, 0.9),
-          new THREE.MeshPhongMaterial({ color: 0x7a5a34, flatShading: true }));
-        this.scene.add(mesh);
-        this.flotsam.push({ x: e.m.x, z: e.m.z, gold, mesh });
-      }
-    }
+    if (isSinking(e.dmg)) this.startSinking(id, e);
+    return { sinking: e.sinkT !== null, dmg: e.dmg };
+  }
+
+  // a ram lands on her: severity 0..1 (collide.js ramSeverity) chews the
+  // hull state the same way round shot does — a ram is a very rude broadside
+  ram(id, severity) {
+    const e = this.live.get(id);
+    if (!e || e.sinkT !== null) return null;
+    e.dmg.hull = Math.max(0, e.dmg.hull - 0.35 * severity);
+    if (isSinking(e.dmg)) this.startSinking(id, e);
     return { sinking: e.sinkT !== null, dmg: e.dmg };
   }
 

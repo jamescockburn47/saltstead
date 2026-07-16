@@ -208,13 +208,30 @@ The door has since widened. Two tiers of harbour now (port.js + ports.js):
   shipwright** anywhere on earth, so a voyage never beats back to the
   Caribbean for a topmast. Honest ports ask questions: prizes fence at half.
 
-The **shipwright's ladder** (shipyard.js) is THE progression purchase: sloop
-(1 gun/side, 12 berths, beaches, outruns anything armed) → brig (2 guns/side,
-20 berths, faster but slow-turning and too deep to beach). Every hull carries
-a **captain's briefing** — the survival doctrine shown on a fresh voyage and
-on every upgrade: the sloop's is "run, hunt traders, dig treasure, hide in the
-shallows" (corvettes break off the chase over water thinner than NAVY_SHOAL);
-the brig's is "now you out-gun the corvette — but mind your draft".
+The **shipwright's ladder** (shipyard.js) is THE progression purchase, seven
+rungs deep: **sloop → cutter → schooner → brig → corvette → frigate → galleon**.
+Each rung buys broadside weight, berths and (until the top) straight-line speed;
+each SPENDS handiness and shallow water — the schooner is the last hull that
+beaches, and the galleon trades the frigate's legs for six guns a side ON
+PURPOSE (verify-shipyard holds that trade honest). Hulls are visibly their
+class (ship.js): fore-and-aft rigs low on the ladder, braced square courses
+from the brig up, a sterncastle and ochre band on the galleon, and a real row
+of cannon at the gun posts main.js actually fires from (shipframe.js gunPosts
+— one truth, two readers). NPC trades sail the same ladder (merchantlayer.js):
+traders are schooners, Indiamen castle-sterned square-riggers, the navy
+corvettes — with **visible deckhands** (crewPosts) so a living ship reads
+alive and a derelict reads dead. Every hull carries a **captain's briefing** —
+the survival doctrine shown on a fresh voyage and on every upgrade: the
+sloop's is "run, hunt traders, dig treasure, hide in the shallows" (corvettes
+break off the chase over water thinner than NAVY_SHOAL); the galleon's is
+"you don't chase anymore — they come to you".
+
+**Collision is real** (collide.js): every hull is a capsule, contacts shoulder
+apart, and closing speed above RAM_HURT wounds both ships through the same
+combat.js damage states a broadside uses — the lighter hull pays more. The
+navy knows it: a hunting corvette closes to NAVY_STANDOFF and then **circles
+at gun range** (she rakes, she does not ram). Guns carry 420 m, ball flight
+time scales with the range, and every muzzle throws a flash and a light.
 
 ## Third person
 

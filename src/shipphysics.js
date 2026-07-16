@@ -7,6 +7,11 @@ import { waveHeight } from './waves.js';
 // groundLine: the terrain elevation at which the hull stops. Positive = she
 // can run her bow right up onto the sand (beachable); negative = she draws
 // too much and fetches up on the shoal OFFSHORE — the longboat takes you in.
+//
+// THE LADDER'S PHYSICS DOCTRINE (shipyard.js sells these in this order):
+// climbing a rung buys straight-line speed, broadside weight and berths; it
+// SPENDS handiness and shallow water. The sloop turns on a doubloon and
+// beaches; the galleon is a fortress that comes about like a cathedral.
 export const SLOOP = {
   maxSpeed: 8.5,   // m/s, ~16.5 knots — arcade-brisk on purpose
   accel: 0.55,     // exponential approach rate when gaining speed
@@ -19,20 +24,44 @@ export const SLOOP = {
   groundLine: 0.05, // shallow draft: the bow takes the sand itself
 };
 
-// The next rung of the shipwright's ladder (docs/DESIGN.md era ladder). Not
-// yet purchasable — the row exists so the grounding/longboat rules are data,
-// not sloop-shaped assumptions.
+export const CUTTER = {
+  maxSpeed: 9.3, accel: 0.55, drag: 0.34, turnRate: 0.55,
+  draft: 0.5, keel: 0.7, length: 11, beam: 3.6,
+  groundLine: 0.03, // still takes the sand, just less of it
+};
+
+export const SCHOONER = {
+  maxSpeed: 10.0, accel: 0.5, drag: 0.32, turnRate: 0.48,
+  draft: 0.6, keel: 0.8, length: 13, beam: 4.2,
+  groundLine: 0.01, // the last rung that beaches at all
+};
+
 export const BRIG = {
-  maxSpeed: 10.5,
-  accel: 0.4,
-  drag: 0.3,
-  turnRate: 0.4,
-  draft: 0.9,
-  keel: 1.1,
-  length: 16,
-  beam: 5.2,
+  maxSpeed: 10.5, accel: 0.4, drag: 0.3, turnRate: 0.4,
+  draft: 0.9, keel: 1.1, length: 16, beam: 5.2,
   groundLine: -1.4, // deep draft: she anchors off and sends a boat in
 };
+
+export const CORVETTE = {
+  maxSpeed: 11.2, accel: 0.38, drag: 0.3, turnRate: 0.36,
+  draft: 1.1, keel: 1.3, length: 19, beam: 5.8,
+  groundLine: -1.8,
+};
+
+export const FRIGATE = {
+  maxSpeed: 11.8, accel: 0.34, drag: 0.28, turnRate: 0.3,
+  draft: 1.4, keel: 1.6, length: 24, beam: 7.2,
+  groundLine: -2.4,
+};
+
+export const GALLEON = {
+  maxSpeed: 10.8, accel: 0.28, drag: 0.26, turnRate: 0.22,
+  draft: 1.8, keel: 2.0, length: 30, beam: 9.0,
+  groundLine: -3.0, // she anchors in the roads like a visiting cathedral
+};
+
+// every hull the game knows, smallest to largest — verify walks this
+export const SPECS = { SLOOP, CUTTER, SCHOONER, BRIG, CORVETTE, FRIGATE, GALLEON };
 
 // does this hull run up onto the beach, or must the boats go in?
 export function beaches(spec) {

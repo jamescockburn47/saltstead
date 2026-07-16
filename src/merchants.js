@@ -133,6 +133,10 @@ export function compassPoint(px, pz, tx, tz) {
 // band the sloop's briefing promises (shipyard.js) lives on this number.
 export const NAVY_SHOAL = -1.0;
 
+// inside this range a hunting corvette stops closing and CIRCLES, guns
+// bearing — the duel happens at cannon range, not at the fenders
+export const NAVY_STANDOFF = 130;
+
 // mutates and returns m. px/pz: the pirate. speedMult: battle damage
 // (combat.js speedFactor) — torn sails slow her whatever her orders are.
 // shoal: the PIRATE sits in water too thin for a warship (caller samples the
@@ -152,11 +156,17 @@ export function stepMerchant(m, px, pz, dt, speedMult = 1, shoal = false) {
       m.yaw += Math.max(-TURN * dt, Math.min(TURN * dt, err));
       m.speed += (spec.cruise * speedMult - m.speed) * Math.min(1, dt * 0.5);
     } else if (hunts && d < HUNT_R) {
-      // the corvette turns TOWARD the black flag and crowds sail
+      // the corvette crowds sail TOWARD the black flag — but she fights
+      // like the navy taught her: inside NAVY_STANDOFF she bears away to
+      // circle, holding the range where her broadside does the work. A
+      // warship rakes; she does not ram (collide.js makes ramming REAL now,
+      // and it would cost her as much as you).
       const at = Math.atan2(px - m.x, pz - m.z);
-      const err = wrapPi(at - m.yaw);
+      const close = d < NAVY_STANDOFF;
+      const err = wrapPi(at + (close ? Math.PI / 2 : 0) - m.yaw);
       m.yaw += Math.max(-TURN * dt, Math.min(TURN * dt, err));
-      m.speed += (spec.panic * speedMult - m.speed) * Math.min(1, dt * 0.5);
+      const want = close ? spec.cruise : spec.panic;
+      m.speed += (want * speedMult - m.speed) * Math.min(1, dt * 0.5);
     } else if (!spec.armed && d < FLEE_R) {
       const away = Math.atan2(m.x - px, m.z - pz);
       const err = wrapPi(away - m.yaw);

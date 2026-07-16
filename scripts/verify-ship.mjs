@@ -1,7 +1,9 @@
 // verify-ship: hull physics on the live wave field — speed converges on the
 // sailing model's target, the rudder answers, and buoyancy attitude stays
 // inside believable bounds (no capsizing the prototype from a maths slip).
-import { newShipState, stepShip, shipAttitude, beaches, SLOOP, BRIG } from '../src/shipphysics.js';
+import {
+  newShipState, stepShip, shipAttitude, beaches, SLOOP, BRIG, SPECS,
+} from '../src/shipphysics.js';
 import { sailPower, speedTarget, optimalTrim, wrapAngle } from '../src/sailing.js';
 import { MAX_WAVE_HEIGHT } from '../src/waves.js';
 
@@ -106,6 +108,30 @@ const DT = 1 / 30;
   const shoal = shipAttitude(s, 2.2, BRIG, () => BRIG.groundLine);
   ok(shoal.y >= BRIG.groundLine + BRIG.keel - 1e-9,
     'brought up on the shoal, the brig sits on it');
+}
+
+// the whole class table is physically sane, smallest to largest
+{
+  const names = Object.keys(SPECS);
+  ok(names.length >= 7, `seven classes on the water (${names.length})`);
+  let prevLen = 0;
+  for (const [name, spec] of Object.entries(SPECS)) {
+    ok(spec.maxSpeed > 5 && spec.maxSpeed < 15, `${name}: speed in the age of sail`);
+    ok(spec.turnRate > 0.1 && spec.turnRate <= 0.7, `${name}: turns like a ship`);
+    ok(spec.draft > 0 && spec.keel > 0 && spec.beam > 0, `${name}: floats right way up`);
+    ok(spec.length > prevLen, `${name}: the table runs smallest to largest`);
+    ok(spec.length / spec.beam > 2 && spec.length / spec.beam < 4.5,
+      `${name}: hull proportions believable (${(spec.length / spec.beam).toFixed(1)}:1)`);
+    // every hull converges on a beam reach and answers her helm
+    const s = newShipState(0, 0);
+    const wind = { from: -Math.PI / 2, speed: 9 };
+    s.trim = optimalTrim(Math.PI / 2);
+    for (let i = 0; i < 90 * 30; i++) stepShip(s, wind, DT, spec);
+    ok(s.speed > 3, `${name}: makes way on a beam reach (${s.speed.toFixed(1)} m/s)`);
+    const att = shipAttitude(s, 4.2, spec);
+    ok(Math.abs(att.pitch) < 0.5 && Math.abs(att.roll) < 0.5, `${name}: rides the sea level-ish`);
+    prevLen = spec.length;
+  }
 }
 
 // open-sea gait covers ground without touching the dynamics

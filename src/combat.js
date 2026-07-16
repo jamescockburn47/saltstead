@@ -6,7 +6,8 @@
 
 import { unit2 } from './noise.js';
 
-export const GUN_RANGE = 260;      // metres — beyond this the sea takes the ball
+export const GUN_RANGE = 420;      // metres — long guns duel at real distance now;
+                                   // beyond this the sea takes the ball
 export const BROADSIDE_ARC = 0.6;  // rad off the beam a gun can be laid
 export const RELOAD_BASE = 8;      // s for the captain alone at the guns
 export const NAVY_RELOAD = 11;     // s between a corvette's broadsides

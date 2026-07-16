@@ -66,9 +66,34 @@ Havana to Nagasaki, Lisbon to Valparaíso — and every one repairs, signs on ha
 and keeps a **shipwright**, so a voyage never beats back to the Caribbean for a
 topmast. Honest ports pay only half for a prize, though.
 
-Get rich and the shipwright builds you up the **ladder**: the **brig** throws two
-guns a side with twenty berths, but turns slowly and draws too much to beach. Every
-hull changes how you survive.
+Get rich and the shipwright builds you up the **seven-rung ladder**:
+
+| | ship | guns/side | berths | the trade |
+|---|---|---|---|---|
+| 1 | **Sloop** | 1 | 12 | fastest, shallowest, beaches — speed is her armour |
+| 2 | **Cutter** | 1 | 14 | the smuggler's legs, still beaches |
+| 3 | **Schooner** | 2 | 16 | first real broadside, last hull that touches sand |
+| 4 | **Brig** | 2 | 20 | square-rigged, fast in a line, too deep to beach |
+| 5 | **Corvette** | 3 | 26 | the navy's own class — the hunt becomes a fair fight |
+| 6 | **Frigate** | 4 | 34 | three masts, blue-water queen, ends most arguments |
+| 7 | **Galleon** | 6 | 45 | sterncastle, slower than the frigate ON PURPOSE — nothing outguns her |
+
+Every hull changes how you survive, and each one is visibly her class on the
+water: square courses on the big rigs, a towering sterncastle on the galleon, and
+a **real row of cannon** at the rail — the guns you see are the broadside you throw.
+NPC ships sail the same ladder (traders are schooners, Indiamen three-masted
+square-riggers, the navy corvettes), with **visible crews** working their decks.
+
+### Battle
+
+Broadsides fire off the **beam** — you turn the ship to bear, that's the whole
+skill. Round shot holes hulls, chain tears rigs, and the fight now happens at
+**real distance** (the guns carry 420 m; a long ball hangs in the air long enough
+to watch fall, muzzle flash and all). Hulls are solid: **collision detection** is
+live, and a hard ram wounds both ships through the same damage model a broadside
+uses — the lighter hull pays more, so aim your galleon's bow with intent and keep
+your sloop's out of everyone's way. A hunting corvette holds off at gun range and
+circles — she rakes, she does not ram.
 
 ### Sinking — what it costs
 
@@ -123,7 +148,7 @@ node scripts/build-earthdata.mjs
 Same contract as Moorstead: pure game logic lives in modules that import no THREE or
 DOM (waves, sailing, ship physics, the earth model, combat, merchants, plunder,
 treasure, ports, the shipyard ladder, monsters, legends…), and each is defended by a
-headless script in `scripts/verify-*.mjs`. `npm run verify` runs all of them (29
+headless script in `scripts/verify-*.mjs`. `npm run verify` runs all of them (30
 checks at the time of writing) and **must be green before any deploy**. Every feature
 lands with a verify script; the gate is the contract.
 

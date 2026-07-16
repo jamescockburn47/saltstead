@@ -12,7 +12,7 @@ import { isWarden, loadAuth, displayName } from './identity.js';
 import { FoamLayer } from './foamlayer.js';
 import { SkyFx } from './skyfx.js';
 import { newShipState, stepShip, shipAttitude, beaches } from './shipphysics.js';
-import { frameFor, clampToDeck, localToWorld } from './shipframe.js';
+import { frameFor, clampToDeck, localToWorld, gunPosts } from './shipframe.js';
 import { hullById, nextHull, prevHull, buyHull } from './shipyard.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
 import { waveHeight } from './waves.js';
@@ -44,6 +44,7 @@ import { canSight, takeSight, sightText } from './navigation.js';
 import { StarChartUI } from './starchartui.js';
 import { LogUI } from './logui.js';
 import { TYPES, NAVY_SHOAL, LOOKOUT_R, compassPoint } from './merchants.js';
+import { collideShips, ramSeverity } from './collide.js';
 import {
   GUN_RANGE, reloadTime, beamBearing, inArc, rollHit, newHullState, applyShot,
   speedFactor, isSinking, NAVY_RELOAD, autoBattle, boardingOdds, founderCost,
@@ -179,7 +180,7 @@ class Game {
     this.hullId = this.hullDef.id;
     this.spec = this.hullDef.spec;
     this.shipFrame = frameFor(this.spec);
-    const built = buildShip(this.spec, this.hullDef.masts);
+    const built = buildShip(this.hullDef);
     this.shipGroup = built.group;
     this.shipGroup.rotation.order = 'YXZ';
     this.setSail = built.setSail;
@@ -384,7 +385,7 @@ class Game {
     this.spec = def.spec;
     this.shipFrame = frameFor(def.spec);
     this.scene.remove(this.shipGroup);
-    const built = buildShip(def.spec, def.masts);
+    const built = buildShip(def);
     this.shipGroup = built.group;
     this.shipGroup.rotation.order = 'YXZ';
     this.setSail = built.setSail;
@@ -413,6 +414,23 @@ class Game {
     this.portui.show(this.port.haven);
     this.refreshPort();
     this.logEvent(`Put in at ${this.port.haven.name}`);
+  }
+
+  // the two-stage rule (combat.js): foundering is the warning, a second
+  // holing while crippled is the wreck. Every way of holing the hull —
+  // broadside, ram, monster — lands here.
+  sufferHoling(cause) {
+    if (this.crippled) {
+      this.wreckShip(cause);
+    } else {
+      this.crippled = true;
+      const lost = founderCost(this.gold);
+      this.gold -= lost;
+      this.hull.hull = CRIPPLED_HULL;
+      this.say(`SHE\u2019S FOUNDERING \u2014 the crew heaves ${lost} doubloons of cargo over the side to keep her afloat. `
+        + 'She\u2019s CRIPPLED: one more holing and the sea takes her. Make for a port and repair!', 10);
+      this.logEvent(`Nearly sunk by ${cause} \u2014 ${lost} doubloons jettisoned to stay afloat`);
+    }
   }
 
   // ---- the wreck (combat.js two-stage rule, stage two) ----
@@ -584,9 +602,10 @@ class Game {
   // the guns down the rail on hulls that mount more than one a side
   muzzlePos(side, slot = 0) {
     const D = this.shipFrame.deck;
-    const m = localToWorld(this.ship, side * (D.maxX - 0.05), 0,
-      0.5 * this.shipFrame.scale - slot * 2.4 * this.shipFrame.scale);
-    return { x: m.x, y: this.shipGroup.position.y + D.y + 0.25, z: m.z };
+    const posts = gunPosts(D, this.shipFrame.scale, this.hullDef.guns);
+    const m = localToWorld(this.ship, side * (D.maxX + 0.35 * this.shipFrame.scale), 0,
+      posts[Math.min(slot, posts.length - 1)]);
+    return { x: m.x, y: this.shipGroup.position.y + D.y + 0.36 * this.shipFrame.scale, z: m.z };
   }
 
   fireGuns() {
@@ -988,24 +1007,45 @@ class Game {
           if (hit) {
             applyShot(this.hull, kind);
             if (isSinking(this.hull)) {
-              // the two-stage rule (combat.js): foundering is the warning,
-              // a second holing while crippled is the wreck
-              if (this.crippled) {
-                this.wreckShip('a corvette\u2019s broadside');
-              } else {
-                this.crippled = true;
-                const lost = founderCost(this.gold);
-                this.gold -= lost;
-                this.hull.hull = CRIPPLED_HULL;
-                this.say(`SHE\u2019S FOUNDERING \u2014 the crew heaves ${lost} doubloons of cargo over the side to keep her afloat. `
-                  + 'She\u2019s CRIPPLED: one more holing and the sea takes her. Make for a port and repair!', 10);
-                this.logEvent(`Nearly sunk by a corvette \u2014 ${lost} doubloons jettisoned to stay afloat`);
-              }
+              this.sufferHoling('a corvette\u2019s broadside');
             } else {
               this.say(kind === 'chain'
                 ? `CHAIN SHOT rips your rig (${(this.hull.rig * 100).toFixed(0)}%) \u2014 R for chain, F to answer her`
                 : `A ball strikes your hull (${(this.hull.hull * 100).toFixed(0)}%) \u2014 she means to SINK you`, 5);
             }
+          }
+        }
+      }
+    }
+
+    // hull meets hull (collide.js): capsule contact with every live ship
+    // nearby — hulls shoulder apart, the way comes off both, and a hard ram
+    // wounds through the same damage states a broadside uses
+    {
+      const me = { x: this.ship.x, z: this.ship.z, yaw: this.ship.yaw, speed: this.ship.speed };
+      for (const [id, e] of this.merchants.live) {
+        if (e.sinkT !== null) continue;
+        if (Math.abs(e.m.x - me.x) > 60 || Math.abs(e.m.z - me.z) > 60) continue;
+        const hit = collideShips(me, this.spec, e.m, e.spec);
+        if (!hit) continue;
+        const push = hit.depth * 0.55;
+        this.ship.x += hit.nx * push; this.ship.z += hit.nz * push;
+        e.m.x -= hit.nx * push; e.m.z -= hit.nz * push;
+        this.ship.speed *= 0.72; e.m.speed *= 0.72;
+        const sev = ramSeverity(hit.closing);
+        if (sev > 0 && this.t > (this.ramCool || 0)) {
+          this.ramCool = this.t + 1.2;
+          // both bows pay, the lighter hull pays more — mass by length
+          const share = e.spec.length / (this.spec.length + e.spec.length);
+          this.hull.hull = Math.max(0, this.hull.hull - 0.55 * sev * share);
+          const r = this.merchants.ram(id, sev * (1 - share) * 1.6);
+          this.logEvent('Collision at sea \u2014 the carpenter is not pleased');
+          if (isSinking(this.hull)) {
+            this.sufferHoling('a collision at sea');
+          } else if (r && r.sinking) {
+            this.say('COLLISION \u2014 your bow stove her side clean in. She\u2019s going down!', 6);
+          } else {
+            this.say(`COLLISION \u2014 the hulls grind apart (your hull ${(this.hull.hull * 100).toFixed(0)}%)`, 5);
           }
         }
       }

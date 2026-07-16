@@ -19,9 +19,10 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 
 ## Build & verify
 
-- `npm run verify` — the headless gate (29 checks). **Must be green before deploy.**
-  Add a verify script with every feature; prefer testing pure modules headlessly over
-  eyeballing.
+- `npm run verify` — the headless gate (30 checks). **Must be green before deploy.**
+ Add a verify script with every feature; prefer testing pure modules headlessly over
+ eyeballing. `scripts/live-classes.mjs` (puppeteer, needs the dev server) smoke-tests
+ the seven ship classes, a long-range battle and a ramming in a real browser.
 - Dev: `npm run dev` (port 5173). `window.saltstead` is the live Game handle
   (`.ship`, `.cam`, `.aground`, `.coastDist`, `.dayStart`, `.ocean.uniforms`).
 - Marketing footage: `saltstead.showreel()` in the live console records the

@@ -1,14 +1,16 @@
 // The hulls — procedural low-poly geometry, flat-shaded, zero assets.
-// buildShip(spec, masts) raises any rung of the shipwright's ladder: the
-// sloop's proportions scaled by the spec's frame (shipframe.js frameFor),
-// with a second mast and course for the bigger hulls. Returns
+// buildShip(def) raises any rung of the shipwright's ladder from its yard
+// row (shipyard.js): the sloop's proportions scaled by the spec's frame
+// (shipframe.js frameFor), then dressed by the def — masts, SQUARE courses
+// for the big hulls, a sterncastle for the galleon, and a visible row of
+// CANNON at the gun posts main.js actually fires from. Returns
 // { group, deck, setSail, setLantern } — group carries position + attitude,
 // the captain is parented to `deck` so the whole ship is one moving frame,
 // setLantern lights the masthead after dark.
 
 import * as THREE from 'three';
 import { SLOOP } from './shipphysics.js';
-import { frameFor } from './shipframe.js';
+import { frameFor, gunPosts } from './shipframe.js';
 import { tackSign } from './sailing.js';
 import { woodPixels } from './woodgrain.js';
 
@@ -62,6 +64,46 @@ function buildHull(D, s) {
   return new THREE.Mesh(geo, woodMat({ base: [110, 74, 47], nPlanks: 8, seed: 7 }));
 }
 
+// one SQUARE rig: mast + braced yards + rectangular courses, planted at
+// deck-local z — the big-ship silhouette. The rig group braces (rotates)
+// toward the wind in setSail; kind: 'square'.
+function buildSquareRig(D, s, sparMat, z, mastH, yardW) {
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.1 * s, 0.15 * s, mastH, 6), sparMat);
+  mast.position.set(0, D.y + mastH / 2, z);
+
+  const rig = new THREE.Group();
+  rig.position.set(0, 0, z);
+
+  const sails = [];
+  const sailMat = new THREE.MeshPhongMaterial({ color: SAILC, flatShading: true, side: THREE.DoubleSide });
+  // course low and broad, topsail high and narrow
+  for (const [hFrac, wFrac, drop] of [[0.62, 1, 0.34], [0.9, 0.7, 0.2]]) {
+    const yH = D.y + mastH * hFrac;
+    const w = yardW * wFrac;
+    const yard = new THREE.Mesh(new THREE.CylinderGeometry(0.05 * s, 0.05 * s, w, 5), sparMat);
+    yard.rotation.z = Math.PI / 2;
+    yard.position.set(0, yH, 0);
+    rig.add(yard);
+    // the sail hangs from the yard, foot drawn a touch aft — enough belly
+    // to read as a drawing sail without cloth simulation
+    const dropH = mastH * drop;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute([
+      -w / 2, yH - 0.06 * s, 0,
+      w / 2, yH - 0.06 * s, 0,
+      w * 0.42, yH - dropH, -0.5 * s,
+      -w / 2, yH - 0.06 * s, 0,
+      w * 0.42, yH - dropH, -0.5 * s,
+      -w * 0.42, yH - dropH, -0.5 * s,
+    ], 3));
+    geo.computeVertexNormals();
+    const sail = new THREE.Mesh(geo, sailMat);
+    rig.add(sail);
+    sails.push(sail);
+  }
+  return { mast, rig, sails, kind: 'square', baseY: 0 };
+}
+
 // one fore-and-aft rig: mast + swinging boom + triangular sail, planted at
 // deck-local z. Returns { mast, rig, sail } — the rig group swings in setSail.
 function buildRig(D, s, sparMat, z, mastH, boomL) {
@@ -87,10 +129,16 @@ function buildRig(D, s, sparMat, z, mastH, boomL) {
     new THREE.MeshPhongMaterial({ color: SAILC, flatShading: true, side: THREE.DoubleSide }));
   rig.add(sail);
 
-  return { mast, rig, sail };
+  return { mast, rig, sails: [sail], kind: 'foreaft' };
 }
 
-export function buildShip(spec = SLOOP, masts = 1) {
+// def: a shipyard.js HULLS row, or any { spec, masts, guns, square, castle }.
+// The legacy call buildShip(spec, masts) still works — old savours of the
+// sloop years call it that way.
+export function buildShip(def = SLOOP, legacyMasts) {
+  if (def && def.maxSpeed !== undefined) def = { spec: def, masts: legacyMasts || 1, guns: 1 };
+  const spec = def.spec || SLOOP;
+  const masts = def.masts || 1;
   const F = frameFor(spec), D = F.deck, s = F.scale;
   const group = new THREE.Group();
 
@@ -121,9 +169,27 @@ export function buildShip(spec = SLOOP, masts = 1) {
   // spars: staved grain running up the stick, not hooped around it
   const sparMat = woodMat({ base: [83, 54, 31], nPlanks: 3, seed: 5, vary: 0.10 }, { rotate: true });
 
-  // the rigs: main aft, and on two-masted hulls a foremast forward
-  const rigs = [buildRig(D, s, sparMat, 1.2 * s, 7.4 * s, 4.6 * s)];
-  if (masts >= 2) rigs.push(buildRig(D, s, sparMat, D.maxZ * 0.55, 6.5 * s, 3.6 * s));
+  // THE SAIL PLAN — the silhouette that tells the classes apart at a mile:
+  //   1 mast            sloop / cutter — one fore-and-aft main
+  //   2 masts, fore-aft schooner — two raked triangles
+  //   2 masts, square   brig / corvette — braced yards and courses
+  //   3 masts, square   frigate / galleon — square fore + main, spanker aft
+  const rigs = [];
+  let mainZ = 1.2 * s, mainH = 7.4 * s;
+  if (masts >= 3) {
+    mainZ = 0.9 * s; mainH = 8.0 * s;
+    rigs.push(buildSquareRig(D, s, sparMat, mainZ, mainH, 3.8 * s));
+    rigs.push(buildSquareRig(D, s, sparMat, D.maxZ * 0.6, 7.0 * s, 3.4 * s));
+    rigs.push(buildRig(D, s, sparMat, D.minZ * 0.55, 5.8 * s, 3.0 * s)); // the spanker
+  } else if (masts === 2 && def.square) {
+    rigs.push(buildSquareRig(D, s, sparMat, mainZ, mainH, 3.5 * s));
+    rigs.push(buildSquareRig(D, s, sparMat, D.maxZ * 0.55, 6.6 * s, 3.1 * s));
+  } else if (masts === 2) {
+    rigs.push(buildRig(D, s, sparMat, mainZ, mainH, 4.6 * s));
+    rigs.push(buildRig(D, s, sparMat, D.maxZ * 0.55, 6.5 * s, 3.6 * s));
+  } else {
+    rigs.push(buildRig(D, s, sparMat, mainZ, mainH, 4.6 * s));
+  }
   for (const r of rigs) { group.add(r.mast); group.add(r.rig); }
 
   const bowsprit = new THREE.Mesh(new THREE.CylinderGeometry(0.05 * s, 0.08 * s, 2.6 * s, 5), sparMat);
@@ -132,7 +198,7 @@ export function buildShip(spec = SLOOP, masts = 1) {
   group.add(bowsprit);
 
   // jib off the bowsprit, tacked to the FOREMOST mast
-  const jibMastZ = masts >= 2 ? D.maxZ * 0.55 : 1.2 * s;
+  const jibMastZ = masts >= 3 ? D.maxZ * 0.6 : masts === 2 ? D.maxZ * 0.55 : 1.2 * s;
   const jibGeo = new THREE.BufferGeometry();
   jibGeo.setAttribute('position', new THREE.Float32BufferAttribute([
     0, D.y + 0.7 * s, D.maxZ + 2.2 * s,
@@ -150,24 +216,68 @@ export function buildShip(spec = SLOOP, masts = 1) {
   tiller.position.set(F.helm.x, D.y + 0.45 * s, F.helm.z - 0.3 * s);
   group.add(tiller);
 
-  // the masthead lantern: a warm point at the maintop, lit after dark by
-  // setLantern. fog:false — a ship's light carries beyond the haze that
-  // swallows her hull, which is exactly how you find a sail at night.
+  // the sterncastle — the galleon's crown: a raised aftercastle with a poop
+  // above it and an ochre band along the topsides, treasure-fleet style
+  if (def.castle) {
+    const castleMat = woodMat({ base: [96, 62, 38], nPlanks: 5, seed: 17, vary: 0.12 });
+    const cw = (D.maxX + 0.1 * s) * 2;
+    const z0 = D.minZ * 0.97, z1 = D.minZ * 0.42;
+    const castle = new THREE.Mesh(new THREE.BoxGeometry(cw, 1.35 * s, z1 - z0), castleMat);
+    castle.position.set(0, D.y + 0.6 * s, (z0 + z1) / 2);
+    group.add(castle);
+    const poop = new THREE.Mesh(new THREE.BoxGeometry(cw * 0.82, 0.7 * s, (z1 - z0) * 0.55), castleMat);
+    poop.position.set(0, D.y + 1.6 * s, z0 + (z1 - z0) * 0.3);
+    group.add(poop);
+    const bandMat = mat(0xc9a24a);
+    for (const side of [-1, 1]) {
+      const band = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08 * s, 0.2 * s, (D.maxZ - D.minZ) * 0.62), bandMat);
+      band.position.set(side * (D.maxX + 0.28 * s), D.y - 0.45 * s, (D.maxZ + D.minZ) / 2 - 0.6 * s);
+      group.add(band);
+    }
+  }
+
+  // THE GUNS — a visible row of cannon at the exact posts main.js fires
+  // from (shipframe.js gunPosts): black barrels run out over the rail on
+  // oak carriages. The broadside you see is the broadside you throw.
+  if (def.guns) {
+    const gunMat = mat(0x23232a);
+    for (const side of [-1, 1]) {
+      for (const z of gunPosts(D, s, def.guns)) {
+        const barrel = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.075 * s, 0.095 * s, 1.15 * s, 6), gunMat);
+        barrel.rotation.z = Math.PI / 2;
+        barrel.position.set(side * (D.maxX + 0.35 * s), D.y + 0.36 * s, z);
+        const carriage = new THREE.Mesh(
+          new THREE.BoxGeometry(0.5 * s, 0.32 * s, 0.46 * s), railMat);
+        carriage.position.set(side * (D.maxX - 0.32 * s), D.y + 0.16 * s, z);
+        group.add(barrel, carriage);
+      }
+    }
+  }
+
+  // the masthead lantern: a warm point at the MAIN top (the tallest stick),
+  // lit after dark by setLantern. fog:false — a ship's light carries beyond
+  // the haze that swallows her hull: how you find a sail at night.
   const lantern = new THREE.Mesh(
     new THREE.SphereGeometry(0.16 * s, 8, 6),
     new THREE.MeshBasicMaterial({ color: 0xffc978, fog: false }));
-  lantern.position.set(0, D.y + 7.65 * s, 1.2 * s);
+  lantern.position.set(0, D.y + mainH + 0.25 * s, mainZ);
   lantern.visible = false;
   group.add(lantern);
   const setLantern = (on) => { lantern.visible = !!on; };
 
-  // heading, trim [0..1], windFrom -> swing the rigs and belly the sails
+  // heading, trim [0..1], windFrom -> swing the rigs and belly the sails.
+  // Fore-and-aft rigs SWING with the trim; square rigs BRACE — a shallower
+  // sweep, yards never fore-and-aft — so the two families move differently.
   function setSail(heading, trim, windFrom, power) {
     const side = tackSign(heading, windFrom);
     const belly = 0.75 + 0.25 * power;
     for (const r of rigs) {
-      r.rig.rotation.y = side * trim * 1.15;
-      r.sail.scale.set(1, belly * 0.25 + 0.75, 1);
+      r.rig.rotation.y = r.kind === 'square'
+        ? side * (0.2 + trim * 0.5)
+        : side * trim * 1.15;
+      for (const sail of r.sails) sail.scale.set(1, belly * 0.25 + 0.75, 1);
     }
     jib.rotation.y = side * (0.15 + trim * 0.5);
   }
@@ -175,8 +285,28 @@ export function buildShip(spec = SLOOP, masts = 1) {
   return { group, deck, setSail, setLantern };
 }
 
-// the unit hull, for every caller that just wants "a ship" (merchant lanes,
-// the fleet astern)
+// the unit hull, for every caller that just wants "a ship" (the title
+// diorama, the fleet astern)
 export function buildSloop() {
-  return buildShip(SLOOP, 1);
+  return buildShip({ spec: SLOOP, masts: 1, guns: 1 });
+}
+
+// ---- deckhands: the little figures that make another ship ALIVE ----
+// Cheaper than the captain (captain.js) — no hat brim, no walk cycle, one
+// material per colour family shared across every hand built. seed picks the
+// shirt so a crew isn't clones.
+const HAND_SHIRTS = [0x6b4a2f, 0x4a5a6b, 0x5a6b4a, 0x6b2f2f, 0x3f3f47].map(mat);
+const HAND_SLOPS = mat(0x2b2b33);
+const HAND_SKIN = mat(0xd9a56f);
+export function buildHand(seed = 0) {
+  const g = new THREE.Group();
+  const shirt = HAND_SHIRTS[Math.abs(Math.floor(seed)) % HAND_SHIRTS.length];
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.4, 0.18), HAND_SLOPS);
+  legs.position.y = 0.2;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.46, 0.26), shirt);
+  body.position.y = 0.62;
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), HAND_SKIN);
+  head.position.y = 0.98;
+  g.add(legs, body, head);
+  return g;
 }
