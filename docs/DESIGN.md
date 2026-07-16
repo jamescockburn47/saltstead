@@ -85,6 +85,32 @@ procedural character model with cosmetic progression (hats).
    grumbles, procedural shanties (the carols system ports).
 6. **Weather as drama** — storms at sea are events, not skybox changes.
 
+## Legends — the highlight points
+
+A planet of accurate coastline is a map, not a game. The **legends layer** is what
+makes sailing TOWARD somewhere: hand-placed wonders anchored to real geography, each
+one a story a player tells afterwards. The table lives in `src/legends.js`
+(append-only content, guarded by `verify-legends`); the founding pair came from the
+co-designer: **dragons in Wales** and **the Bermuda Triangle**.
+
+Design rules for a legend:
+
+1. **Anchored to real geography** — the real-world map is the game's hook; a legend
+   must make a real place worth the voyage (and teach a little geography by stealth).
+2. **Discovered, not listed** — tavern rumours, chart fragments, and other players'
+   stories point at legends; no map-marker shopping list.
+3. **The payoff respects the economy** — land legends (the dragons) pay in treasure
+   that originated at sea, so "money is made at sea" survives.
+4. **Each kind exercises a different system** — boss (combat), anomaly (navigation
+   skill), haven (social/multiplayer), hunt (quest chain), wreck (diving/salvage).
+   A new legend should say which system it stresses.
+
+Current table: the Welsh dragons, the Bermuda Triangle, the Kraken (Norwegian deeps),
+the Corryvreckan whirlpool (real, off Scotland), the Flying Dutchman (Cape of Good
+Hope), Port Royal (haven/social hub), Davy Jones' Locker (Mariana Trench endgame
+vault), the 1715 Plate Fleet (real Florida treasure wrecks), El Dorado (Amazon river
+hunt — where shallow draft beats the biggest ship).
+
 ## Multiplayer
 
 Reuse the `worldsvc` relay model (rooms → oceans/shards; additive message protocol;

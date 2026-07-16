@@ -7,9 +7,10 @@ import * as THREE from 'three';
 import { Ocean } from './ocean.js';
 import { buildSloop } from './ship.js';
 import { buildCaptain } from './captain.js';
+import { FoamLayer } from './foamlayer.js';
 import { newShipState, stepShip, shipAttitude, SLOOP } from './shipphysics.js';
-import { DECK, HELM, clampToDeck, nearHelm } from './shipframe.js';
-import { sailPower, wrapAngle, optimalTrim, IRONS } from './sailing.js';
+import { DECK, HELM, clampToDeck, nearHelm, localToWorld } from './shipframe.js';
+import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS } from './sailing.js';
 import { waveHeight } from './waves.js';
 
 const POS_NAMES = [
@@ -39,6 +40,7 @@ class Game {
     this.scene.add(hemi, sun);
 
     this.ocean = new Ocean(this.scene);
+    this.foam = new FoamLayer(this.scene);
 
     this.ship = newShipState(0, 0);
     this.ship.trim = 0.5;
@@ -109,8 +111,9 @@ class Game {
     this.t += dt;
     const t = this.t, k = this.keys;
 
-    // a living wind: direction wanders, strength breathes with gusts
-    this.wind.from += (Math.sin(t * 0.011) * 0.14 + Math.sin(t * 0.037) * 0.05) * dt;
+    // a living wind: direction breathes AROUND a base bearing (bounded, so it
+    // can never spin onto the bow and stall the game), strength gusts
+    this.wind.from = 2.3 + 0.3 * Math.sin(t * 0.011) + 0.12 * Math.sin(t * 0.037);
     this.wind.speed = 7 + 2.2 * Math.sin(t * 0.07) + 1.1 * Math.sin(t * 0.21);
 
     if (this.mode === 'helm') {
@@ -124,12 +127,26 @@ class Game {
 
     stepShip(this.ship, this.wind, dt);
     const att = shipAttitude(this.ship, t);
-    this.shipGroup.position.set(this.ship.x, att.y, this.ship.z);
-    this.shipGroup.rotation.set(att.pitch, this.ship.yaw, att.roll);
-
     const rel = wrapAngle(this.ship.yaw - this.wind.from);
     const power = sailPower(this.ship.yaw, this.wind.from, this.ship.trim);
+    // wind heel: lean away from the wind in proportion to drive — visual only
+    const heel = -tackSign(this.ship.yaw, this.wind.from) * power * 0.14;
+    this.shipGroup.position.set(this.ship.x, att.y, this.ship.z);
+    this.shipGroup.rotation.set(att.pitch, this.ship.yaw, att.roll + heel);
     this.setSail(this.ship.yaw, this.ship.trim, this.wind.from, power);
+
+    // wake astern + bow-wave foam, world-anchored so the ship leaves them behind
+    const stern = localToWorld(this.ship, 0, 0, DECK.minZ - 0.5);
+    const bow = localToWorld(this.ship, 0, 0, DECK.maxZ + 0.9);
+    this.foam.update(t, dt, this.ship.x, this.ship.z, this.ship.speed,
+      [{ x: stern.x, z: stern.z, size: 1.7 }, { x: bow.x, z: bow.z, size: 0.8 }]);
+
+    // speed widens the lens a touch — subliminal but it sells the pace
+    const fovTarget = 62 + 7 * Math.min(1, this.ship.speed / SLOOP.maxSpeed);
+    if (Math.abs(this.camera.fov - fovTarget) > 0.05) {
+      this.camera.fov += (fovTarget - this.camera.fov) * Math.min(1, dt * 3);
+      this.camera.updateProjectionMatrix();
+    }
 
     // captain: walk the deck (camera-relative input, ship-local position)
     this.cap.moving = false;
