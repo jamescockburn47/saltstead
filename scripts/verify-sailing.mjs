@@ -2,8 +2,9 @@
 // pillar 1), plus the sailing-model invariants the feel depends on.
 import {
   wrapAngle, IRONS, pointOfSailPower, optimalTrim, trimEfficiency,
-  sailPower, tackSign, speedTarget,
+  sailPower, tackSign, speedTarget, crewRudder, CREW_HOLD,
 } from '../src/sailing.js';
+import { newShipState, stepShip, SLOOP } from '../src/shipphysics.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -48,6 +49,33 @@ ok(speedTarget(1, 16, 10) === 20 && speedTarget(1, 30, 10) === 20, 'gale capped 
 ok(speedTarget(0.5, 8, 10) < speedTarget(1, 8, 10), 'more power = faster');
 ok(speedTarget(1, 4, 10) < speedTarget(1, 8, 10), 'more wind = faster');
 ok(speedTarget(0, 8, 10) === 0, 'no power, no way');
+
+// crew auto-helm: with the captain off the tiller, the crew must never let
+// her sit head-to-wind — but must not touch a course that's drawing
+ok(crewRudder(1.2) === 0 && crewRudder(-1.2) === 0, 'crew holds a drawing course');
+ok(crewRudder(0.1) > 0.5, 'near-irons starboard tack: crew bears away hard to starboard');
+ok(crewRudder(-0.1) < -0.5, 'near-irons port tack: crew bears away hard to port');
+ok(Math.abs(crewRudder(CREW_HOLD - 0.01)) < Math.abs(crewRudder(0.05)),
+  'crew rudder eases off as she comes onto a drawing course');
+
+// end to end: dead in irons at zero way, crew alone gets her sailing again
+{
+  const wind = { from: 0, speed: 8 };
+  const s = newShipState(0, 0);
+  s.yaw = 0.02; s.speed = 0; s.trim = 0.5; // head-to-wind, stopped
+  const dt = 0.1;
+  let recovered = -1;
+  for (let t = 0; t < 90; t += dt) {
+    const rel = wrapAngle(s.yaw - wind.from);
+    s.rudder += (crewRudder(rel) - s.rudder) * Math.min(1, dt * 2);
+    stepShip(s, wind, dt, SLOOP);
+    if (recovered < 0 && s.speed > 2) recovered = t;
+  }
+  ok(recovered >= 0 && recovered < 60,
+    `crew sails her out of irons unaided (speed>2 in ${recovered.toFixed(0)}s)`);
+  ok(Math.abs(wrapAngle(s.yaw - wind.from)) > IRONS,
+    'and she ends up clear of the irons cone');
+}
 
 if (failed) { console.error(`verify-sailing: ${failed} FAILED`); process.exit(1); }
 console.log('verify-sailing: OK — irons/beam/run curve sane, trim skill pays >=1.7x');

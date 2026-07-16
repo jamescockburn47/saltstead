@@ -65,6 +65,19 @@ export function tackSign(heading, windFrom) {
   return wrapAngle(heading - windFrom) >= 0 ? 1 : -1;
 }
 
+// Crew auto-helm for when the captain is away from the tiller: hold the
+// course while she's drawing, but never let her sit in irons. rel is the
+// signed bow-to-wind angle (yaw - windFrom, wrapped). Returns a rudder
+// command [-1, 1] that bears away onto the current tack until the sail can
+// draw again. A real crew would never stand by while she's head-to-wind.
+export const CREW_HOLD = IRONS + 0.35; // bear away to a close reach + margin
+export function crewRudder(rel) {
+  const a = Math.abs(rel);
+  if (a >= CREW_HOLD) return 0; // she's drawing — hold the course
+  const sign = rel >= 0 ? 1 : -1; // fall off on whichever tack she's on
+  return sign * Math.min(1, (CREW_HOLD - a) * 1.6);
+}
+
 // Target hull speed (m/s) for a given power and wind strength. The cap is
 // 2x: a full offshore gale genuinely doubles the hull's pace — half of what
 // makes blue water feel FAST (the other half is the open-sea gait).

@@ -10,7 +10,7 @@ import { buildCaptain } from './captain.js';
 import { FoamLayer } from './foamlayer.js';
 import { newShipState, stepShip, shipAttitude, SLOOP } from './shipphysics.js';
 import { DECK, HELM, clampToDeck, nearHelm, localToWorld } from './shipframe.js';
-import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS } from './sailing.js';
+import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
 import { waveHeight } from './waves.js';
 import { TerrainLayer } from './terrain.js';
 import { Sky } from './sky.js';
@@ -355,7 +355,10 @@ class Game {
       if (k.has('KeyW')) this.ship.trim = Math.max(0, this.ship.trim - dt * 0.45);
       if (k.has('KeyS')) this.ship.trim = Math.min(1, this.ship.trim + dt * 0.45);
     } else {
-      this.ship.rudder *= 1 - Math.min(1, dt * 2);
+      // captain off the tiller: the crew holds her — if the wind's breathing
+      // walks the bow into irons, they bear away until the sail draws again
+      const relNow = wrapAngle(this.ship.yaw - this.wind.from);
+      this.ship.rudder += (crewRudder(relNow) - this.ship.rudder) * Math.min(1, dt * 2);
     }
     // with the captain ashore the crew heaves to and HOLDS her
     if (this.mode === 'ashore') this.ship.speed = 0;
