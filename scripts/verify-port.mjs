@@ -2,7 +2,7 @@
 // right haven, the ledger adds up, and the loop is profitable in the right
 // direction (capture > strip, hire-to-capture pays).
 import {
-  PORT_RADIUS, PORT_SPEED, PRIZE_VALUE, HAND_COST, CREW_MAX,
+  PORT_RADIUS, HARBOUR_RADIUS, PORT_SPEED, PRIZE_VALUE, HAND_COST, CREW_MAX,
   nearestHaven, inAnchorage, sellFleet, canHire,
 } from '../src/port.js';
 import { LEGENDS } from '../src/legends.js';
@@ -34,6 +34,10 @@ const oneDeg = nearestHaven(18.94, -76.84);
 ok(Math.abs(oneDeg.dist - M_PER_DEG) < 1, 'a degree of anchorage bearing = M_PER_DEG metres');
 
 // ---- the anchorage gate ----
+// the furling harbour is a small heart inside the anchorage — a passing ship
+// in the outer anchorage must NOT lose her wind
+ok(HARBOUR_RADIUS < PORT_RADIUS / 2,
+  `the furling harbour (${HARBOUR_RADIUS} m) is well inside the anchorage (${PORT_RADIUS} m)`);
 ok(inAnchorage(PORT_RADIUS - 1, 0), 'stopped inside the anchorage: in port');
 ok(inAnchorage(PORT_RADIUS - 1, PORT_SPEED), 'bare steerageway still puts in');
 ok(!inAnchorage(PORT_RADIUS - 1, PORT_SPEED + 2), 'sweeping through at speed does not');

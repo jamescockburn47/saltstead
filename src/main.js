@@ -10,7 +10,7 @@ import { buildCaptain } from './captain.js';
 import { isWarden } from './identity.js';
 import { FoamLayer } from './foamlayer.js';
 import { newShipState, stepShip, shipAttitude, SLOOP } from './shipphysics.js';
-import { DECK, HELM, clampToDeck, nearHelm, localToWorld } from './shipframe.js';
+import { DECK, HELM, clampToDeck, localToWorld } from './shipframe.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
 import { waveHeight } from './waves.js';
 import { TerrainLayer } from './terrain.js';
@@ -35,6 +35,7 @@ import { setSeaState } from './waves.js';
 import { makeEntry, pushEntry, acceptLog } from './shiplog.js';
 import {
   nearestHaven, inAnchorage, sellFleet, canHire, HAND_COST, PORT_RADIUS,
+  HARBOUR_RADIUS,
 } from './port.js';
 import { PortUI } from './portui.js';
 import { canSight, takeSight, sightText } from './navigation.js';
@@ -134,7 +135,11 @@ class Game {
     this.cam = { yaw: Math.PI * 0.85, pitch: 0.32, dist: 8, targetDist: 8 };
 
     this.keys = new Set();
-    addEventListener('keydown', (e) => { this.keys.add(e.code); if (e.code === 'KeyE') this.onE(); });
+    addEventListener('keydown', (e) => {
+      this.keys.add(e.code);
+      if (e.code === 'KeyE') this.onE();
+      if (e.code === 'KeyT') this.toggleTiller();
+    });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     this.dragging = false;
     const el = this.renderer.domElement;
@@ -303,18 +308,20 @@ class Game {
     try { localStorage['saltstead-gfx'] = q; } catch { /* private mode */ }
   }
 
-  toggleHelm() {
+  // T is the tiller, from anywhere on deck — the captain runs aft. T again
+  // hands it back. It also slams the port panel shut: T ALWAYS means "sail".
+  toggleTiller() {
+    if (this.portui.open) this.portui.hide();
     if (this.mode === 'helm') { this.mode = 'walk'; this.cam.targetDist = 8; return; }
-    if (nearHelm(this.cap.x, this.cap.z)) {
-      this.mode = 'helm';
-      this.cap.x = HELM.x; this.cap.z = HELM.z + 0.6;
-      this.cap.facing = 0; // face the bow
-      this.cam.targetDist = 19;
-    }
+    if (this.mode !== 'walk') return; // ashore: the tiller is back on the ship
+    this.mode = 'helm';
+    this.cap.x = HELM.x; this.cap.z = HELM.z + 0.6;
+    this.cap.facing = 0; // face the bow
+    this.cam.targetDist = 19;
   }
 
-  // E is contextual: (ashore: dig > re-board) / prize alongside > dig >
-  // step ashore > the helm
+  // E is the DOING key — board, capture, dig, step ashore, put in at port.
+  // The tiller lives on T alone, so E can never trap you off the helm.
   onE() {
     if (this.portui.open) { this.portui.hide(); return; }
     if (this.mode === 'ashore') {
@@ -333,14 +340,8 @@ class Game {
       this.say('The longboat pulls for the shore\u2026');
       return;
     }
-    // the helm wins when you're standing at it — otherwise a spawn inside an
-    // anchorage (Port Royal!) traps E on the port panel and the tiller is
-    // unreachable; the anchorage outranks only the beach
-    if (this.mode === 'walk' && nearHelm(this.cap.x, this.cap.z)) { this.toggleHelm(); return; }
-    if (this.mode !== 'helm' && this.port
-      && inAnchorage(this.port.dist, this.ship.speed)) { this.putIn(); return; }
+    if (this.port && inAnchorage(this.port.dist, this.ship.speed)) { this.putIn(); return; }
     if (this.canStepAshore()) { this.goAshore(); return; }
-    this.toggleHelm();
   }
 
   // ---- shore leave ----
@@ -454,9 +455,9 @@ class Game {
       this.ship.rudder += (rt - this.ship.rudder) * Math.min(1, dt * 5);
       if (k.has('KeyW')) this.ship.trim = Math.max(0, this.ship.trim - dt * 0.45);
       if (k.has('KeyS')) this.ship.trim = Math.min(1, this.ship.trim + dt * 0.45);
-    } else if (this.port && this.port.dist <= PORT_RADIUS) {
-      // inside an anchorage with the captain off the helm, the crew hands
-      // the sails and lets her run off her way — that's how you arrive
+    } else if (this.port && this.port.dist <= HARBOUR_RADIUS) {
+      // in the inner harbour with the captain off the tiller, she runs off
+      // her way and glides to a stop — that's how you arrive
       this.ship.rudder *= 1 - Math.min(1, dt * 2);
     } else {
       // captain off the tiller: the crew holds her — if the wind's breathing
@@ -561,7 +562,9 @@ class Game {
     }
 
     const px = this.ship.x, pz = this.ship.z;
-    const furled = (this.mode !== 'helm' && this.port && this.port.dist <= PORT_RADIUS)
+    // sails come off ONLY in the inner harbour (or with the port panel up) —
+    // the outer anchorage must never becalm a ship that's just passing
+    const furled = (this.mode !== 'helm' && this.port && this.port.dist <= HARBOUR_RADIUS)
       || this.portui.open;
     stepShip(this.ship, this.wind, dt, SLOOP, gait, furled);
 
@@ -758,19 +761,17 @@ class Game {
             ? (this.crew > 0 ? 'E \u2014 send the longboat to dig' : 'E \u2014 row in and dig')
             : this.mode === 'helm'
               ? (anchored
-                ? `ANCHORAGE \u2014 E to leave the helm, then put in at ${this.port.haven.name}`
+                ? `ANCHORAGE \u2014 T to leave the tiller, E to put in at ${this.port.haven.name}`
                 : this.aground
-                ? 'AGROUND \u2014 E to leave the helm, then step ashore'
-                : 'A/D — steer · W/S — sheet · E — leave the helm · M — chart · N — stars · L — log')
-              : nearHelm(this.cap.x, this.cap.z)
-                ? 'E — take the helm'
-                : anchored
-                  ? `E \u2014 put in at ${this.port.haven.name}`
-                  : this.canStepAshore()
-                  ? 'E \u2014 step ashore'
+                ? 'AGROUND \u2014 T to leave the tiller, E to step ashore'
+                : 'A/D — steer · W/S — sheet · T — leave the tiller · M — chart · N — stars · L — log')
+              : anchored
+                ? `E \u2014 put in at ${this.port.haven.name} \u00b7 T \u2014 take the tiller`
+                : this.canStepAshore()
+                  ? 'E \u2014 step ashore \u00b7 T \u2014 take the tiller'
                   : this.aground
-                    ? 'AGROUND \u2014 steer for deeper water'
-                    : 'WASD — walk the deck · drag — look · M — chart · N — stars · L — log';
+                    ? 'AGROUND \u2014 T for the tiller, steer for deeper water'
+                    : 'T — take the tiller · WASD — walk the deck · M — chart · N — stars · L — log';
     this.hud.toast.style.display = t < this.toast.until ? 'block' : 'none';
     if (t < this.toast.until) this.hud.toast.textContent = this.toast.text;
     // a nudge toward good trim, teaching by whisper not tutorial
