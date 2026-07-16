@@ -192,6 +192,8 @@ class Game {
     // a nudge toward good trim, teaching by whisper not tutorial
     const err = Math.abs(this.ship.trim - optimalTrim(rel));
     this.hud.trim.style.background = err < 0.12 ? '#7fd48a' : err < 0.3 ? '#e8c46a' : '#d47a6a';
+
+    this.renderer.render(this.scene, this.camera);
   }
 }
 
