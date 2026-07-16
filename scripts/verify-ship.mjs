@@ -1,7 +1,7 @@
 // verify-ship: hull physics on the live wave field — speed converges on the
 // sailing model's target, the rudder answers, and buoyancy attitude stays
 // inside believable bounds (no capsizing the prototype from a maths slip).
-import { newShipState, stepShip, shipAttitude, SLOOP } from '../src/shipphysics.js';
+import { newShipState, stepShip, shipAttitude, beaches, SLOOP, BRIG } from '../src/shipphysics.js';
 import { sailPower, speedTarget, optimalTrim, wrapAngle } from '../src/sailing.js';
 import { MAX_WAVE_HEIGHT } from '../src/waves.js';
 
@@ -91,6 +91,21 @@ const DT = 1 / 30;
   s.yaw = 0; // bow along +z; slope rising with z lifts the bow
   const slope = shipAttitude(s, t, SLOOP, (x, z) => 2 + z * 0.3);
   ok(slope.pitch < -0.15, `beached on a slope the bow lifts (pitch ${slope.pitch.toFixed(2)})`);
+}
+
+// the draft ladder: the sloop beaches, the brig anchors off and sends a boat
+{
+  ok(beaches(SLOOP), 'the sloop runs her bow up onto the sand');
+  ok(!beaches(BRIG), 'the brig draws too much to beach — the boats go in');
+  ok(SLOOP.groundLine > 0, `sloop stops ON the land (groundLine ${SLOOP.groundLine})`);
+  ok(BRIG.groundLine < 0, `brig stops OFFSHORE, in ${-BRIG.groundLine} m of water`);
+  ok(BRIG.draft > SLOOP.draft && BRIG.length > SLOOP.length,
+    'the brig is the bigger, deeper hull');
+  // and the grounded brig still rides the shoal, not merges with it
+  const s = newShipState(0, 0);
+  const shoal = shipAttitude(s, 2.2, BRIG, () => BRIG.groundLine);
+  ok(shoal.y >= BRIG.groundLine + BRIG.keel - 1e-9,
+    'brought up on the shoal, the brig sits on it');
 }
 
 // open-sea gait covers ground without touching the dynamics

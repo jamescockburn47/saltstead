@@ -9,7 +9,7 @@ import { buildSloop } from './ship.js';
 import { buildCaptain } from './captain.js';
 import { isWarden } from './identity.js';
 import { FoamLayer } from './foamlayer.js';
-import { newShipState, stepShip, shipAttitude, SLOOP } from './shipphysics.js';
+import { newShipState, stepShip, shipAttitude, beaches, SLOOP } from './shipphysics.js';
 import { DECK, HELM, clampToDeck, localToWorld } from './shipframe.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
 import { waveHeight } from './waves.js';
@@ -110,6 +110,7 @@ class Game {
     this.fleet.restore(this.savedFleet, this.ship.x, this.ship.z, this.ship.yaw);
     this.lastPrizeId = null; // the stripped hull still alongside (capture window)
     this.toast = { text: '', until: 0 };
+    this.spec = SLOOP; // the hull you sail — the shipwright will swap this
     const sloop = buildSloop();
     this.shipGroup = sloop.group;
     this.shipGroup.rotation.order = 'YXZ';
@@ -349,9 +350,10 @@ class Game {
       && (this.aground || this.coastDist < 300);
   }
 
-  // nearest dry ground within longboat reach of a point
+  // nearest dry ground within longboat reach of a point — the reach is long
+  // enough for a deep hull anchored off the shoal, not just a beached sloop
   findLanding(cx, cz) {
-    for (let r = 5; r <= 380; r += 8) {
+    for (let r = 5; r <= 700; r += 8) {
       for (let a = 0; a < 16; a++) {
         const ang = (a / 16) * Math.PI * 2;
         const x = cx + Math.sin(ang) * r, z = cz + Math.cos(ang) * r;
@@ -378,10 +380,10 @@ class Game {
     this.cam.targetDist = 8;
     this.say(this.crew > 0
       ? 'The longboat puts you ashore. The crew holds the ship.'
-      : 'You row yourself ashore. The sloop lies to her anchor.', 5);
+      : 'You row yourself ashore. She lies to her anchor.', 5);
     this.logEvent(this.crew > 0
       ? 'The captain went ashore by longboat; the crew holds the ship'
-      : 'The captain rowed ashore; the sloop lies to her anchor');
+      : 'The captain rowed ashore; she lies to her anchor');
   }
 
   boardShip() {
@@ -564,16 +566,17 @@ class Game {
     // only the port panel furls the sails (so she doesn't sail off mid-trade);
     // everywhere else you stop the intuitive way — run her up the beach
     const furled = this.portui.open;
-    stepShip(this.ship, this.wind, dt, SLOOP, gait, furled);
+    stepShip(this.ship, this.wind, dt, this.spec, gait, furled);
 
-    // beaching: the hull PULLS RIGHT UP to the land — she stops when the bow
-    // noses onto actual sand (elevation above the waterline), not in the
-    // offshore shallows. shipAttitude rides the ground, so she sits ON it.
+    // grounding is per-hull (spec.groundLine): a shallow-draft sloop PULLS
+    // RIGHT UP onto the sand; a deep hull fetches up on the shoal offshore
+    // and the boats go in. shipAttitude rides the ground either way.
     const groundAt = (x, z) => { const g = worldToLatLon(x, z); return elevation(g.lat, g.lon); };
     if (this.coastDist < 400) {
-      const bowX = this.ship.x + Math.sin(this.ship.yaw) * SLOOP.length * 0.5;
-      const bowZ = this.ship.z + Math.cos(this.ship.yaw) * SLOOP.length * 0.5;
-      if (groundAt(bowX, bowZ) > 0.05 || groundAt(this.ship.x, this.ship.z) > 0.05) {
+      const gl = this.spec.groundLine;
+      const bowX = this.ship.x + Math.sin(this.ship.yaw) * this.spec.length * 0.5;
+      const bowZ = this.ship.z + Math.cos(this.ship.yaw) * this.spec.length * 0.5;
+      if (groundAt(bowX, bowZ) > gl || groundAt(this.ship.x, this.ship.z) > gl) {
         this.ship.x = px; this.ship.z = pz;
         this.ship.speed = 0;
         this.aground = true;
@@ -582,10 +585,17 @@ class Game {
         if (this.mode === 'helm') this.ship.yaw += this.ship.rudder * 0.45 * dt;
       } else this.aground = false;
     } else this.aground = false;
+    // the moment she fetches up, say OUT LOUD how you get ashore from here
+    if (this.aground && !this.wasAgroundSay) {
+      this.say(beaches(this.spec)
+        ? 'The bow takes the sand \u2014 E steps you ashore'
+        : 'She draws too much to beach \u2014 the boats must go in. E sends the longboat ashore', 8);
+    }
+    this.wasAgroundSay = this.aground;
 
     this.terrain.update(this.ship.x, this.ship.z);
     // inshore the hull rides the sea floor where it shoals past the keel
-    const att = shipAttitude(this.ship, t, SLOOP, this.coastDist < 400 ? groundAt : null);
+    const att = shipAttitude(this.ship, t, this.spec, this.coastDist < 400 ? groundAt : null);
     const rel = wrapAngle(this.ship.yaw - this.wind.from);
     const power = sailPower(this.ship.yaw, this.wind.from, this.ship.trim);
     // wind heel: lean away from the wind in proportion to drive — visual only
@@ -601,7 +611,7 @@ class Game {
       [{ x: stern.x, z: stern.z, size: 1.7 }, { x: bow.x, z: bow.z, size: 0.8 }]);
 
     // speed widens the lens a touch — subliminal but it sells the pace
-    const fovTarget = 62 + 7 * Math.min(1, this.ship.speed / SLOOP.maxSpeed);
+    const fovTarget = 62 + 7 * Math.min(1, this.ship.speed / this.spec.maxSpeed);
     if (Math.abs(this.camera.fov - fovTarget) > 0.05) {
       this.camera.fov += (fovTarget - this.camera.fov) * Math.min(1, dt * 3);
       this.camera.updateProjectionMatrix();
@@ -712,7 +722,11 @@ class Game {
     }
     if (this.aground !== this.wasAground) {
       this.wasAground = this.aground;
-      if (this.aground) this.logEvent('Beached her \u2014 the bow takes the sand');
+      if (this.aground) {
+        this.logEvent(beaches(this.spec)
+          ? 'Beached her \u2014 the bow takes the sand'
+          : 'Brought up on the shoal \u2014 anchored off the shore');
+      }
     }
 
     // HUD
@@ -765,14 +779,20 @@ class Game {
               ? (anchored
                 ? `ANCHORAGE \u2014 T to leave the tiller, E to put in at ${this.port.haven.name}`
                 : this.aground
-                ? 'BEACHED \u2014 T to leave the tiller, E to step ashore \u00b7 steer A/D to swing her off'
+                ? (beaches(this.spec)
+                  ? 'BEACHED \u2014 T to leave the tiller, E to step ashore \u00b7 steer A/D to swing her off'
+                  : 'ANCHORED OFF \u2014 she draws too much to beach \u00b7 T, then E to send the longboat ashore')
                 : 'A/D — steer · W/S — sheet · T — leave the tiller · M — chart · N — stars · L — log')
               : anchored
                 ? `E \u2014 put in at ${this.port.haven.name} \u00b7 T \u2014 take the tiller`
                 : this.canStepAshore()
-                  ? 'E \u2014 step ashore \u00b7 T \u2014 take the tiller'
+                  ? (beaches(this.spec)
+                    ? 'E \u2014 step ashore \u00b7 T \u2014 take the tiller'
+                    : 'E \u2014 send the longboat ashore \u00b7 T \u2014 take the tiller')
                   : this.aground
-                    ? 'BEACHED \u2014 E to step ashore \u00b7 T to take the tiller'
+                    ? (beaches(this.spec)
+                      ? 'BEACHED \u2014 E to step ashore \u00b7 T to take the tiller'
+                      : 'ANCHORED OFF \u2014 E sends the longboat ashore \u00b7 T to take the tiller')
                     : 'T — take the tiller · WASD — walk the deck · M — chart · N — stars · L — log';
     this.hud.toast.style.display = t < this.toast.until ? 'block' : 'none';
     if (t < this.toast.until) this.hud.toast.textContent = this.toast.text;

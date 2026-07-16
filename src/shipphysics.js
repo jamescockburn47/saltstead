@@ -4,6 +4,9 @@
 import { sailPower, speedTarget } from './sailing.js';
 import { waveHeight } from './waves.js';
 
+// groundLine: the terrain elevation at which the hull stops. Positive = she
+// can run her bow right up onto the sand (beachable); negative = she draws
+// too much and fetches up on the shoal OFFSHORE — the longboat takes you in.
 export const SLOOP = {
   maxSpeed: 8.5,   // m/s, ~16.5 knots — arcade-brisk on purpose
   accel: 0.55,     // exponential approach rate when gaining speed
@@ -13,7 +16,28 @@ export const SLOOP = {
   keel: 0.65,      // hull bottom below the group origin (ship.js buildHull)
   length: 9,
   beam: 3.2,
+  groundLine: 0.05, // shallow draft: the bow takes the sand itself
 };
+
+// The next rung of the shipwright's ladder (docs/DESIGN.md era ladder). Not
+// yet purchasable — the row exists so the grounding/longboat rules are data,
+// not sloop-shaped assumptions.
+export const BRIG = {
+  maxSpeed: 10.5,
+  accel: 0.4,
+  drag: 0.3,
+  turnRate: 0.4,
+  draft: 0.9,
+  keel: 1.1,
+  length: 16,
+  beam: 5.2,
+  groundLine: -1.4, // deep draft: she anchors off and sends a boat in
+};
+
+// does this hull run up onto the beach, or must the boats go in?
+export function beaches(spec) {
+  return spec.groundLine > 0;
+}
 
 export function newShipState(x = 0, z = 0) {
   return { x, y: 0, z, yaw: 0, speed: 0, rudder: 0, trim: 0.5 };
