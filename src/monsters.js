@@ -1,0 +1,131 @@
+// Sea monsters — the pure fight logic, no THREE, no DOM. verify-monsters.mjs
+// guards it; monsterlayer.js gives them bodies. Two boss legends live here:
+//
+//   THE KRAKEN (kraken-deep) — tentacles grab the hull, the crew hacks them
+//   off while you steer for shallow water where it cannot follow — or stand
+//   and shoot every arm off it. One ship can flee it; a crewed one can kill it.
+//
+//   Y DDRAIG GOCH (dragons-wales) — a dragon circles high over the Irish
+//   Sea and stoops on your rig. She is only in cannon reach DURING the
+//   stoop: wound her three times and she flees to her crag in Snowdonia —
+//   follow her ashore and the hoard is yours.
+//
+// Both machines are deterministic given their inputs (invariant 6).
+
+// ---- the Kraken ----
+export const KRAKEN_ARMS = 6;
+export const KRAKEN_WARN = 8;     // s of boiling sea before the arms come up
+export const KRAKEN_HOLD = 60;    // s before it tires and lets go on its own
+export const KRAKEN_SHALLOW = 400; // game m of coast where it cannot follow
+export const KRAKEN_HACK = 10;    // crew-seconds of axe-work per arm
+export const KRAKEN_RIG_RATE = 0.012; // rigging shredded per second in its grip
+export const KRAKEN_LOOT = 1200;  // what the deeps owe you for slaying it
+
+export function newKraken() {
+  return { state: 'rising', t: 0, arms: KRAKEN_ARMS, hackT: 0 };
+}
+
+// mutates k; crew: hands hacking (the captain counts himself in), coastDist:
+// game metres of water under the escape rule. Returns events this step.
+export function stepKraken(k, dt, crew, coastDist) {
+  const ev = { grabbed: false, released: false, slain: false };
+  if (k.state === 'rising') {
+    k.t += dt;
+    if (k.t >= KRAKEN_WARN) { k.state = 'gripping'; k.t = 0; ev.grabbed = true; }
+    return ev;
+  }
+  if (k.state !== 'gripping') return ev;
+  k.t += dt;
+  // the crew hacks at the arms — every hand, and the captain's own axe
+  k.hackT += (crew + 1) * dt;
+  while (k.hackT >= KRAKEN_HACK && k.arms > 0) {
+    k.hackT -= KRAKEN_HACK;
+    k.arms--;
+  }
+  if (k.arms <= 0) { k.state = 'slain'; ev.slain = true; return ev; }
+  if (coastDist < KRAKEN_SHALLOW) { k.state = 'fled'; ev.released = true; return ev; }
+  if (k.t >= KRAKEN_HOLD) { k.state = 'fled'; ev.released = true; }
+  return ev;
+}
+
+// a broadside into the writhing mass takes an arm clean off
+export function shootKrakenArm(k) {
+  if (k.state !== 'gripping' || k.arms <= 0) return { hit: false, slain: false };
+  k.arms--;
+  if (k.arms <= 0) k.state = 'slain';
+  return { hit: true, slain: k.arms <= 0 };
+}
+
+// how much way she can make in its grip: six arms all but stop her
+export function krakenDrag(k) {
+  if (k.state !== 'gripping') return 1;
+  return Math.max(0.15, 1 - 0.14 * k.arms);
+}
+
+export function krakenOver(k) {
+  return k.state === 'slain' || k.state === 'fled';
+}
+
+// ---- Y Ddraig Goch ----
+export const DRAGON_HP = 3;        // wounds before she breaks off for her crag
+export const DRAGON_CIRCLE = 11;   // s wheeling high, out of reach
+export const DRAGON_STOOP = 3.5;   // s of the dive — the firing window
+export const DRAGON_CLIMB = 3;     // s regaining her height
+export const DRAGON_RAKE = 0.14;   // rig torn per stoop she completes unharried
+export const DRAGON_HIT = 0.75;    // a laid gun mostly tells at her wingspan
+export const DRAGON_HIGH = 60;     // circling altitude (visual)
+export const DRAGON_LOW = 9;       // she bottoms out at masthead height
+export const HOARD_GOLD = 2000;    // the crag's hoard — sea plunder, re-buried
+export const HOARD_REACH = 500;    // game m ashore of the crag to loot it
+
+export function newDragon() {
+  return { state: 'circling', t: 0, hp: DRAGON_HP, raked: false };
+}
+
+// mutates d. Returns { rake: bool } — true the single moment she passes
+// through the rig this stoop.
+export function stepDragon(d, dt) {
+  const ev = { rake: false };
+  if (d.state === 'fled') return ev;
+  d.t += dt;
+  if (d.state === 'circling' && d.t >= DRAGON_CIRCLE) {
+    d.state = 'stoop'; d.t = 0; d.raked = false;
+  } else if (d.state === 'stoop') {
+    // the rake lands at the bottom of the dive, once
+    if (!d.raked && d.t >= DRAGON_STOOP * 0.55) { d.raked = true; ev.rake = true; }
+    if (d.t >= DRAGON_STOOP) { d.state = 'climb'; d.t = 0; }
+  } else if (d.state === 'climb' && d.t >= DRAGON_CLIMB) {
+    d.state = 'circling'; d.t = 0;
+  }
+  return ev;
+}
+
+// she is only a target on the way down
+export function dragonVulnerable(d) {
+  return d.state === 'stoop';
+}
+
+export function woundDragon(d) {
+  if (d.state === 'fled') return { fled: true };
+  d.hp--;
+  if (d.hp <= 0) { d.state = 'fled'; return { fled: true }; }
+  return { fled: false };
+}
+
+// visual altitude through the cycle: high on the wheel, masthead in the stoop
+export function dragonAlt(d) {
+  if (d.state === 'stoop') {
+    const u = Math.min(1, d.t / DRAGON_STOOP);
+    const dip = Math.sin(u * Math.PI); // down and back up in one pass
+    return DRAGON_HIGH - (DRAGON_HIGH - DRAGON_LOW) * dip;
+  }
+  if (d.state === 'climb') {
+    const u = Math.min(1, d.t / DRAGON_CLIMB);
+    return DRAGON_LOW + (DRAGON_HIGH - DRAGON_LOW) * u * 0.4 + DRAGON_HIGH * 0.6 * u * u;
+  }
+  return DRAGON_HIGH;
+}
+
+export function dragonGone(d) {
+  return d.state === 'fled';
+}

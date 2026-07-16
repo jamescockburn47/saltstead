@@ -8,9 +8,10 @@ const DB = 'saltstead', STORE = 'meta', KEY = 'game';
 import { acceptLog } from './shiplog.js';
 
 // ---- pure ----
-// loot: { gold, map, lootSeed, crew, fleet, log } — additive fields, version
-// stays 1 (older saves simply read as a poor pirate with no map, no hands —
-// the sloop sails solo — no prizes, a blank log)
+// loot: { gold, map, lootSeed, crew, fleet, log, banked, won } — additive
+// fields, version stays 1 (older saves simply read as a poor pirate with no
+// map, no hands — the sloop sails solo — no prizes, a blank log, nothing in
+// Davy Jones' vault and no legends won)
 export function snapshotSave(ship, skyT, loot = {}) {
   return {
     version: SAVE_VERSION,
@@ -22,6 +23,8 @@ export function snapshotSave(ship, skyT, loot = {}) {
     crew: loot.crew ?? 0,
     fleet: loot.fleet || 0,
     log: Array.isArray(loot.log) ? loot.log : [],
+    banked: loot.banked || 0,           // consigned to the Locker, forever
+    won: Array.isArray(loot.won) ? loot.won : [], // one-shot legends claimed
     savedAt: Date.now(),
   };
 }
@@ -44,6 +47,8 @@ export function acceptSave(meta) {
     crew: Number.isFinite(meta.crew) && meta.crew >= 0 ? Math.round(meta.crew) : 0,
     fleet: Number.isFinite(meta.fleet) && meta.fleet >= 0 ? Math.min(3, Math.round(meta.fleet)) : 0,
     log: acceptLog(meta.log),
+    banked: Number.isFinite(meta.banked) && meta.banked >= 0 ? Math.round(meta.banked) : 0,
+    won: Array.isArray(meta.won) ? meta.won.filter((w) => typeof w === 'string').slice(0, 32) : [],
     savedAt: meta.savedAt || 0,
   };
 }

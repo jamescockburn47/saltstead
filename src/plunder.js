@@ -15,12 +15,15 @@ export function canBoard(dist, relSpeed) {
 }
 
 // a merchant's purse: 40–220 doubloons, and roughly a third carry a treasure
-// map in the master's cabin — the map is the hook that points you at the world
+// map in the master's cabin — the map is the hook that points you at the world.
+// mult scales the purse by the ship (merchants.js TYPES.goldMult): an indiaman
+// pays treble, a corvette carries the King's thin pay chest, a derelict is
+// the best salvage in the Atlantic.
 export const MAP_CHANCE = 0.35;
 export const HANDS_CHANCE = 0.34; // fleet.js JOIN_CHANCE — piracy recruits from its victims
-export function lootRoll(seed) {
+export function lootRoll(seed, mult = 1) {
   return {
-    gold: Math.round(40 + u01(seed, 17.3) * 180),
+    gold: Math.round((40 + u01(seed, 17.3) * 180) * mult),
     map: u01(seed, 91.7) < MAP_CHANCE,
     hands: u01(seed, 61.3) < HANDS_CHANCE, // a sailor signs articles
   };

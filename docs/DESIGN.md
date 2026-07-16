@@ -62,7 +62,12 @@ where money is *spent* — taverns (recruit crew, buy rumours/treasure maps), sh
 (upgrades/repairs), hideouts (stash loot). On-foot exploration supports the sea game;
 it never pays directly.
 
-## Sea battles (the design; cannons land in Phase 2b)
+## Sea battles (BUILT — combat.js, verify-combat)
+
+Broadsides on F (R swaps round/chain shot), damage-as-states on both sides,
+navy corvettes that hunt and shoot back, sinking + floating salvage, the
+boarding autobattle for armed ships, foundering-as-jettison (no death, a third
+of the chest), and yard repairs at any haven. The design that got built:
 
 The fight is **positioning, not aiming**. Third-person + low-poly means the skill
 expression is the same one sailing already trains: wind, angle, timing.
@@ -273,6 +278,16 @@ Hope), Port Royal (haven/social hub), Davy Jones' Locker (Mariana Trench endgame
 vault), the 1715 Plate Fleet (real Florida treasure wrecks), El Dorado (Amazon river
 hunt — where shallow draft beats the biggest ship).
 
+**All eight non-haven legends are LIVE** (`src/legendfx.js` zones/anomalies +
+`src/monsters.js` fights, guarded by verify-legendfx and verify-monsters):
+the Triangle scrambles every instrument and drifts derelicts; the Corryvreckan
+slings the rim and shreds the core; the Kraken grips (axes + broadsides + the
+shallow-water escape); the dragon stoops and flees wounded to a lootable crag;
+the Dutchman sails the Cape in storms and can be boarded but never shot; the
+Plate Fleet pays diminishing dives; El Dorado pays once, up the Amazon; and
+Davy Jones' Locker kills the wind and banks gold forever. The legends TABLE
+stays append-only; runtime tuning lives keyed-by-id in legendfx.js.
+
 ## Multiplayer
 
 Reuse the `worldsvc` relay model (rooms → oceans/shards; additive message protocol;
@@ -318,14 +333,14 @@ boarding.
 ## Phases (each gated by verify scripts)
 
 - **Phase 0 — sailing prototype (kill/go gate)**: one ocean, one sloop, wind, waves,
-  walking the moving deck, helm, third-person camera. If sailing isn't fun in
-  isolation, stop and rethink. ← *we are here*
-- **Phase 1 — the world**: Earth coastline tables, streaming + LOD, 3–4 Caribbean
-  ports, open-sea gait.
-- **Phase 2 — the loop**: NPC merchants, cannons, boarding, loot, fencing, first
-  upgrade tier.
-- **Phase 3 — crew and land**: hire/manage crew, brain integration, taverns, rumours,
-  on-foot exploration.
+  walking the moving deck, helm, third-person camera. ✓ DONE
+- **Phase 1 — the world**: Earth coastline tables, streaming + LOD, Caribbean
+  ports, open-sea gait. ✓ DONE
+- **Phase 2 — the loop**: NPC merchants (traders/indiamen/navy/derelicts), cannons,
+  boarding + autobattle, loot, fencing, repairs, the legends live. ✓ DONE except
+  the first upgrade tier ← *we are here: the shipwright is the next rung*
+- **Phase 3 — crew and land**: hire/manage crew ✓ (hire/prizes), brain integration,
+  taverns, rumours, on-foot exploration ✓ (shore leave, digs, the hoard).
 - **Phase 4 — multiplayer**: relay integration, ships as networked entities, co-op
   crewing.
 - **Phase 5 — progression**: the era ladder, notoriety/heat, economy balance.

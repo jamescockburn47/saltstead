@@ -1,8 +1,13 @@
 // verify-merchants: the trade lanes are deterministic (invariant 6), spawn
-// only in honest water, flee a pirate, heave to when stripped, and the active
-// cell walk covers the simulation radius.
-import { cellMerchants, stepMerchant, activeCells, CELL, ACTIVE_R, FLEE_R, CRUISE, PANIC } from '../src/merchants.js';
-import { isLand, worldToLatLon } from '../src/earth.js';
+// only in honest water, carry all three honest types plus the triangle's
+// derelicts, flee a pirate (or HUNT one, if she flies the King's colours),
+// heave to when stripped, and the active cell walk covers the radius.
+import {
+  cellMerchants, stepMerchant, activeCells, zoneDerelicts, CELL, ACTIVE_R,
+  FLEE_R, HUNT_R, CRUISE, PANIC, TYPES,
+} from '../src/merchants.js';
+import { isLand, worldToLatLon, latLonToWorld } from '../src/earth.js';
+import { inZone } from '../src/legendfx.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -10,24 +15,70 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
 // determinism + placement over a spread of open Atlantic cells
 {
   let total = 0;
+  const seen = { trader: 0, indiaman: 0, navy: 0 };
   for (let cx = -8; cx < 0; cx++) {
     for (let cz = -6; cz < 2; cz++) {
       const a = cellMerchants(cx, cz), b = cellMerchants(cx, cz);
       ok(JSON.stringify(a) === JSON.stringify(b), `cell ${cx},${cz} deterministic`);
       for (const m of a) {
         total++;
+        seen[m.type] = (seen[m.type] || 0) + 1;
         const ll = worldToLatLon(m.x, m.z);
         ok(!isLand(ll.lat, ll.lon), `${m.id} spawns at sea`);
         ok(m.x >= cx * CELL && m.x <= (cx + 1) * CELL, `${m.id} stays in its cell`);
+        ok(TYPES[m.type], `${m.id} is a known type (${m.type})`);
       }
     }
   }
-  ok(total > 5, `the lanes are populated (${total} merchants in 64 cells)`);
+  ok(total > 5, `the lanes are populated (${total} ships in 64 cells)`);
+  ok(seen.trader > 0, 'traders work the lanes');
+}
+
+// the wider ocean carries every honest type at roughly the design mix
+{
+  const seen = { trader: 0, indiaman: 0, navy: 0, derelict: 0 };
+  let total = 0;
+  for (let cx = -20; cx < 10; cx++) {
+    for (let cz = -12; cz < 6; cz++) {
+      for (const m of cellMerchants(cx, cz)) { seen[m.type]++; total++; }
+    }
+  }
+  ok(seen.trader > seen.indiaman && seen.indiaman > 0, `indiamen are the rarer prize (${seen.indiaman}/${total})`);
+  ok(seen.navy > 0 && seen.navy < total * 0.25, `the navy patrols but does not own the sea (${seen.navy}/${total})`);
+}
+
+// inside the Bermuda Triangle the lanes go quiet and the derelicts drift
+{
+  const drl = zoneDerelicts();
+  ok(drl.length >= 4, `derelicts drift in the triangle (${drl.length})`);
+  ok(JSON.stringify(drl) === JSON.stringify(zoneDerelicts()), 'the same wrecks every session');
+  for (const m of drl) {
+    const ll = worldToLatLon(m.x, m.z);
+    ok(inZone(ll.lat, ll.lon, 'bermuda-triangle'), `${m.id} drifts inside the zone`);
+    ok(!isLand(ll.lat, ll.lon), `${m.id} floats, not beached`);
+    ok(m.type === 'derelict' && m.speed === 0, `${m.id} is a dead ship`);
+  }
+  // and the ordinary spawn table trades no honest flag through the zone
+  const w = latLonToWorld(25.5, -70);
+  const cx0 = Math.floor(w.x / CELL), cz0 = Math.floor(w.z / CELL);
+  let honest = 0;
+  for (let cx = cx0 - 2; cx <= cx0 + 2; cx++) {
+    for (let cz = cz0 - 2; cz <= cz0 + 2; cz++) {
+      for (const m of cellMerchants(cx, cz)) {
+        const ll = worldToLatLon(m.x, m.z);
+        if (inZone(ll.lat, ll.lon, 'bermuda-triangle') && m.type !== 'derelict') honest++;
+      }
+    }
+  }
+  ok(honest === 0, `nobody trades through it (${honest} honest sails inside)`);
+  const d = { id: 'd', type: 'derelict', x: 0, z: 0, yaw: 0, speed: 0, looted: false, routed: false };
+  for (let i = 0; i < 60; i++) stepMerchant(d, 50, 50, 1 / 30);
+  ok(Math.hypot(d.x, d.z) < 1, 'a derelict never runs — she has no one left to run');
 }
 
 // behaviour: cruise alone, flee a pirate, heave to when stripped
 {
-  const m = { id: 't', x: 0, z: 0, yaw: 0, speed: CRUISE, looted: false };
+  const m = { id: 't', type: 'trader', x: 0, z: 0, yaw: 0, speed: CRUISE, looted: false, routed: false };
   // far pirate: cruise on, course held
   for (let i = 0; i < 100; i++) stepMerchant(m, 99999, 99999, 1 / 30);
   ok(Math.abs(m.speed - CRUISE) < 0.2 && Math.abs(m.yaw) < 1e-9, 'alone she cruises her course');
@@ -51,6 +102,27 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
   ok(m.speed < 0.1, 'stripped, she heaves to');
 }
 
+// the corvette HUNTS: she turns toward the pirate and closes
+{
+  const n = { id: 'n', type: 'navy', x: 0, z: 0, yaw: Math.PI, speed: TYPES.navy.cruise, looted: false, routed: false };
+  const px = 0, pz = HUNT_R * 0.6; // pirate ahead of her stern
+  const d0 = Math.hypot(n.x - px, n.z - pz);
+  for (let i = 0; i < 60 * 30; i++) stepMerchant(n, px, pz, 1 / 30);
+  const d1 = Math.hypot(n.x - px, n.z - pz);
+  ok(d1 < d0, `she CLOSES on the black flag (${d0.toFixed(0)} -> ${d1.toFixed(0)} m)`);
+  ok(n.speed > TYPES.navy.cruise, 'and crowds sail to do it');
+
+  // routed (a lost autobattle), she runs like anyone else
+  const r = { id: 'r', type: 'navy', x: 0, z: 0, yaw: 0, speed: TYPES.navy.cruise, looted: false, routed: true };
+  for (let i = 0; i < 30 * 30; i++) stepMerchant(r, 0, -200, 1 / 30);
+  ok(Math.hypot(r.x - 0, r.z - -200) > 200, 'routed, she opens the range instead');
+
+  // torn sails slow the hunt: battle damage caps her orders
+  const c = { id: 'c', type: 'navy', x: 0, z: 0, yaw: 0, speed: 0, looted: false, routed: false };
+  for (let i = 0; i < 60 * 30; i++) stepMerchant(c, 0, 300, 1 / 30, 0.4);
+  ok(c.speed < TYPES.navy.panic * 0.5, `chain shot slows her (${c.speed.toFixed(1)} m/s)`);
+}
+
 // active cells cover the radius
 {
   const cells = activeCells(100, 100);
@@ -60,5 +132,12 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
   ok(span >= 1, 'radius spans at least a cell');
 }
 
+// the ledger constants hold their design shape
+ok(TYPES.indiaman.goldMult > TYPES.trader.goldMult, 'the indiaman is the payday');
+ok(TYPES.indiaman.cruise < TYPES.trader.cruise, 'and slower for it');
+ok(TYPES.navy.armed && !TYPES.trader.armed, 'only the navy shoots back');
+ok(TYPES.navy.crew > 0, 'boarding a corvette meets a crew');
+ok(PANIC > CRUISE, 'panic beats cruise');
+
 if (failed) { console.error(`verify-merchants: ${failed} FAILED`); process.exit(1); }
-console.log('verify-merchants: OK — lanes deterministic, sea-only spawns, flee/heave-to behaviour sound');
+console.log('verify-merchants: OK — lanes deterministic, four types sound, navy hunts, derelicts drift the triangle');

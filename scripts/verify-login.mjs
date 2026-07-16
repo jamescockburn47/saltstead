@@ -90,6 +90,14 @@ const fakeStorage = () => {
   ok(badMap && badMap.map === null && badMap.gold === 340, 'a mangled map is dropped, not fatal');
   const badGold = acceptSave({ ...meta, gold: -50 });
   ok(badGold && badGold.gold === 0, 'negative gold refused');
+  // the Locker's vault and the won-legends list are additive fields
+  const vault = acceptSave(snapshotSave(ship, 0, { banked: 900, won: ['el-dorado', 'dragons-wales'] }));
+  ok(vault.banked === 900 && vault.won.length === 2 && vault.won[0] === 'el-dorado',
+    'the vault and the won legends survive the round-trip');
+  ok(bare.banked === 0 && bare.won.length === 0, 'a fresh pirate has banked nothing, won nothing');
+  const cheat = acceptSave({ ...snapshotSave(ship, 0), banked: -50, won: [7, 'el-dorado', {}] });
+  ok(cheat.banked === 0 && cheat.won.length === 1, 'a mangled vault empties, mangled legends drop');
+
   const page = { d: 2, w: 'First watch', p: '17\u00b051\u2032N 76\u00b054\u2032W', x: 'Boarded a merchantman' };
   const logged = acceptSave(snapshotSave(ship, 0, { log: [page] }));
   ok(logged.log.length === 1 && logged.log[0].x === page.x,

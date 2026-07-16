@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Saltstead — Phase 0</title>
+  <title>Saltstead</title>
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #0a1622;
       font-family: Georgia, 'Times New Roman', serif; }
@@ -126,7 +126,7 @@
 </head>
 <body>
   <div id="app"></div>
-  <div class="hud" id="title"><h1>SALTSTEAD</h1><small>phase 0 — the sailing prototype</small></div>
+  <div class="hud" id="title"><h1>SALTSTEAD</h1><small>the sea never signed the treaty</small></div>
   <div class="hud" id="panel">
     <div class="label">SPEED</div>
     <div id="speed">0.0 kn</div>
@@ -142,7 +142,11 @@
     <div><span id="crewn">0</span> hands<span id="fleetn" style="opacity:.75"></span></div>
     <div class="label" style="margin-top:8px">WEATHER</div>
     <div id="weather" style="text-transform:capitalize">—</div>
+    <div class="label" style="margin-top:8px">GUNS</div>
+    <div id="guns" style="font-size:13px">READY — round shot</div>
+    <div id="shipdamage" style="display:none; margin-top:8px; color:#d47a6a; font-size:12px; letter-spacing:1px;"></div>
     <div id="gaitbadge" style="display:none; margin-top:10px; color:#8fd6a0; font-size:12px; letter-spacing:1px;"></div>
+    <div id="legendbadge" style="display:none; margin-top:6px; color:#c9a2e8; font-size:12px; letter-spacing:2px;"></div>
   </div>
   <div class="hud" id="winddial">
     <div id="windarrow">⬇</div>
@@ -153,9 +157,11 @@
     <div class="sub">the sea never signed the treaty</div>
     <div class="blurb">A pirate sandbox on the <b>real Earth</b>, drawn entirely by code —
       no assets, nothing to download. Sail a scaled planet under real weather and real
-      stars: board merchantmen, capture prizes for your fleet, dig up buried treasure,
-      and sell the lot in the old pirate havens. Money is made at sea; the land just
-      keeps the secrets. Single-ship prototype — multiplayer is coming.</div>
+      stars: run down merchantmen, trade broadsides with the King's corvettes, capture
+      prizes for your fleet, dig up buried treasure — and chase the legends: the Kraken
+      in the Norwegian deeps, dragons over Snowdonia, the Flying Dutchman rounding the
+      Cape in a storm. Money is made at sea; the land just keeps the secrets.
+      Single-ship prototype — multiplayer is coming.</div>
     <div class="box" id="loginbox">
       <input id="invitecode" placeholder="invite code" autocomplete="off" spellcheck="false">
       <input id="invitename" placeholder="your name" autocomplete="off" maxlength="24">
@@ -217,7 +223,23 @@
       <p>Merchantmen work the coasts — square sails, no flag. Run one down, pull
         <b>alongside</b> (within a couple of boat-lengths, speeds matched) and press
         <kbd>E</kbd> to board. Her purse is yours; about a third carry a <b>treasure
-        map</b>, and sometimes a sailor signs on with you.</p>
+        map</b>, and sometimes a sailor signs on with you. Watch the horizon for the
+        big slow <b>Indiamen</b> — treble the purse — and for the blue-hulled
+        <b>navy corvettes</b>, which hunt pirates and shoot back.</p>
+
+      <h3>THE GUNS</h3>
+      <p>Your broadside fires <b>perpendicular to the hull</b> — there is no aiming,
+        only seamanship: turn the ship until she bears, then <kbd>F</kbd>. Range is a
+        musket-shot or so and closer is better. <kbd>R</kbd> swaps the load:
+        <b>round shot</b> holes the hull and eventually sinks her (most cargo goes
+        down; some floats — sail over the flotsam to hook it aboard);
+        <b>chain shot</b> shreds sails and slows a runner so you can board her whole.
+        Reloading is slow alone and quick with a crew. Damage works both ways: a
+        corvette's iron tears <b>your</b> rig and hull — watch the panel, and if she
+        holes you through, the crew heaves a third of your gold overboard to keep
+        her afloat. The yard at any haven <b>repairs</b> her for coin. Boarding an
+        armed ship is a real fight — the crews decide it by weight of numbers, so
+        count your hands before you leap.</p>
 
       <h3>PRIZES AND YOUR FLEET</h3>
       <p>After boarding, stay alongside and press <kbd>E</kbd> again to put a
@@ -254,11 +276,29 @@
         wildlife navigates too: gulls mean land is near, the albatross means true blue
         water, and a fin in warm shallows means don&rsquo;t swim.</p>
 
+      <h3>THE LEGENDS</h3>
+      <p>Every mark on the world chart is real geography with a story on it, and the
+        stories are <b>live</b>. In the <b>Bermuda Triangle</b> the fog closes in, the
+        instruments lie — position, chart, heading, all of it — and dead ships drift
+        full of cargo; navigate out by the sun. The <b>Corryvreckan whirlpool</b> off
+        Scotland slings you round its rim, but the core will shred your rigging.
+        The <b>Kraken</b> waits in the Norwegian deeps: axes and broadsides cut it
+        loose arm by arm, or run for shallow water where it cannot follow. Dragons
+        nest on <b>Snowdonia</b> — she only comes into gunshot when she stoops on
+        your rig; wound her thrice and follow her ashore to her hoard. The
+        <b>Flying Dutchman</b> rounds the Cape of Good Hope in every storm — iron
+        passes through her, but a bold crew can board her mid-tempest. Dive the
+        <b>1715 Plate Fleet</b> off Florida for Spanish silver. Sail up the Amazon
+        to find <b>El Dorado</b>. And over the deepest water on earth waits
+        <b>Davy Jones&rsquo; Locker</b>: gold consigned there is banked forever.</p>
+
       <h3>THE KEYS</h3>
       <table class="keys">
         <tr><td><kbd>W A S D</kbd></td><td>walk the deck / steer and sheet at the tiller / walk ashore</td></tr>
         <tr><td><kbd>T</kbd></td><td>the tiller — take it from anywhere on deck, press again to hand it back</td></tr>
-        <tr><td><kbd>E</kbd></td><td>the doing key — board, capture, dig, step ashore, put in at port</td></tr>
+        <tr><td><kbd>E</kbd></td><td>the doing key — board, capture, dig, dive, bank, step ashore, put in at port</td></tr>
+        <tr><td><kbd>F</kbd></td><td>fire the broadside (turn the ship until she bears)</td></tr>
+        <tr><td><kbd>R</kbd></td><td>swap the load — round shot / chain shot</td></tr>
         <tr><td><kbd>M</kbd></td><td>world chart</td></tr>
         <tr><td><kbd>N</kbd></td><td>star chart (and a sight, on a clear night)</td></tr>
         <tr><td><kbd>L</kbd></td><td>ship&rsquo;s log</td></tr>
@@ -267,9 +307,8 @@
       </table>
 
       <h3>WHAT&rsquo;S COMING</h3>
-      <p>Cannons and sea battles, the shipwright (bigger and bigger hulls), the
-        legends — dragons nest in Wales, the Bermuda Triangle bends the compass, the
-        Kraken waits in the Norwegian deeps — and multiplayer: every captain their own
+      <p>The shipwright (bigger and bigger hulls, up through the eras), notoriety
+        and navy heat, cargo running — and multiplayer: every captain their own
         ship, meeting on one shared ocean.</p>
     </div>
     <div class="cap"><span>H or Esc — back to the sea</span><button id="helpclose">Close</button></div>
@@ -280,6 +319,7 @@
     <div class="status"></div>
     <button id="portsell">Sell prizes</button>
     <button id="porthire">Sign on a hand</button>
+    <button id="portrepair">Repairs</button>
     <button id="portleave">Put back to sea — E or Esc</button>
   </div></div>
   <div class="hud" id="hint">T — take the tiller · WASD — walk the deck · drag — look · wheel — zoom</div>

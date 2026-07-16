@@ -10,15 +10,16 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 - **[docs/DESIGN.md](docs/DESIGN.md)** — game identity, era-ladder progression, world
   model (1:250 land / gait-compressed ocean), phase plan, named risks.
 - `src/` modules are small and single-purpose; pure logic modules (waves, sailing,
-  shipphysics, shipframe, foam, earth, terraingen, skymath, lightrig, woodgrain,
-  legends, noise) have **no THREE/DOM imports** and each is guarded by a
-  `scripts/verify-*.mjs` check.
+ shipphysics, shipframe, foam, earth, terraingen, skymath, lightrig, woodgrain,
+ legends, legendfx, combat, monsters, merchants, plunder, treasure, fleet, port,
+ noise) have **no THREE/DOM imports** and each is guarded by a
+ `scripts/verify-*.mjs` check.
 - `src/earthdata.js` is **generated** by `scripts/build-earthdata.mjs` from Natural
   Earth (coastlines, rivers, mountain ranges) — never edit by hand.
 
 ## Build & verify
 
-- `npm run verify` — the headless gate (11 checks). **Must be green before deploy.**
+- `npm run verify` — the headless gate (25 checks). **Must be green before deploy.**
   Add a verify script with every feature; prefer testing pure modules headlessly over
   eyeballing.
 - Dev: `npm run dev` (port 5173). `window.saltstead` is the live Game handle

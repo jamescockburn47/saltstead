@@ -29,6 +29,15 @@ ok(canBoard(5, -2), 'closing speed counts by magnitude');
   ok(Math.abs(rate - MAP_CHANCE) < 0.05, `map drop ~${MAP_CHANCE} (saw ${rate.toFixed(2)})`);
 }
 
+// the purse multiplier: the indiaman pays treble, exactly
+{
+  const a = lootRoll(9), b = lootRoll(9, 3);
+  ok(b.gold === Math.round(a.gold * 3) || Math.abs(b.gold - a.gold * 3) <= 1,
+    `mult scales the purse (${a.gold} -> ${b.gold})`);
+  ok(a.map === b.map && a.hands === b.hands, 'the mult buys gold, not maps or hands');
+  ok(lootRoll(9).gold === a.gold, 'the default mult is the old purse');
+}
+
 // the chest always beats the richest single prize
 {
   let cmn = Infinity;
