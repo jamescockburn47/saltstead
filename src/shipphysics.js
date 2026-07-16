@@ -10,6 +10,7 @@ export const SLOOP = {
   drag: 0.35,      // and when losing it (sails luff, sea slows you)
   turnRate: 0.6,   // rad/s at full speed, full rudder
   draft: 0.45,     // hull sits this far below the sampled surface
+  keel: 0.65,      // hull bottom below the group origin (ship.js buildHull)
   length: 9,
   beam: 3.2,
 };
@@ -38,13 +39,20 @@ export function stepShip(s, wind, dt, spec = SLOOP, gait = 1) {
 
 // Buoyancy attitude from four hull sample points on the live wave field.
 // Returns { y, pitch, roll } — pitch/roll in radians, y is hull-centre height.
-export function shipAttitude(s, t, spec = SLOOP) {
+// ground (optional): (x, z) => terrain height. Wherever the sea floor rises
+// past the keel, the hull RIDES it — beached on a slope the bow lifts and the
+// deck takes the sand's tilt, instead of the hull merging into the land.
+export function shipAttitude(s, t, spec = SLOOP, ground = null) {
+  const lift = spec.draft + (spec.keel || 0);
+  const surf = ground
+    ? (x, z) => Math.max(waveHeight(x, z, t), ground(x, z) + lift)
+    : (x, z) => waveHeight(x, z, t);
   const sy = Math.sin(s.yaw), cy = Math.cos(s.yaw);
   const hl = spec.length * 0.42, hb = spec.beam * 0.45;
-  const bow = waveHeight(s.x + sy * hl, s.z + cy * hl, t);
-  const stern = waveHeight(s.x - sy * hl, s.z - cy * hl, t);
-  const star = waveHeight(s.x + cy * hb, s.z - sy * hb, t);
-  const port = waveHeight(s.x - cy * hb, s.z + sy * hb, t);
+  const bow = surf(s.x + sy * hl, s.z + cy * hl);
+  const stern = surf(s.x - sy * hl, s.z - cy * hl);
+  const star = surf(s.x + cy * hb, s.z - sy * hb);
+  const port = surf(s.x - cy * hb, s.z + sy * hb);
   return {
     y: (bow + stern + star + port) / 4 - spec.draft,
     pitch: Math.atan2(stern - bow, hl * 2),

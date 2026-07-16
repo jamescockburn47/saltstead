@@ -190,10 +190,13 @@ class Game {
     const px = this.ship.x, pz = this.ship.z;
     stepShip(this.ship, this.wind, dt, SLOOP, gait);
 
-    // grounding: inshore, the sea floor is real
+    // grounding: inshore, the sea floor is real — checked at the BOW, so the
+    // hull stops when the stem touches, not once the mast is in the dunes
+    const groundAt = (x, z) => { const g = worldToLatLon(x, z); return elevation(g.lat, g.lon); };
     if (this.coastDist < 400) {
-      const ll = worldToLatLon(this.ship.x, this.ship.z);
-      if (elevation(ll.lat, ll.lon) > -0.9) {
+      const bowX = this.ship.x + Math.sin(this.ship.yaw) * SLOOP.length * 0.5;
+      const bowZ = this.ship.z + Math.cos(this.ship.yaw) * SLOOP.length * 0.5;
+      if (groundAt(bowX, bowZ) > -0.9 || groundAt(this.ship.x, this.ship.z) > -0.9) {
         this.ship.x = px; this.ship.z = pz;
         this.ship.speed = 0;
         this.aground = true;
@@ -201,7 +204,8 @@ class Game {
     } else this.aground = false;
 
     this.terrain.update(this.ship.x, this.ship.z);
-    const att = shipAttitude(this.ship, t);
+    // inshore the hull rides the sea floor where it shoals past the keel
+    const att = shipAttitude(this.ship, t, SLOOP, this.coastDist < 400 ? groundAt : null);
     const rel = wrapAngle(this.ship.yaw - this.wind.from);
     const power = sailPower(this.ship.yaw, this.wind.from, this.ship.trim);
     // wind heel: lean away from the wind in proportion to drive — visual only

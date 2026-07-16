@@ -63,6 +63,26 @@ const DT = 1 / 30;
   ok(sawMotion, 'the hull rises and falls');
 }
 
+// grounding attitude: where the floor shoals past the keel the hull RIDES it
+{
+  const s = newShipState(0, 0);
+  const t = 3.7;
+  const afloat = shipAttitude(s, t, SLOOP, () => -30);         // abyss: pure buoyancy
+  const pure = shipAttitude(s, t);
+  ok(Math.abs(afloat.y - pure.y) < 1e-9 && Math.abs(afloat.pitch - pure.pitch) < 1e-9,
+    'deep water: ground sampler changes nothing');
+
+  const beached = shipAttitude(s, t, SLOOP, () => 2);          // high flat sand
+  ok(Math.abs(beached.y - (2 + SLOOP.keel)) < 1e-9,
+    `beached hull sits ON the sand (${beached.y.toFixed(2)} vs ${(2 + SLOOP.keel).toFixed(2)})`);
+  ok(Math.abs(beached.pitch) < 1e-9 && Math.abs(beached.roll) < 1e-9,
+    'flat sand: the deck sits level');
+
+  s.yaw = 0; // bow along +z; slope rising with z lifts the bow
+  const slope = shipAttitude(s, t, SLOOP, (x, z) => 2 + z * 0.3);
+  ok(slope.pitch < -0.15, `beached on a slope the bow lifts (pitch ${slope.pitch.toFixed(2)})`);
+}
+
 // open-sea gait covers ground without touching the dynamics
 {
   const a = newShipState(0, 0), b = newShipState(0, 0);
