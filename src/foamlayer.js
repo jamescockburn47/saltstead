@@ -49,6 +49,12 @@ export class FoamLayer {
     this.fleckCellZ = null;
   }
 
+  // foam takes the ambient light: bright noon foam, faint moonlit foam
+  setLight(l) {
+    this.wakeMesh.material.color.setScalar(0.25 + 0.75 * l);
+    this.fleckMesh.material.opacity = 0.5 * (0.2 + 0.8 * l);
+  }
+
   // emitters: [{ x, z, size }] world-space foam sources (stern, bow)
   update(t, dt, cx, cz, speed, emitters) {
     stepWake(this.wake, dt, speed, emitters);

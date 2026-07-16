@@ -16,6 +16,14 @@ export class TerrainLayer {
     });
     this.chunks = new Map();  // key -> { mesh } | { empty: true }
     this.queue = [];
+    this.shadows = false;
+  }
+
+  setShadows(on) {
+    this.shadows = on;
+    for (const c of this.chunks.values()) {
+      if (c.mesh) { c.mesh.castShadow = on; c.mesh.receiveShadow = on; }
+    }
   }
 
   key(cx, cz) { return `${cx},${cz}`; }
@@ -49,6 +57,8 @@ export class TerrainLayer {
       geo.setIndex(idx);
       geo.computeVertexNormals();
       const mesh = new THREE.Mesh(geo, this.mat);
+      mesh.castShadow = this.shadows;
+      mesh.receiveShadow = this.shadows;
       this.scene.add(mesh);
       this.chunks.set(k, { mesh });
     }

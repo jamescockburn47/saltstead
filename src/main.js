@@ -14,7 +14,8 @@ import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS } from './sailing.js
 import { waveHeight } from './waves.js';
 import { TerrainLayer } from './terrain.js';
 import { Sky } from './sky.js';
-import { DAY_LENGTH } from './skymath.js';
+import { DAY_LENGTH, solarState, lunarState, moonPhase } from './skymath.js';
+import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness } from './lightrig.js';
 import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
 } from './earth.js';
@@ -102,9 +103,48 @@ class Game {
       gait: document.getElementById('gaitbadge'),
     };
 
+    this.applyQuality(localStorage['saltstead-gfx'] === 'plain' ? 'plain' : 'fine');
+
     this.t = 0;
     this.last = performance.now();
     this.renderer.setAnimationLoop(() => this.frame());
+  }
+
+  // Moorstead's two-tier rig (invariant 5): Fine = ACES + PCFSoft shadows +
+  // water glitter/fresnel; Plain = library defaults, amps parked at 0.
+  applyQuality(q) {
+    this.gfxQuality = q;
+    const fine = q === 'fine';
+    const r = this.renderer;
+    r.toneMapping = fine ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+    r.toneMappingExposure = fine ? EXPOSURE_BASE : 1;
+    r.shadowMap.enabled = fine;
+    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    const sun = this.sky.sun;
+    sun.castShadow = fine;
+    if (fine) {
+      // one tight ortho frustum tracking the ship (the Moorstead rig)
+      const s = sun.shadow;
+      s.mapSize.set(2048, 2048);
+      s.camera.left = -60; s.camera.right = 60; s.camera.top = 60; s.camera.bottom = -60;
+      s.camera.near = 0.5; s.camera.far = 400;
+      s.bias = -0.0004; s.normalBias = 0.5;
+      s.camera.updateProjectionMatrix();
+      if (s.map) { s.map.dispose(); s.map = null; }
+    }
+    this.ocean.glitterScale = fine ? 1 : 0;
+    this.ocean.uniforms.uFresnel.value = fine ? 0.45 : 0;
+    this.ocean.mesh.receiveShadow = fine; // the ship's shadow rides the sea
+    this.terrain.setShadows(fine);
+    this.shipGroup.traverse((o) => {
+      if (o.isMesh) { o.castShadow = fine; o.receiveShadow = fine; }
+    });
+    this.scene.traverse((o) => {
+      const m = o.material;
+      if (!m) return;
+      for (const mm of Array.isArray(m) ? m : [m]) mm.needsUpdate = true;
+    });
+    try { localStorage['saltstead-gfx'] = q; } catch { /* private mode */ }
   }
 
   toggleHelm() {
@@ -224,9 +264,21 @@ class Game {
     if (this.camera.position.y < wy + 0.6) this.camera.position.y = wy + 0.6;
     this.camera.lookAt(target);
 
-    this.ocean.update(t, this.ship.x, this.ship.z);
+    // light dynamics: sun/moon glitter corridor, adaptive exposure, lit foam
+    const skyT = t + this.dayStart;
+    const sol = solarState(skyT);
+    const lun = lunarState(skyT);
+    const glit = glitterSource(sol, lun, moonBrightness(moonPhase(skyT)));
     const skyLL = worldToLatLon(this.ship.x, this.ship.z);
-    this.sky.update(t + this.dayStart, skyLL.lat, this.camera.position);
+    this.sky.update(skyT, skyLL.lat, this.camera.position);
+    this.ocean.update(t, this.ship.x, this.ship.z, this.camera.position, glit,
+      this.sky.domeUniforms.uHor.value);
+    this.foam.setLight(Math.min(1, sol.dayness
+      + 0.3 * sol.nightness * moonBrightness(moonPhase(skyT)) * Math.max(0, lun.alt)));
+    if (this.gfxQuality === 'fine') {
+      this.renderer.toneMappingExposure +=
+        (exposureTarget(sol.dayness) - this.renderer.toneMappingExposure) * Math.min(1, dt * 0.4);
+    }
 
     // HUD
     this.hud.speed.textContent = (this.ship.speed * 1.944).toFixed(1) + ' kn';
