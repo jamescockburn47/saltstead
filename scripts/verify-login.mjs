@@ -98,6 +98,15 @@ const fakeStorage = () => {
   const cheat = acceptSave({ ...snapshotSave(ship, 0), banked: -50, won: [7, 'el-dorado', {}] });
   ok(cheat.banked === 0 && cheat.won.length === 1, 'a mangled vault empties, mangled legends drop');
 
+  // the hull rides the save; a mangled hull reads as the sloop's string
+  const brig = acceptSave(snapshotSave(ship, 0, { hull: 'brig' }));
+  ok(brig.hull === 'brig', 'the brig survives the round-trip');
+  ok(bare.hull === 'sloop', 'a fresh pirate sails the sloop');
+  const badHull = acceptSave({ ...snapshotSave(ship, 0), hull: 42 });
+  ok(badHull.hull === 'sloop', 'a mangled hull reads as the sloop');
+  const longHull = acceptSave({ ...snapshotSave(ship, 0), hull: 'x'.repeat(400) });
+  ok(longHull.hull.length <= 16, 'a bloated hull string is trimmed');
+
   const page = { d: 2, w: 'First watch', p: '17\u00b051\u2032N 76\u00b054\u2032W', x: 'Boarded a merchantman' };
   const logged = acceptSave(snapshotSave(ship, 0, { log: [page] }));
   ok(logged.log.length === 1 && logged.log[0].x === page.x,

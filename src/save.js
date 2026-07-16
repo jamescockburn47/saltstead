@@ -8,15 +8,16 @@ const DB = 'saltstead', STORE = 'meta', KEY = 'game';
 import { acceptLog } from './shiplog.js';
 
 // ---- pure ----
-// loot: { gold, map, lootSeed, crew, fleet, log, banked, won } — additive
-// fields, version stays 1 (older saves simply read as a poor pirate with no
-// map, no hands — the sloop sails solo — no prizes, a blank log, nothing in
-// Davy Jones' vault and no legends won)
+// loot: { gold, map, lootSeed, crew, fleet, log, banked, won, hull } —
+// additive fields, version stays 1 (older saves simply read as a poor pirate
+// with no map, no hands — the sloop sails solo — no prizes, a blank log,
+// nothing in Davy Jones' vault, no legends won, and the starting sloop)
 export function snapshotSave(ship, skyT, loot = {}) {
   return {
     version: SAVE_VERSION,
     ship: { x: ship.x, z: ship.z, yaw: ship.yaw, trim: ship.trim },
     skyT,
+    hull: typeof loot.hull === 'string' ? loot.hull : 'sloop',
     gold: loot.gold || 0,
     map: loot.map || null,
     lootSeed: loot.lootSeed || 1,
@@ -41,6 +42,9 @@ export function acceptSave(meta) {
     version: meta.version,
     ship: { x: s.x, z: s.z, yaw: s.yaw, trim: Math.max(0, Math.min(1, s.trim)) },
     skyT: Number.isFinite(meta.skyT) ? meta.skyT : 0,
+    // the hull id is vetted by the shipyard on load (hullById falls back to
+    // the sloop) — the save only promises a short string
+    hull: typeof meta.hull === 'string' ? meta.hull.slice(0, 16) : 'sloop',
     gold: Number.isFinite(meta.gold) && meta.gold >= 0 ? Math.round(meta.gold) : 0,
     map: mapOK ? { seed: m.seed, lat: m.lat, lon: m.lon } : null,
     lootSeed: Number.isFinite(meta.lootSeed) && meta.lootSeed >= 1 ? meta.lootSeed : 1,

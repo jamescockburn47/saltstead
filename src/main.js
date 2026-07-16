@@ -6,12 +6,13 @@
 
 import * as THREE from 'three';
 import { Ocean } from './ocean.js';
-import { buildSloop } from './ship.js';
+import { buildShip } from './ship.js';
 import { buildCaptain } from './captain.js';
 import { isWarden, loadAuth, displayName } from './identity.js';
 import { FoamLayer } from './foamlayer.js';
-import { newShipState, stepShip, shipAttitude, beaches, SLOOP } from './shipphysics.js';
-import { DECK, HELM, clampToDeck, localToWorld } from './shipframe.js';
+import { newShipState, stepShip, shipAttitude, beaches } from './shipphysics.js';
+import { frameFor, clampToDeck, localToWorld } from './shipframe.js';
+import { hullById, nextHull, buyHull } from './shipyard.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
 import { waveHeight } from './waves.js';
 import { TerrainLayer } from './terrain.js';
@@ -35,13 +36,13 @@ import { windProfile, seaStateFor, LiveWeather } from './weather.js';
 import { setSeaState } from './waves.js';
 import { makeEntry, pushEntry, acceptLog } from './shiplog.js';
 import {
-  nearestHaven, inAnchorage, sellFleet, canHire, HAND_COST,
+  nearestHaven, inAnchorage, sellFleet, canHire, HAND_COST, fenceRate,
 } from './port.js';
 import { PortUI } from './portui.js';
 import { canSight, takeSight, sightText } from './navigation.js';
 import { StarChartUI } from './starchartui.js';
 import { LogUI } from './logui.js';
-import { TYPES } from './merchants.js';
+import { TYPES, NAVY_SHOAL } from './merchants.js';
 import {
   GUN_RANGE, reloadTime, beamBearing, inArc, rollHit, newHullState, applyShot,
   speedFactor, isSinking, NAVY_RELOAD, autoBattle, boardingOdds, founderCost,
@@ -129,6 +130,7 @@ class Game {
       if (document.visibilityState === 'hidden') this.persist();
     });
     this.coastDist = COAST_CAP;
+    this.shoalWater = false;
     this.geoClock = 0;
     this.aground = false;
     // other ships at sea ({x, z} world coords) — multiplayer peers and NPC
@@ -161,16 +163,21 @@ class Game {
     this.expTimer = 0;          // the El Dorado expedition clock
     this.monsterFx = new MonsterLayer(this.scene);
     this.legendFx = new LegendLayer(this.scene);
-    this.spec = SLOOP; // the hull you sail — the shipwright will swap this
-    const sloop = buildSloop();
-    this.shipGroup = sloop.group;
+    // the hull you sail — a rung of the shipwright's ladder (shipyard.js),
+    // remembered by the save; the yard at any port swaps it
+    this.hullDef = hullById(save?.hull || 'sloop');
+    this.hullId = this.hullDef.id;
+    this.spec = this.hullDef.spec;
+    this.shipFrame = frameFor(this.spec);
+    const built = buildShip(this.spec, this.hullDef.masts);
+    this.shipGroup = built.group;
     this.shipGroup.rotation.order = 'YXZ';
-    this.setSail = sloop.setSail;
+    this.setSail = built.setSail;
     this.scene.add(this.shipGroup);
 
     this.captain = buildCaptain(isWarden(auth));
     this.cap = { x: 0, z: -2.2, facing: 0, moving: false };
-    this.captain.group.position.set(this.cap.x, DECK.y, this.cap.z);
+    this.captain.group.position.set(this.cap.x, this.shipFrame.deck.y, this.cap.z);
     this.shipGroup.add(this.captain.group);
 
     this.mode = 'walk'; // 'walk' | 'helm'
@@ -230,14 +237,17 @@ class Game {
       fleet: document.getElementById('fleetn'),
       guns: document.getElementById('guns'),
       damage: document.getElementById('shipdamage'),
+      shipname: document.getElementById('shipname'),
     };
+    this.hud.shipname.textContent =
+      `${this.hullDef.name} \u00b7 ${this.hullDef.guns} gun${this.hullDef.guns > 1 ? 's' : ''} a side`;
 
     this.maps = new MapUI();
     this.starchart = new StarChartUI();
     this.logui = new LogUI();
     this.port = null; // { haven, dist } refreshed with the geography
     this.portui = new PortUI(() => this.sellPrizes(), () => this.hireHand(),
-      () => this.repairShip());
+      () => this.repairShip(), () => this.buyShip());
     // the weather-turn and landfall log entries fire on TRANSITIONS
     this.loggedWeather = this.weatherState;
     this.atSea = null; // null until first geography sample settles it
@@ -257,7 +267,11 @@ class Game {
 
     this.t = 0;
     this.last = performance.now();
-    if (!save) this.logEvent('Weighed anchor off Port Royal \u2014 the voyage begins');
+    if (!save) {
+      this.logEvent('Weighed anchor off Port Royal \u2014 the voyage begins');
+      // a fresh captain gets the survival doctrine before the sea does
+      showBriefingFor(this.hullDef);
+    }
     this.renderer.setAnimationLoop(() => this.frame());
   }
 
@@ -266,7 +280,7 @@ class Game {
     saveGame(snapshotSave(this.ship, this.t + this.dayStart, {
       gold: this.gold, map: this.treasureMap, lootSeed: this.lootSeed,
       crew: this.crew, fleet: this.fleet.size(), log: this.log,
-      banked: this.banked, won: this.won,
+      banked: this.banked, won: this.won, hull: this.hullId,
     })).catch(() => {});
   }
 
@@ -280,28 +294,35 @@ class Game {
   }
 
   // ---- port transactions (the plunder economy's first sink) ----
+  refreshPort() {
+    this.portui.refresh(this.gold, this.crew, this.fleet.size(), this.hull,
+      this.hullId, this.port.haven);
+  }
+
   sellPrizes() {
     const n = this.fleet.size();
     if (!n) return;
-    const sale = sellFleet(n, this.crew);
+    const rate = fenceRate(this.port.haven);
+    const sale = sellFleet(n, this.crew, this.hullDef.berths, rate);
     this.gold += sale.gold;
     this.crew = sale.crewBack;
     this.fleet.clear();
     this.say(`${sale.sold} prize${sale.sold > 1 ? 's' : ''} sold \u2014 `
-      + `${sale.gold} doubloons; the prize crews come back aboard`, 7);
+      + `${sale.gold} doubloons${rate < 1 ? ' (the harbourmaster took his cut)' : ''}; `
+      + 'the prize crews come back aboard', 7);
     this.logEvent(`Sold ${sale.sold} prize${sale.sold > 1 ? 's' : ''} at `
       + `${this.port.haven.name} for ${sale.gold} doubloons`);
-    this.portui.refresh(this.gold, this.crew, 0, this.hull);
+    this.refreshPort();
     this.persist();
   }
 
   hireHand() {
-    if (!canHire(this.gold, this.crew)) return;
+    if (!canHire(this.gold, this.crew, this.hullDef.berths)) return;
     this.gold -= HAND_COST;
     this.crew++;
     this.say(`A hand signs articles \u2014 ${this.crew} aboard`, 4);
     this.logEvent(`Signed on a hand at ${this.port.haven.name} (${HAND_COST} doubloons)`);
-    this.portui.refresh(this.gold, this.crew, this.fleet.size(), this.hull);
+    this.refreshPort();
     this.persist();
   }
 
@@ -313,13 +334,50 @@ class Game {
     this.hull.rig = 1; this.hull.hull = 1;
     this.say(`The yard makes her whole again \u2014 ${cost} doubloons`, 5);
     this.logEvent(`Repaired at ${this.port.haven.name} (${cost} doubloons)`);
-    this.portui.refresh(this.gold, this.crew, this.fleet.size(), this.hull);
+    this.refreshPort();
     this.persist();
+  }
+
+  // the shipwright: the next rung of the ladder, bought with the chest
+  buyShip() {
+    const deal = buyHull(this.gold, this.hullId);
+    if (!deal) return;
+    const def = hullById(deal.hull);
+    this.gold = deal.gold;
+    this.setHull(def);
+    this.hull.rig = 1; this.hull.hull = 1; // she comes off the stocks whole
+    this.say(`The yard builds you a ${def.name.toUpperCase()} \u2014 ${deal.paid} doubloons. `
+      + 'She smells of fresh oakum and tar.', 8);
+    this.logEvent(`The shipwright at ${this.port.haven.name} built a ${def.name} `
+      + `(${deal.paid} doubloons)`);
+    this.refreshPort();
+    this.persist();
+    showBriefingFor(def);
+  }
+
+  // swap the hull under the captain: spec, frame, and the visible ship
+  setHull(def) {
+    this.hullDef = def;
+    this.hullId = def.id;
+    this.spec = def.spec;
+    this.shipFrame = frameFor(def.spec);
+    this.scene.remove(this.shipGroup);
+    const built = buildShip(def.spec, def.masts);
+    this.shipGroup = built.group;
+    this.shipGroup.rotation.order = 'YXZ';
+    this.setSail = built.setSail;
+    this.scene.add(this.shipGroup);
+    if (this.mode !== 'ashore') this.shipGroup.add(this.captain.group);
+    const p = clampToDeck(this.cap.x, this.cap.z, 0.2, this.shipFrame.deck);
+    this.cap.x = p.x; this.cap.z = p.z;
+    this.hud.shipname.textContent =
+      `${def.name} \u00b7 ${def.guns} gun${def.guns > 1 ? 's' : ''} a side`;
+    this.applyQuality(this.gfxQuality); // shadows onto the new meshes
   }
 
   putIn() {
     this.portui.show(this.port.haven);
-    this.portui.refresh(this.gold, this.crew, this.fleet.size(), this.hull);
+    this.refreshPort();
     this.logEvent(`Put in at ${this.port.haven.name}`);
   }
 
@@ -386,9 +444,9 @@ class Game {
     if (this.mode === 'helm') { this.mode = 'walk'; this.cam.targetDist = 8; return; }
     if (this.mode !== 'walk') return; // ashore: the tiller is back on the ship
     this.mode = 'helm';
-    this.cap.x = HELM.x; this.cap.z = HELM.z + 0.6;
+    this.cap.x = this.shipFrame.helm.x; this.cap.z = this.shipFrame.helm.z + 0.6;
     this.cap.facing = 0; // face the bow
-    this.cam.targetDist = 19;
+    this.cam.targetDist = 10 + this.spec.length; // a longer hull needs a longer look
   }
 
   // E is the DOING key — board, capture, dig, dive, bank, step ashore, put
@@ -436,10 +494,13 @@ class Game {
       : 'CHAIN SHOT loaded \u2014 tear her rig, slow her', 4);
   }
 
-  // world position of the firing side's rail, for the theatre
-  muzzlePos(side) {
-    const m = localToWorld(this.ship, side * 1.5, 0, 0.5);
-    return { x: m.x, y: this.shipGroup.position.y + 1.4, z: m.z };
+  // world position of the firing side's rail, for the theatre; slot spaces
+  // the guns down the rail on hulls that mount more than one a side
+  muzzlePos(side, slot = 0) {
+    const D = this.shipFrame.deck;
+    const m = localToWorld(this.ship, side * (D.maxX - 0.05), 0,
+      0.5 * this.shipFrame.scale - slot * 2.4 * this.shipFrame.scale);
+    return { x: m.x, y: this.shipGroup.position.y + D.y + 0.25, z: m.z };
   }
 
   fireGuns() {
@@ -507,31 +568,44 @@ class Game {
       return;
     }
     this.gunCool = reloadTime(this.crew);
-    this.shotSeed++;
     if (target.ghost) {
+      this.shotSeed++;
       this.combatFx.fire(this.muzzlePos(b.side),
         { x: this.ship.x + target.dx, z: this.ship.z + target.dz }, true);
       this.say('The broadside passes CLEAN THROUGH her \u2014 iron means nothing to the dead. Board her.', 6);
       return;
     }
-    const hit = rollHit(this.shotSeed, target.dist);
-    const aim = {
-      x: target.e.m.x + (hit ? 0 : (this.shotSeed % 2 ? 18 : -14)),
-      z: target.e.m.z + (hit ? 0 : (this.shotSeed % 3 ? 12 : -16)),
-    };
-    this.combatFx.fire(this.muzzlePos(b.side), aim, !hit);
-    if (!hit) { this.say('Short \u2014 the sea takes the ball', 3); return; }
-    const r = this.merchants.applyShotTo(target.id, this.shotKind);
-    if (!r) return;
-    if (r.sinking) {
+    // the whole broadside goes at once: every gun on the bearing side rolls
+    // its own ball (the shipwright's ladder is felt right here)
+    let hits = 0, sank = false, lastDmg = null;
+    for (let g = 0; g < this.hullDef.guns && !sank; g++) {
+      this.shotSeed++;
+      const hit = rollHit(this.shotSeed, target.dist);
+      const aim = {
+        x: target.e.m.x + (hit ? 0 : (this.shotSeed % 2 ? 18 : -14)),
+        z: target.e.m.z + (hit ? 0 : (this.shotSeed % 3 ? 12 : -16)),
+      };
+      this.combatFx.fire(this.muzzlePos(b.side, g), aim, !hit);
+      if (!hit) continue;
+      const r = this.merchants.applyShotTo(target.id, this.shotKind);
+      if (!r) break;
+      hits++;
+      lastDmg = r.dmg;
+      if (r.sinking) sank = true;
+    }
+    if (sank) {
       this.say(target.e.m.looted
         ? 'She goes down by the stern \u2014 an empty hull for the fishes'
         : 'HOLED THROUGH \u2014 she\u2019s going down! Most of her cargo goes with her\u2026', 6);
       this.logEvent('Sank her with round shot');
+    } else if (!hits) {
+      this.say(this.hullDef.guns > 1 ? 'Short \u2014 the sea takes every ball' : 'Short \u2014 the sea takes the ball', 3);
     } else if (this.shotKind === 'chain') {
-      this.say(`Chain tears through her rig \u2014 sails in ribbons (rig ${(r.dmg.rig * 100).toFixed(0)}%)`, 4);
+      this.say(`Chain tears through her rig \u2014 sails in ribbons (rig ${(lastDmg.rig * 100).toFixed(0)}%)`
+        + (hits > 1 ? ` \u2014 ${hits} balls told` : ''), 4);
     } else {
-      this.say(`A hit on the waterline (hull ${(r.dmg.hull * 100).toFixed(0)}%)`, 4);
+      this.say(`A hit on the waterline (hull ${(lastDmg.hull * 100).toFixed(0)}%)`
+        + (hits > 1 ? ` \u2014 ${hits} balls told` : ''), 4);
     }
   }
 
@@ -752,6 +826,9 @@ class Game {
       const ll = worldToLatLon(this.ship.x, this.ship.z);
       this.coastDist = coastDistGame(ll.lat, ll.lon);
       this.port = nearestHaven(ll.lat, ll.lon);
+      // the sloop's bolt-hole: water too thin for a warship's keel — a
+      // hunting corvette breaks off rather than follow you over the shoal
+      this.shoalWater = elevation(ll.lat, ll.lon) > NAVY_SHOAL;
       // the legends layer wakes by geography: which zone are we inside?
       const wasZone = this.zone && this.zone.legend.id;
       this.zone = legendAt(ll.lat, ll.lon);
@@ -771,7 +848,8 @@ class Game {
       }
     }
     // the trade lanes live: merchants stream, sail, flee, and count as contacts
-    this.merchants.update(t, dt, this.ship.x, this.ship.z, this.wind.from);
+    this.merchants.update(t, dt, this.ship.x, this.ship.z, this.wind.from,
+      this.shoalWater);
 
     // corvettes in range work their guns: the King's navy shoots FIRST
     {
@@ -1055,8 +1133,8 @@ class Game {
     this.setSail(this.ship.yaw, this.ship.trim, this.wind.from, power);
 
     // wake astern + bow-wave foam, world-anchored so the ship leaves them behind
-    const stern = localToWorld(this.ship, 0, 0, DECK.minZ - 0.5);
-    const bow = localToWorld(this.ship, 0, 0, DECK.maxZ + 0.9);
+    const stern = localToWorld(this.ship, 0, 0, this.shipFrame.deck.minZ - 0.5);
+    const bow = localToWorld(this.ship, 0, 0, this.shipFrame.deck.maxZ + 0.9);
     this.foam.update(t, dt, this.ship.x, this.ship.z, this.ship.speed,
       [{ x: stern.x, z: stern.z, size: 1.7 }, { x: bow.x, z: bow.z, size: 0.8 }]);
 
@@ -1085,7 +1163,8 @@ class Game {
       // world direction -> ship-local (yaw only)
       const s = Math.sin(this.ship.yaw), c = Math.cos(this.ship.yaw);
       const lx = dir.x * c - dir.z * s, lz = dir.x * s + dir.z * c;
-      const p = clampToDeck(this.cap.x + lx * 2.6 * dt, this.cap.z + lz * 2.6 * dt);
+      const p = clampToDeck(this.cap.x + lx * 2.6 * dt, this.cap.z + lz * 2.6 * dt,
+        0.2, this.shipFrame.deck);
       this.cap.x = p.x; this.cap.z = p.z;
       this.cap.facing = Math.atan2(lx, lz);
       this.cap.moving = true;
@@ -1109,7 +1188,7 @@ class Game {
         this.shore.x, Math.max(elevation(sll.lat, sll.lon), -0.3), this.shore.z);
       this.captain.group.rotation.y = this.shore.facing;
     } else {
-      this.captain.group.position.set(this.cap.x, DECK.y, this.cap.z);
+      this.captain.group.position.set(this.cap.x, this.shipFrame.deck.y, this.cap.z);
       this.captain.group.rotation.y = this.cap.facing;
     }
     this.captain.animate(dt, this.cap.moving);
@@ -1118,7 +1197,7 @@ class Game {
     this.cam.dist += (this.cam.targetDist - this.cam.dist) * Math.min(1, dt * 4);
     const target = new THREE.Vector3();
     if (this.mode === 'helm') {
-      target.set(this.ship.x, att.y + 2.5, this.ship.z);
+      target.set(this.ship.x, att.y + this.shipFrame.deck.y + 1.35, this.ship.z);
     } else {
       this.captain.group.getWorldPosition(target); target.y += 1.0;
     }
@@ -1323,6 +1402,32 @@ document.getElementById('btnhow').addEventListener('click', () => showHelp(true)
 document.getElementById('helpbtn').addEventListener('click', () => showHelp(true));
 document.getElementById('helpclose').addEventListener('click', () => showHelp(false));
 
+// the captain's briefing — the survival doctrine for the hull you sail
+// (shipyard.js copy). Pops on a fresh voyage and on every new hull; the help
+// book carries a button to read it again.
+const briefWrap = document.getElementById('briefing');
+const briefOpen = () => briefWrap.style.display === 'flex';
+function showBriefingFor(def) {
+  document.getElementById('briefingsub').textContent =
+    `${def.name.toUpperCase()} \u2014 ${def.pitch}`;
+  const list = document.getElementById('briefingpoints');
+  list.innerHTML = '';
+  for (const p of def.briefing) {
+    const li = document.createElement('li');
+    li.textContent = p;
+    list.appendChild(li);
+  }
+  briefWrap.style.display = 'flex';
+}
+document.getElementById('briefingclose').addEventListener('click', () => {
+  briefWrap.style.display = 'none';
+});
+document.getElementById('helpbriefing').addEventListener('click', () => {
+  showHelp(false);
+  const g = window.saltstead;
+  showBriefingFor(g ? g.hullDef : hullById('sloop'));
+});
+
 // feedback & bugs — the harbourmaster's ledger takes reports from the title
 // screen and mid-voyage alike (the help book carries the in-game button)
 const fbWrap = document.getElementById('feedback');
@@ -1363,9 +1468,10 @@ document.getElementById('fbsend').addEventListener('click', async () => {
 
 addEventListener('keydown', (e) => {
   if (e.repeat || typingInField()) return;
-  if (e.code === 'KeyH' && !fbOpen()) showHelp(!helpOpen());
+  if (e.code === 'KeyH' && !fbOpen() && !briefOpen()) showHelp(!helpOpen());
   if (e.code === 'Escape') {
     if (fbOpen()) showFeedback(false);
+    else if (briefOpen()) briefWrap.style.display = 'none';
     else if (helpOpen()) showHelp(false);
   }
 });

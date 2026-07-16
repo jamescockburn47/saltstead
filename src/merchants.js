@@ -103,17 +103,30 @@ export function zoneDerelicts() {
 
 const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
+// water shallower than this (terrain elevation above it) is corvette-proof:
+// her deep keel dare not follow where a beaching sloop can run. The escape
+// band the sloop's briefing promises (shipyard.js) lives on this number.
+export const NAVY_SHOAL = -1.0;
+
 // mutates and returns m. px/pz: the pirate. speedMult: battle damage
 // (combat.js speedFactor) — torn sails slow her whatever her orders are.
-// Deterministic given inputs.
-export function stepMerchant(m, px, pz, dt, speedMult = 1) {
+// shoal: the PIRATE sits in water too thin for a warship (caller samples the
+// terrain against NAVY_SHOAL) — a hunting corvette stands off rather than
+// ground herself. Deterministic given inputs.
+export function stepMerchant(m, px, pz, dt, speedMult = 1, shoal = false) {
   const spec = TYPES[m.type] || TYPES.trader;
   if (m.looted || m.type === 'derelict') {
     m.speed += (0 - m.speed) * Math.min(1, dt * 0.8); // strike sail, heave to
   } else {
     const d = Math.hypot(px - m.x, pz - m.z);
-    const hunts = spec.armed && !m.routed;
-    if (hunts && d < HUNT_R) {
+    const hunts = spec.armed && !m.routed && !shoal;
+    if (spec.armed && !m.routed && shoal && d < HUNT_R) {
+      // the chase ends at the shoal line: she bears away and stands off
+      const away = Math.atan2(m.x - px, m.z - pz);
+      const err = wrapPi(away - m.yaw);
+      m.yaw += Math.max(-TURN * dt, Math.min(TURN * dt, err));
+      m.speed += (spec.cruise * speedMult - m.speed) * Math.min(1, dt * 0.5);
+    } else if (hunts && d < HUNT_R) {
       // the corvette turns TOWARD the black flag and crowds sail
       const at = Math.atan2(px - m.x, pz - m.z);
       const err = wrapPi(at - m.yaw);

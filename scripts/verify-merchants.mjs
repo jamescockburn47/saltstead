@@ -4,10 +4,11 @@
 // heave to when stripped, and the active cell walk covers the radius.
 import {
   cellMerchants, stepMerchant, activeCells, zoneDerelicts, CELL, ACTIVE_R,
-  FLEE_R, HUNT_R, CRUISE, PANIC, TYPES,
+  FLEE_R, HUNT_R, CRUISE, PANIC, TYPES, NAVY_SHOAL,
 } from '../src/merchants.js';
 import { isLand, worldToLatLon, latLonToWorld } from '../src/earth.js';
 import { inZone } from '../src/legendfx.js';
+import { SLOOP } from '../src/shipphysics.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -121,7 +122,24 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
   const c = { id: 'c', type: 'navy', x: 0, z: 0, yaw: 0, speed: 0, looted: false, routed: false };
   for (let i = 0; i < 60 * 30; i++) stepMerchant(c, 0, 300, 1 / 30, 0.4);
   ok(c.speed < TYPES.navy.panic * 0.5, `chain shot slows her (${c.speed.toFixed(1)} m/s)`);
+
+  // the shoal line ends the chase: a pirate in thin water is a pirate she
+  // cannot reach — she bears away instead of grounding her keel after him
+  const s = { id: 's', type: 'navy', x: 0, z: 0, yaw: 0, speed: TYPES.navy.cruise, looted: false, routed: false };
+  const sd0 = Math.hypot(s.x - 0, s.z - 400);
+  for (let i = 0; i < 60 * 30; i++) stepMerchant(s, 0, 400, 1 / 30, 1, true);
+  const sd1 = Math.hypot(s.x - 0, s.z - 400);
+  ok(sd1 > sd0, `over the shoal she breaks off (${sd0.toFixed(0)} -> ${sd1.toFixed(0)} m)`);
+  ok(NAVY_SHOAL < 0, 'the shoal line is below the waterline');
 }
+
+// the early-game doctrine holds in the numbers: a well-sailed sloop OUTRUNS
+// the hunt (speed is her armour — the sloop briefing in shipyard.js is a
+// promise, and this is the promise kept)
+ok(SLOOP.maxSpeed > TYPES.navy.panic + 1.5,
+  `the sloop outruns a crowding corvette (${SLOOP.maxSpeed} vs ${TYPES.navy.panic} m/s)`);
+ok(SLOOP.maxSpeed > TYPES.trader.panic,
+  'and catches every honest sail on the lanes');
 
 // active cells cover the radius
 {

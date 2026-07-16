@@ -9,6 +9,10 @@
 
 import { globalChartPixels, localChartPixels, chartXY } from './chart.js';
 import { LEGENDS } from './legends.js';
+import { PORTS } from './ports.js';
+
+// every mark a chart carries: the legends, then the world's honest dockyards
+const MARKS = LEGENDS.concat(PORTS);
 
 const INK = '#3a2c1c', BLOOD = '#8c2f22';
 const LOCAL_SPAN = 9;      // degrees across the minimap window
@@ -40,6 +44,8 @@ function drawLegend(ctx, x, y, kind) {
   ctx.strokeStyle = INK; ctx.fillStyle = INK; ctx.lineWidth = 1.5;
   if (kind === 'haven') {                         // anchor dot
     ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+  } else if (kind === 'dockyard') {               // open ring: an honest port
+    ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.stroke();
   } else {                                        // X marks the spot
     ctx.beginPath();
     ctx.moveTo(x - 3, y - 3); ctx.lineTo(x + 3, y + 3);
@@ -100,7 +106,7 @@ export class MapUI {
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.localBase, 0, 0, S, S);
     const k = S / this.localView.w;
-    for (const L of LEGENDS) {
+    for (const L of MARKS) {
       const p = chartXY(L.lat, L.lon, this.localView);
       if (p.x >= 0 && p.x < LOCAL_N && p.y >= 0 && p.y < LOCAL_N)
         drawLegend(ctx, p.x * k, p.y * k, L.kind);
@@ -120,12 +126,15 @@ export class MapUI {
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.worldBase, 0, 0, W, H);
     const view = { w: W, h: H };
-    ctx.font = '11px Georgia';
-    for (const L of LEGENDS) {
+    for (const L of MARKS) {
       const p = chartXY(L.lat, L.lon, view);
       drawLegend(ctx, p.x, p.y, L.kind);
       ctx.fillStyle = INK;
+      // dockyards mark quietly; the legends get the big ink
+      ctx.font = L.kind === 'dockyard' ? '9px Georgia' : '11px Georgia';
+      if (L.kind === 'dockyard') ctx.globalAlpha = 0.75;
       ctx.fillText(L.name, p.x + 6, p.y + 3);
+      ctx.globalAlpha = 1;
     }
     if (this.digSite) {
       const p = chartXY(this.digSite.lat, this.digSite.lon, view);

@@ -1,7 +1,8 @@
 // verify-shipframe: the moving-deck frame maths (DESIGN.md risk 1).
 // Local<->world must round-trip exactly, the deck clamp must hold, and the
 // helm must be a reachable spot ON the deck.
-import { DECK, HELM, localToWorld, worldToLocal, clampToDeck, nearHelm } from '../src/shipframe.js';
+import { DECK, HELM, frameFor, localToWorld, worldToLocal, clampToDeck, nearHelm } from '../src/shipframe.js';
+import { SLOOP, BRIG } from '../src/shipphysics.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -36,6 +37,24 @@ ok(HELM.x >= DECK.minX && HELM.x <= DECK.maxX && HELM.z >= DECK.minZ && HELM.z <
 ok(nearHelm(HELM.x, HELM.z), 'standing at the helm counts');
 ok(nearHelm(HELM.x + 1.2, HELM.z), 'a stride away still counts');
 ok(!nearHelm(0, DECK.maxZ - 0.3), 'the bow is not the helm');
+
+// frameFor: the sloop's frame IS the constants; a bigger hull scales true
+{
+  const s9 = frameFor(SLOOP);
+  ok(['minX', 'maxX', 'minZ', 'maxZ', 'y'].every((k) => Math.abs(s9.deck[k] - DECK[k]) < 1e-12),
+    'frameFor(SLOOP) reproduces DECK exactly');
+  ok(Math.abs(s9.helm.z - HELM.z) < 1e-12 && s9.scale === 1, 'and HELM, at unit scale');
+  const b = frameFor(BRIG);
+  const k = BRIG.length / SLOOP.length;
+  ok(Math.abs(b.deck.maxZ - DECK.maxZ * k) < 1e-9, 'the brig\'s deck scales with her length');
+  ok(b.deck.y > DECK.y, 'her deck stands higher off the water');
+  ok(b.helm.z > b.deck.minZ && b.helm.z < b.deck.maxZ, 'her helm still stands on her own deck');
+  // the clamp and the helm test honour the bigger frame
+  const p = clampToDeck(99, -99, 0.2, b.deck);
+  ok(p.x === b.deck.maxX - 0.2 && p.z === b.deck.minZ + 0.2, 'the clamp walks the brig\'s deck');
+  ok(nearHelm(b.helm.x, b.helm.z, 1.5, b.helm), 'standing at the brig\'s helm counts');
+  ok(!nearHelm(0, b.deck.maxZ - 0.3, 1.5, b.helm), 'her bow is not her helm');
+}
 
 if (failed) { console.error(`verify-shipframe: ${failed} FAILED`); process.exit(1); }
 console.log('verify-shipframe: OK — frame round-trips, deck clamp holds, helm reachable');

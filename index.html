@@ -123,6 +123,25 @@
     #help .cap button { background: none; border: 1px solid rgba(58,44,28,.5);
       color: #3a2c1c; padding: 5px 14px; font: inherit; font-size: 12px;
       border-radius: 3px; cursor: pointer; }
+    #briefing { position: fixed; inset: 0; display: none; align-items: center;
+      justify-content: center; background: rgba(8,14,20,.82); z-index: 35; }
+    #briefing .book { width: min(640px, 94vw); max-height: 84vh; display: flex;
+      flex-direction: column; background: #efe6cf; color: #3a2c1c;
+      border: 2px solid rgba(58,44,28,.9); border-radius: 4px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.6); }
+    #briefing h2 { margin: 0; padding: 14px 26px 8px; font-weight: normal;
+      letter-spacing: 3px; font-size: 18px; border-bottom: 1px solid rgba(58,44,28,.35); }
+    #briefingsub { padding: 10px 26px 0; font-size: 13px; font-style: italic; opacity: .8; }
+    #briefingpoints { overflow-y: auto; margin: 8px 0 4px; padding: 0 26px 8px 44px;
+      font-size: 13.5px; line-height: 1.7; }
+    #briefingpoints li { margin: 8px 0; }
+    #briefing .cap { padding: 8px 26px 12px; font-size: 12px; opacity: .75;
+      letter-spacing: 1px; border-top: 1px solid rgba(58,44,28,.35);
+      display: flex; justify-content: space-between; align-items: center; }
+    #briefing .cap button { background: rgba(58,44,28,.08); border: 1px solid rgba(58,44,28,.55);
+      color: #3a2c1c; padding: 6px 18px; font: inherit; font-size: 13px;
+      border-radius: 3px; cursor: pointer; }
+    #briefing .cap button:hover { background: rgba(58,44,28,.16); }
     #feedback { position: fixed; inset: 0; display: none; align-items: center;
       justify-content: center; background: rgba(8,14,20,.78); z-index: 40; }
     #feedback .house { width: min(460px, 92vw); display: flex; flex-direction: column;
@@ -161,6 +180,8 @@
     <div id="latlon">—</div>
     <div class="label" style="margin-top:8px">DOUBLOONS</div>
     <div id="gold" style="color:#e8c46a">0</div>
+    <div class="label" style="margin-top:8px">SHIP</div>
+    <div id="shipname" style="font-size:13px">Sloop</div>
     <div class="label" style="margin-top:8px">CREW</div>
     <div><span id="crewn">0</span> hands<span id="fleetn" style="opacity:.75"></span></div>
     <div class="label" style="margin-top:8px">WEATHER</div>
@@ -261,9 +282,12 @@
         Reloading is slow alone and quick with a crew. Damage works both ways: a
         corvette's iron tears <b>your</b> rig and hull — watch the panel, and if she
         holes you through, the crew heaves a third of your gold overboard to keep
-        her afloat. The yard at any haven <b>repairs</b> her for coin. Boarding an
+        her afloat. The yard at any port <b>repairs</b> her for coin. Boarding an
         armed ship is a real fight — the crews decide it by weight of numbers, so
-        count your hands before you leap.</p>
+        count your hands before you leap. And when you are out-gunned (in a sloop,
+        you are): <b>run</b>. A well-trimmed sloop outruns any corvette afloat, and
+        <b>shallow water ends every chase</b> — a warship's keel dare not follow
+        where yours can go.</p>
 
       <h3>PRIZES AND YOUR FLEET</h3>
       <p>After boarding, stay alongside and press <kbd>E</kbd> again to put a
@@ -271,15 +295,31 @@
         falls in astern and sails with you, up to three prizes in column. Prizes are
         worth far more than their purses — if you have the hands, take the ship.</p>
 
-      <h3>PORTS</h3>
-      <p>Four havens fly no colours: <b>Port Royal</b>, <b>Nassau</b>, <b>Tortuga</b>,
-        and <b>&Icirc;le Sainte-Marie</b> off Madagascar. Arriving is simple: <b>run her
-        right up the beach</b> — the sloop draws so little the bow takes the sand and
-        she stops — and press <kbd>E</kbd> to put in. (Bigger hulls draw too much:
-        they fetch up on the shoal offshore and <kbd>E</kbd> sends the longboat in —
-        the game tells you when.) There you
-        <b>sell your prizes</b> (the prize crews come back aboard) and <b>sign on
-        hands</b> at the tavern. Gold buys crew, crew takes prizes: that is the game.</p>
+      <h3>PORTS — A WORLD OF THEM</h3>
+      <p>Two kinds of harbour work for you. Four pirate <b>havens</b> fly no colours —
+        <b>Port Royal</b>, <b>Nassau</b>, <b>Tortuga</b>, and <b>&Icirc;le
+        Sainte-Marie</b> off Madagascar — and they <b>fence prizes at full price</b>,
+        no questions asked. Beyond them, <b>dockyards ring the whole world</b>:
+        Havana, Lisbon, Cape Town, Bombay, Canton, Acapulco, Rio and more (small
+        anchors on the chart). Every one of them <b>repairs</b>, <b>signs on
+        hands</b>, and keeps a <b>shipwright</b> — so a voyage never has to beat
+        back to the Caribbean for a new topmast. Honest ports ask questions,
+        though: a prize fetches only half there.</p>
+      <p>Arriving is simple: <b>run her right up the beach</b> — the sloop draws so
+        little the bow takes the sand and she stops — and press <kbd>E</kbd> to put
+        in. (Bigger hulls draw too much: they fetch up on the shoal offshore and
+        <kbd>E</kbd> sends the longboat in — the game tells you when.) Gold buys
+        crew, crew takes prizes: that is the game.</p>
+
+      <h3>THE SHIPWRIGHT'S LADDER</h3>
+      <p>You start in a <b>sloop</b>: one gun a side, twelve berths, the fastest and
+        shallowest thing afloat. She is <b>not a warship</b> — she is a predator of
+        traders and a keeper of secrets. Survive, get rich, and any port's
+        shipwright will build you up the ladder: the <b>brig</b> carries two guns a
+        side, twenty berths, and more raw speed — but she turns like a barn door
+        and <b>draws too much to beach</b>. Every hull changes how you survive, and
+        the <b>Captain's Briefing</b> (button below, and it pops whenever you take a
+        new hull to sea) tells you exactly how to stay alive in yours.</p>
 
       <h3>TREASURE</h3>
       <p>A looted map inks an <b>X on your charts</b>. Sail within reach of the X
@@ -336,8 +376,16 @@
         ship, meeting on one shared ocean.</p>
     </div>
     <div class="cap"><span>H or Esc — back to the sea</span>
-      <span><button id="helpfeedback">Feedback &amp; bugs</button>
+      <span><button id="helpbriefing">Captain&rsquo;s briefing</button>
+      <button id="helpfeedback">Feedback &amp; bugs</button>
       <button id="helpclose">Close</button></span></div>
+  </div></div>
+  <div id="briefing"><div class="book">
+    <h2>THE CAPTAIN&rsquo;S BRIEFING</h2>
+    <div id="briefingsub"></div>
+    <ul id="briefingpoints"></ul>
+    <div class="cap"><span>Read it twice — the sea won&rsquo;t</span>
+      <button id="briefingclose">To the sea</button></div>
   </div></div>
   <div id="feedback"><div class="house">
     <h2>FEEDBACK &amp; BUGS</h2>
@@ -363,6 +411,7 @@
     <button id="portsell">Sell prizes</button>
     <button id="porthire">Sign on a hand</button>
     <button id="portrepair">Repairs</button>
+    <button id="portship">The shipwright</button>
     <button id="portleave">Put back to sea — E or Esc</button>
   </div></div>
   <div class="hud" id="hint">T — take the tiller · WASD — walk the deck · drag — look · wheel — zoom</div>

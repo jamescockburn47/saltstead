@@ -175,10 +175,23 @@ V1 is two transactions, because the loop needs a drain before it needs a shop:
 - **Sign on hands** — the tavern trades gold for crew, which is the currency of
   capture. Gold -> hands -> prizes -> gold: the loop closes.
 
-Later, same door: the shipwright (bigger hulls — THE progression purchase),
-repairs, victualling, rumours. Havens are legends rows (append-only): Port
-Royal, Nassau, Tortuga, Île Sainte-Marie — real pirate geography, spread so
-every ocean has a door.
+The door has since widened. Two tiers of harbour now (port.js + ports.js):
+
+- **Havens** are legends rows (append-only): Port Royal, Nassau, Tortuga, Île
+  Sainte-Marie — real pirate geography, spread so every ocean has a door. They
+  fence prizes at **full price**, no questions asked.
+- **Dockyards** (ports.js, append-only, ~18 real age-of-sail harbours from
+  Havana to Nagasaki) serve every basin: **repairs, hands, and the
+  shipwright** anywhere on earth, so a voyage never beats back to the
+  Caribbean for a topmast. Honest ports ask questions: prizes fence at half.
+
+The **shipwright's ladder** (shipyard.js) is THE progression purchase: sloop
+(1 gun/side, 12 berths, beaches, outruns anything armed) → brig (2 guns/side,
+20 berths, faster but slow-turning and too deep to beach). Every hull carries
+a **captain's briefing** — the survival doctrine shown on a fresh voyage and
+on every upgrade: the sloop's is "run, hunt traders, dig treasure, hide in the
+shallows" (corvettes break off the chase over water thinner than NAVY_SHOAL);
+the brig's is "now you out-gun the corvette — but mind your draft".
 
 ## Third person
 

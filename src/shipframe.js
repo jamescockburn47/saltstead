@@ -11,6 +11,23 @@ export const DECK = { minX: -1.55, maxX: 1.55, minZ: -5.0, maxZ: 4.6, y: 1.15 };
 
 export const HELM = { x: 0, z: -4.0 }; // the tiller, near the stern
 
+// the walkable frame for any hull on the shipwright's ladder: the sloop's
+// proportions, scaled by the spec's length (shipphysics.js). DECK/HELM above
+// stay as the sloop's own numbers — frameFor(SLOOP) reproduces them exactly,
+// so every existing caller keeps its old geometry.
+export function frameFor(spec) {
+  const s = spec.length / 9; // the sloop is the unit hull
+  return {
+    deck: {
+      minX: -1.55 * s, maxX: 1.55 * s,
+      minZ: -5.0 * s, maxZ: 4.6 * s,
+      y: 1.15 * s,
+    },
+    helm: { x: 0, z: -4.0 * s },
+    scale: s,
+  };
+}
+
 // yaw-only frame: walking happens on the yaw frame (the deck stays flat
 // underfoot); pitch/roll is applied visually by the scene graph on top.
 export function localToWorld(ship, lx, ly, lz) {
@@ -32,14 +49,14 @@ export function worldToLocal(ship, wx, wy, wz) {
   };
 }
 
-export function clampToDeck(lx, lz, margin = 0.2) {
+export function clampToDeck(lx, lz, margin = 0.2, deck = DECK) {
   return {
-    x: Math.max(DECK.minX + margin, Math.min(DECK.maxX - margin, lx)),
-    z: Math.max(DECK.minZ + margin, Math.min(DECK.maxZ - margin, lz)),
+    x: Math.max(deck.minX + margin, Math.min(deck.maxX - margin, lx)),
+    z: Math.max(deck.minZ + margin, Math.min(deck.maxZ - margin, lz)),
   };
 }
 
-export function nearHelm(lx, lz, radius = 1.5) {
-  const dx = lx - HELM.x, dz = lz - HELM.z;
+export function nearHelm(lx, lz, radius = 1.5, helm = HELM) {
+  const dx = lx - helm.x, dz = lz - helm.z;
   return dx * dx + dz * dz <= radius * radius;
 }

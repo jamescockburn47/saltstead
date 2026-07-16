@@ -43,7 +43,9 @@ export class MerchantLayer {
     return out;
   }
 
-  update(t, dt, px, pz, windFrom) {
+  // shoal: the player floats where a warship's keel dare not go (main.js
+  // samples the terrain against merchants.js NAVY_SHOAL)
+  update(t, dt, px, pz, windFrom, shoal = false) {
     // stream in
     for (const spec of this.spawnable(px, pz)) {
       if (this.live.has(spec.id) || this.sunk.has(spec.id)) continue;
@@ -77,7 +79,7 @@ export class MerchantLayer {
         }
         continue;
       }
-      stepMerchant(e.m, px, pz, dt, speedFactor(e.dmg));
+      stepMerchant(e.m, px, pz, dt, speedFactor(e.dmg), shoal);
       const y = waveHeight(e.m.x, e.m.z, t) - 0.45;
       e.group.position.set(e.m.x, y, e.m.z);
       e.group.rotation.set(0, e.m.yaw, (1 - e.dmg.hull) * 0.12); // holed, she lists
