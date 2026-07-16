@@ -1,0 +1,51 @@
+// Ship physics — pure, no THREE, no DOM. verify-ship.mjs guards it.
+// Convention matches shipframe.js: bow along local +z, forward = (sin yaw, cos yaw).
+
+import { sailPower, speedTarget } from './sailing.js';
+import { waveHeight } from './waves.js';
+
+export const SLOOP = {
+  maxSpeed: 8.5,   // m/s, ~16.5 knots — arcade-brisk on purpose
+  accel: 0.55,     // exponential approach rate when gaining speed
+  drag: 0.35,      // and when losing it (sails luff, sea slows you)
+  turnRate: 0.6,   // rad/s at full speed, full rudder
+  draft: 0.45,     // hull sits this far below the sampled surface
+  length: 9,
+  beam: 3.2,
+};
+
+export function newShipState(x = 0, z = 0) {
+  return { x, y: 0, z, yaw: 0, speed: 0, rudder: 0, trim: 0.5 };
+}
+
+// wind: { from, speed }. Mutates and returns the state.
+export function stepShip(s, wind, dt, spec = SLOOP) {
+  const power = sailPower(s.yaw, wind.from, s.trim);
+  const target = speedTarget(power, wind.speed, spec.maxSpeed);
+  const rate = target > s.speed ? spec.accel : spec.drag;
+  s.speed += (target - s.speed) * (1 - Math.exp(-rate * dt));
+
+  // rudder bites with waterflow: barely steer when becalmed
+  const bite = 0.15 + 0.85 * Math.min(1, s.speed / spec.maxSpeed);
+  s.yaw += s.rudder * spec.turnRate * bite * dt;
+
+  s.x += Math.sin(s.yaw) * s.speed * dt;
+  s.z += Math.cos(s.yaw) * s.speed * dt;
+  return s;
+}
+
+// Buoyancy attitude from four hull sample points on the live wave field.
+// Returns { y, pitch, roll } — pitch/roll in radians, y is hull-centre height.
+export function shipAttitude(s, t, spec = SLOOP) {
+  const sy = Math.sin(s.yaw), cy = Math.cos(s.yaw);
+  const hl = spec.length * 0.42, hb = spec.beam * 0.45;
+  const bow = waveHeight(s.x + sy * hl, s.z + cy * hl, t);
+  const stern = waveHeight(s.x - sy * hl, s.z - cy * hl, t);
+  const star = waveHeight(s.x + cy * hb, s.z - sy * hb, t);
+  const port = waveHeight(s.x - cy * hb, s.z + sy * hb, t);
+  return {
+    y: (bow + stern + star + port) / 4 - spec.draft,
+    pitch: Math.atan2(stern - bow, hl * 2),
+    roll: Math.atan2(port - star, hb * 2),
+  };
+}

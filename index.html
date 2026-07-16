@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Saltstead — Phase 0</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0a1622;
+      font-family: Georgia, 'Times New Roman', serif; }
+    #app { position: fixed; inset: 0; }
+    #app canvas { display: block; cursor: grab; }
+    #app canvas:active { cursor: grabbing; }
+    .hud { position: fixed; color: #eef6fb; text-shadow: 0 1px 3px rgba(0,0,0,.6);
+      user-select: none; pointer-events: none; }
+    #title { top: 14px; left: 18px; }
+    #title h1 { margin: 0; font-size: 20px; letter-spacing: 3px; font-weight: normal; }
+    #title small { opacity: .65; font-size: 11px; letter-spacing: 1px; }
+    #panel { top: 64px; left: 18px; font-size: 14px; line-height: 1.7; }
+    #panel .label { opacity: .6; font-size: 11px; letter-spacing: 1px; }
+    #speed { font-size: 22px; }
+    #trimbar { width: 120px; height: 8px; background: rgba(255,255,255,.18);
+      border-radius: 4px; overflow: hidden; margin-top: 2px; }
+    #trimfill { height: 100%; width: 50%; background: #e8c46a; transition: background .3s; }
+    #winddial { top: 14px; right: 18px; width: 76px; height: 76px; border-radius: 50%;
+      border: 1.5px solid rgba(255,255,255,.35); display: flex; align-items: center;
+      justify-content: center; }
+    #windarrow { font-size: 30px; line-height: 1; transition: transform .15s linear; }
+    #winddial .ws { position: absolute; bottom: -20px; width: 100%; text-align: center;
+      font-size: 11px; opacity: .7; letter-spacing: 1px; }
+    #hint { bottom: 22px; left: 0; width: 100%; text-align: center; font-size: 14px;
+      opacity: .85; letter-spacing: .5px; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div class="hud" id="title"><h1>SALTSTEAD</h1><small>phase 0 — the sailing prototype</small></div>
+  <div class="hud" id="panel">
+    <div class="label">SPEED</div>
+    <div id="speed">0.0 kn</div>
+    <div class="label" style="margin-top:8px">POINT OF SAIL</div>
+    <div id="pointofsail">—</div>
+    <div class="label" style="margin-top:8px">MAINSHEET</div>
+    <div id="trimbar"><div id="trimfill"></div></div>
+  </div>
+  <div class="hud" id="winddial">
+    <div id="windarrow">⬇</div>
+    <div class="ws"><span id="windspeed">7</span> m/s wind</div>
+  </div>
+  <div class="hud" id="hint">WASD — walk the deck · drag — look · wheel — zoom</div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
