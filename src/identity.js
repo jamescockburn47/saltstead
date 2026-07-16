@@ -3,6 +3,8 @@
 //
 // Auth blob shapes (localStorage 'saltstead-auth'), same three as Moorstead:
 //   { code, name, acct, room, token }   — invited (claimed on the dash)
+//     ... plus warden: true when the code was minted as a warden code —
+//     the harbourmaster's own mark (gold hatband, warden hail)
 //   { guest: true, name }               — guest, no invite
 //   null                                — not signed in
 //
@@ -33,6 +35,7 @@ export function loadAuth(storage) {
       return {
         code: String(a.code || ''), name: String(a.name || ''),
         acct: a.acct, room: String(a.room || 'brine'), token: a.token,
+        warden: a.warden === true,
       };
     }
     return null;
@@ -52,4 +55,9 @@ export function playerId(auth, pid) {
 
 export function displayName(auth) {
   return (auth && auth.name) ? auth.name : 'Sea Rover';
+}
+
+// the warden — the harbourmaster's own standing, granted by the dash at claim
+export function isWarden(auth) {
+  return !!(auth && auth.warden === true && auth.token);
 }

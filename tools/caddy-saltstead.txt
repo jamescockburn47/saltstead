@@ -1,0 +1,25 @@
+
+# Saltstead: public origin behind saltstead.sovren.xyz (Cloudflare tunnel).
+# Only the login claim is public; the ledger UI stays on the LAN (:8097).
+:8091 {
+	encode gzip
+
+	log {
+		output file /var/log/caddy/saltstead.log {
+			roll_size 20mb
+			roll_keep 5
+			mode 0644
+		}
+		format json
+	}
+
+	handle_path /dash/* {
+		@notallowed not path /auth/claim
+		respond @notallowed 403
+		reverse_proxy 127.0.0.1:8097
+	}
+
+	handle {
+		respond 404
+	}
+}

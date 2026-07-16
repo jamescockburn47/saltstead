@@ -5,17 +5,27 @@ import * as THREE from 'three';
 
 function mat(color) { return new THREE.MeshPhongMaterial({ color, flatShading: true, shininess: 4 }); }
 
-export function buildCaptain() {
+// warden: true dresses the harbourmaster's own figure — gold hatband, gold
+// epaulettes, a sea-green coat. Same silhouette, unmistakable from above.
+export function buildCaptain(warden = false) {
   const g = new THREE.Group();
+  const coatColor = warden ? 0x1e4d40 : 0x5a1f24; // sea-green vs oxblood
 
   const legL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.42, 0.18), mat(0x2b2b33));
   legL.position.set(-0.11, 0.21, 0);
   const legR = legL.clone(); legR.position.x = 0.11;
   g.add(legL, legR);
 
-  const coat = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.52, 0.28), mat(0x5a1f24)); // oxblood coat
+  const coat = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.52, 0.28), mat(coatColor));
   coat.position.y = 0.68;
   g.add(coat);
+
+  if (warden) {
+    const epL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.05, 0.2), mat(0xd8b95a));
+    epL.position.set(-0.24, 0.92, 0);
+    const epR = epL.clone(); epR.position.x = 0.24;
+    g.add(epL, epR);
+  }
 
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.24), mat(0xd9a56f));
   head.position.y = 1.08;
@@ -28,7 +38,13 @@ export function buildCaptain() {
   crown.position.y = 1.3;
   g.add(brim, crown);
 
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.44, 0.14), mat(0x5a1f24));
+  if (warden) { // the gold hatband — the warden's mark, readable top-down
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.165, 0.175, 0.045, 6), mat(0xd8b95a));
+    band.position.y = 1.27;
+    g.add(band);
+  }
+
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.44, 0.14), mat(coatColor));
   armL.position.set(-0.3, 0.68, 0);
   const armR = armL.clone(); armR.position.x = 0.3;
   g.add(armL, armR);

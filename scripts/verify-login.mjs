@@ -3,7 +3,7 @@
 // a crash), the multiplayer pid derivation matches the relay's expectations
 // ('a'+acct = invited), and saves forward-refuse newer versions (invariant 3).
 import {
-  devicePid, loadAuth, saveAuth, playerId, displayName, AUTH_KEY,
+  devicePid, loadAuth, saveAuth, playerId, displayName, isWarden, AUTH_KEY,
 } from '../src/identity.js';
 import { SAVE_VERSION, snapshotSave, acceptSave } from '../src/save.js';
 
@@ -45,6 +45,15 @@ const fakeStorage = () => {
   ok(g && g.guest === true, 'guest auth round-trips');
   ok(playerId(g, 'dev-pid') === 'dev-pid', 'guest pid rides the device');
   ok(displayName(g) === 'Sea Rover', 'nameless guest gets the default hail');
+
+  // warden standing: granted by the dash at claim, carried in the blob
+  saveAuth(st, { ...invited, warden: true });
+  const w = loadAuth(st);
+  ok(w && w.warden === true && isWarden(w), 'warden standing round-trips');
+  ok(!isWarden(back), 'a plain invite is no warden');
+  ok(!isWarden(g), 'a guest is never a warden');
+  st.setItem(AUTH_KEY, JSON.stringify({ guest: true, warden: true, name: 'Sneak' }));
+  ok(!isWarden(loadAuth(st)), 'a guest blob claiming warden is refused (no token)');
 
   saveAuth(st, null);
   ok(loadAuth(st) === null, 'sign-out clears the blob');

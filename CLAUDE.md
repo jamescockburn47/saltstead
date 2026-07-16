@@ -45,6 +45,17 @@ will too (CSP already whitelists `saltstead.sovren.xyz`). Crew-NPC brains can sh
 `llama-server-moorstead` (Gemma, `--parallel 32`) or afford their own model — the
 UMA headroom allows either.
 
+### Saltstead's harbourmaster ledger (invite codes + warden)
+
+`~/saltstead/dash/app.py` on the EVO (repo copy: `tools/dash-app.py`), systemd unit
+`saltstead-dash` on **:8097**. Mint/revoke codes on the ledger UI at
+`http://evo:8097/` — **LAN/Tailscale only**. Only `POST /auth/claim` is public:
+Vercel rewrites `/dash/*` → `saltstead.sovren.xyz` (Cloudflare tunnel) → Caddy
+`:8091` (allowlist) → :8097. Codes minted with `warden: true` grant warden standing
+(gold hatband + epaulettes on the captain, `isWarden(auth)` in `identity.js`); the
+claim response carries `warden` into the auth blob. Caddy backup:
+`Caddyfile.bak-20260716-saltstead`; tunnel backup: `config.yml.bak-20260716-saltstead`.
+
 ## Setting
 
 Alt-history "piracy never died": pirate-age start, ship tiers climb through eras.

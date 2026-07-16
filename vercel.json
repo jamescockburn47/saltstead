@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/dash/:path*",
+      "destination": "https://saltstead.sovren.xyz/dash/:path*"
+    }
+  ],
   "redirects": [
     {
       "source": "/(.*)",

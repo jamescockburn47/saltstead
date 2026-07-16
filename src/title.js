@@ -2,11 +2,13 @@
 // states gated by setLoggedIn: the login box (claim an invite on the dash, or
 // board as a guest) and the play box (continue / new voyage / sign out).
 //
-// The invite claim POSTs to /dash/auth/claim — the dashboard on the EVO owns
-// codes, accounts, rooms and tokens; this client never validates codes. Until
-// Saltstead's dash is live the claim fails soft and the guest door stays open.
+// The invite claim POSTs to /dash/auth/claim — the harbourmaster's ledger on
+// the EVO (~/saltstead/dash) owns codes, accounts, rooms, tokens and warden
+// standing; this client never validates codes. Codes are minted on the ledger
+// UI (LAN-only, EVO :8097). If the EVO is unreachable the claim fails soft
+// and the guest door stays open.
 
-import { devicePid, loadAuth, saveAuth, displayName } from './identity.js';
+import { devicePid, loadAuth, saveAuth, displayName, isWarden } from './identity.js';
 import { hasSave, clearSave } from './save.js';
 
 export function bootTitle({ onStart }) {
@@ -21,7 +23,7 @@ export function bootTitle({ onStart }) {
     playBox.style.display = a ? 'flex' : 'none';
     if (a) {
       $('welcome').textContent = `Welcome aboard, ${displayName(a)}`
-        + (a.guest ? ' (guest)' : '');
+        + (a.guest ? ' (guest)' : isWarden(a) ? ' \u2014 WARDEN OF THE SEAS' : '');
       $('btncontinue').disabled = true;
       hasSave().then((h) => { $('btncontinue').disabled = !h; });
     }
@@ -38,14 +40,20 @@ export function bootTitle({ onStart }) {
         body: JSON.stringify({ code, name, pid: devicePid(localStorage) }),
       });
       const d = await r.json();
-      if (!r.ok || !d.ok) throw new Error(d.error || 'refused');
-      const a = { code, name: d.name || name, acct: d.acct, room: d.room || 'brine', token: d.token };
+      if (!r.ok || !d.ok) {
+        msg.textContent = d.error || 'The harbourmaster refused that code.';
+        return;
+      }
+      const a = {
+        code, name: d.name || name, acct: d.acct,
+        room: d.room || 'brine', token: d.token, warden: d.warden === true,
+      };
       saveAuth(localStorage, a);
       msg.textContent = '';
       setLoggedIn(a);
     } catch {
-      msg.textContent = 'The harbourmaster is not answering \u2014 invites open '
-        + 'with multiplayer. Board as a guest for now.';
+      msg.textContent = 'The harbourmaster is not answering \u2014 '
+        + 'board as a guest for now.';
     }
   });
 

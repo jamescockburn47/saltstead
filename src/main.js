@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { Ocean } from './ocean.js';
 import { buildSloop } from './ship.js';
 import { buildCaptain } from './captain.js';
+import { isWarden } from './identity.js';
 import { FoamLayer } from './foamlayer.js';
 import { newShipState, stepShip, shipAttitude, SLOOP } from './shipphysics.js';
 import { DECK, HELM, clampToDeck, nearHelm, localToWorld } from './shipframe.js';
@@ -115,7 +116,7 @@ class Game {
     this.setSail = sloop.setSail;
     this.scene.add(this.shipGroup);
 
-    this.captain = buildCaptain();
+    this.captain = buildCaptain(isWarden(auth));
     this.cap = { x: 0, z: -2.2, facing: 0, moving: false };
     this.captain.group.position.set(this.cap.x, DECK.y, this.cap.z);
     this.shipGroup.add(this.captain.group);
