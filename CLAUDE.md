@@ -1,0 +1,52 @@
+# Saltstead — working instructions
+
+Procedural sea-rover game on a scaled real-world Earth (Vite + Three.js) — sibling to
+Moorstead (`C:\Users\James\Desktop\Moorcraft`), same identity: **procedural-only, zero
+assets, browser-first, deterministic, verify-gated**. Public client:
+**www.saltstead.app** (Vercel project `saltstead`, GitHub `jamescockburn47/saltstead`).
+
+## Start here
+
+- **[docs/DESIGN.md](docs/DESIGN.md)** — game identity, era-ladder progression, world
+  model (1:250 land / gait-compressed ocean), phase plan, named risks.
+- `src/` modules are small and single-purpose; pure logic modules (waves, sailing,
+  shipphysics, shipframe, foam, earth, terraingen, skymath, lightrig, woodgrain,
+  legends, noise) have **no THREE/DOM imports** and each is guarded by a
+  `scripts/verify-*.mjs` check.
+- `src/earthdata.js` is **generated** by `scripts/build-earthdata.mjs` from Natural
+  Earth (coastlines, rivers, mountain ranges) — never edit by hand.
+
+## Build & verify
+
+- `npm run verify` — the headless gate (11 checks). **Must be green before deploy.**
+  Add a verify script with every feature; prefer testing pure modules headlessly over
+  eyeballing.
+- Dev: `npm run dev` (port 5173). `window.saltstead` is the live Game handle
+  (`.ship`, `.cam`, `.aground`, `.coastDist`, `.dayStart`, `.ocean.uniforms`).
+
+## Deploy
+
+Use **`npm run deploy`** (`scripts/deploy.mjs`, inherited from Moorstead) — not bare
+`vercel`. Gates on clean tree / on-main / pushed, runs verify + build, patch-bumps,
+commits, pushes, ships to Vercel. Domains: saltstead.app → www.saltstead.app.
+
+## The EVO (home server) — hardware facts, verified 2026-07-16
+
+The EVO X2 is an **AMD Ryzen AI MAX+ 395 (Radeon 8060S) with 128 GB of UNIFIED
+memory (UMA)**, carved as ~96 GiB GPU + ~32 GiB system. **`free -h` only shows the
+32 GiB CPU side — do not conclude the box is out of RAM from it.** Check the GPU pool
+with `rocm-smi --showmeminfo vram` (as of writing: ~46 GiB of 96 used by four
+llama-servers, so ~50 GiB model headroom). CPU load is negligible (32 cores, idle).
+
+Reachable via `ssh evo-tailscale` (anywhere) or `ssh evo-wifi` (LAN); passwordless
+`sudo -n`. Verify server-side questions there, don't disclaim them. Moorstead's relay
+(`~/moorstead/worldsvc/`), brain, and dashboard live there; Saltstead's future relay
+will too (CSP already whitelists `saltstead.sovren.xyz`). Crew-NPC brains can share
+`llama-server-moorstead` (Gemma, `--parallel 32`) or afford their own model — the
+UMA headroom allows either.
+
+## Setting
+
+Alt-history "piracy never died": pirate-age start, ship tiers climb through eras.
+Highlight legends (Welsh dragons, Bermuda Triangle, Kraken…) live in `src/legends.js`
+— append-only data table.
