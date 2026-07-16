@@ -12,6 +12,10 @@ import { newShipState, stepShip, shipAttitude, SLOOP } from './shipphysics.js';
 import { DECK, HELM, clampToDeck, nearHelm, localToWorld } from './shipframe.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS } from './sailing.js';
 import { waveHeight } from './waves.js';
+import { TerrainLayer } from './terrain.js';
+import {
+  latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
+} from './earth.js';
 
 const POS_NAMES = [
   [IRONS, 'In irons'],
@@ -41,9 +45,16 @@ class Game {
 
     this.ocean = new Ocean(this.scene);
     this.foam = new FoamLayer(this.scene);
+    this.terrain = new TerrainLayer(this.scene);
 
-    this.ship = newShipState(0, 0);
+    // spawn in the Caribbean, off Port Royal — the Phase 1 haven
+    const spawn = latLonToWorld(17.85, -76.9);
+    this.ship = newShipState(spawn.x, spawn.z);
+    this.ship.yaw = 0.5; // bow toward the Jamaican coast
     this.ship.trim = 0.5;
+    this.coastDist = COAST_CAP;
+    this.geoClock = 0;
+    this.aground = false;
     const sloop = buildSloop();
     this.shipGroup = sloop.group;
     this.shipGroup.rotation.order = 'YXZ';
@@ -87,6 +98,8 @@ class Game {
       windArrow: document.getElementById('windarrow'),
       windSpeed: document.getElementById('windspeed'),
       hint: document.getElementById('hint'),
+      latlon: document.getElementById('latlon'),
+      gait: document.getElementById('gaitbadge'),
     };
 
     this.t = 0;
@@ -125,7 +138,29 @@ class Game {
       this.ship.rudder *= 1 - Math.min(1, dt * 2);
     }
 
-    stepShip(this.ship, this.wind, dt);
+    // geography, throttled: coast distance drives the gait and the checks
+    this.geoClock -= dt;
+    if (this.geoClock <= 0) {
+      this.geoClock = 0.25;
+      const ll = worldToLatLon(this.ship.x, this.ship.z);
+      this.coastDist = coastDistGame(ll.lat, ll.lon);
+    }
+    const gait = gaitFactor(this.coastDist);
+
+    const px = this.ship.x, pz = this.ship.z;
+    stepShip(this.ship, this.wind, dt, SLOOP, gait);
+
+    // grounding: inshore, the sea floor is real
+    if (this.coastDist < 400) {
+      const ll = worldToLatLon(this.ship.x, this.ship.z);
+      if (elevation(ll.lat, ll.lon) > -0.9) {
+        this.ship.x = px; this.ship.z = pz;
+        this.ship.speed = 0;
+        this.aground = true;
+      } else this.aground = false;
+    } else this.aground = false;
+
+    this.terrain.update(this.ship.x, this.ship.z);
     const att = shipAttitude(this.ship, t);
     const rel = wrapAngle(this.ship.yaw - this.wind.from);
     const power = sailPower(this.ship.yaw, this.wind.from, this.ship.trim);
@@ -201,11 +236,19 @@ class Game {
     this.hud.windArrow.style.transform =
       `rotate(${(-(windTo - camYaw) * 180 / Math.PI).toFixed(1)}deg)`;
     this.hud.windSpeed.textContent = this.wind.speed.toFixed(0);
-    this.hud.hint.textContent = this.mode === 'helm'
-      ? 'A/D — steer · W/S — sheet in / ease · E — leave the helm'
-      : nearHelm(this.cap.x, this.cap.z)
-        ? 'E — take the helm'
-        : 'WASD — walk the deck · drag — look · wheel — zoom';
+    const ll = worldToLatLon(this.ship.x, this.ship.z);
+    this.hud.latlon.textContent =
+      `${Math.abs(ll.lat).toFixed(2)}\u00b0${ll.lat >= 0 ? 'N' : 'S'} `
+      + `${Math.abs(ll.lon).toFixed(2)}\u00b0${ll.lon >= 0 ? 'E' : 'W'}`;
+    this.hud.gait.style.display = gait > 1.3 ? 'block' : 'none';
+    if (gait > 1.3) this.hud.gait.textContent = `OPEN SEA \u2014 fair current \u00d7${gait.toFixed(1)}`;
+    this.hud.hint.textContent = this.aground
+      ? 'AGROUND \u2014 steer for deeper water'
+      : this.mode === 'helm'
+        ? 'A/D — steer · W/S — sheet in / ease · E — leave the helm'
+        : nearHelm(this.cap.x, this.cap.z)
+          ? 'E — take the helm'
+          : 'WASD — walk the deck · drag — look · wheel — zoom';
     // a nudge toward good trim, teaching by whisper not tutorial
     const err = Math.abs(this.ship.trim - optimalTrim(rel));
     this.hud.trim.style.background = err < 0.12 ? '#7fd48a' : err < 0.3 ? '#e8c46a' : '#d47a6a';

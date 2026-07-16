@@ -11,10 +11,21 @@ zero asset files, kid-safe multiplayer, deterministic worlds.
 "piracy never died" era ladder, the non-uniform Earth scale, the sea-must-not-be-boring
 pillar, what ports from Moorstead, the phase plan and named risks.
 
-## Status: Phase 0 — the sailing prototype (kill/go gate)
+## Status: Phase 1 — the real Earth
 
-One ocean, one sloop, wind, waves, a walkable moving deck, a helm, third-person camera.
-If sailing isn't fun in isolation, we stop and rethink before building the planet.
+Phase 0 (the sailing prototype — deck, helm, wind, waves, third-person camera) passed
+its kill/go gate. The world is now the REAL world: Natural Earth 50m coastlines baked
+into code (`scripts/build-earthdata.mjs` → `src/earthdata.js`, 1,415 rings), streamed
+as low-poly terrain chunks around the ship. You spawn off Port Royal, Jamaica. Shallow
+water grounds you; past ~800 m offshore the **open-sea gait** ramps to 4× so crossings
+compress while inshore sailing stays 1:1.
+
+To regenerate the Earth data (the generated file is committed; the raw download is not):
+
+```
+curl -L -o tools/ne_50m_land.geojson https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_land.geojson
+node scripts/build-earthdata.mjs
+```
 
 - Walk the deck with WASD, drag to orbit the camera, wheel to zoom.
 - Stand near the tiller and press **E** to take the helm.

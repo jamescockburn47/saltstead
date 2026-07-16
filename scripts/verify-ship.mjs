@@ -63,5 +63,16 @@ const DT = 1 / 30;
   ok(sawMotion, 'the hull rises and falls');
 }
 
+// open-sea gait covers ground without touching the dynamics
+{
+  const a = newShipState(0, 0), b = newShipState(0, 0);
+  const wind = { from: -Math.PI / 2, speed: 8 };
+  a.trim = b.trim = optimalTrim(Math.PI / 2);
+  for (let i = 0; i < 300; i++) { stepShip(a, wind, DT); stepShip(b, wind, DT, SLOOP, 4); }
+  ok(Math.abs(a.speed - b.speed) < 1e-9, 'gait leaves hull speed untouched');
+  const da = Math.hypot(a.x, a.z), db = Math.hypot(b.x, b.z);
+  ok(db > da * 3.5 && db < da * 4.5, `gait 4 covers ~4x the ground (${(db / da).toFixed(2)}x)`);
+}
+
 if (failed) { console.error(`verify-ship: ${failed} FAILED`); process.exit(1); }
 console.log('verify-ship: OK — converges, stalls in irons, rudder answers, buoyancy bounded');
