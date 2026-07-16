@@ -1,0 +1,72 @@
+// The solo voyage save — Moorstead's one-slot IndexedDB structure, ported.
+// snapshot/accept are pure (verify-login.mjs guards them, including the
+// forward-refuse rule: never load a save from a NEWER client — invariant 3).
+
+export const SAVE_VERSION = 1;
+const DB = 'saltstead', STORE = 'meta', KEY = 'game';
+
+// ---- pure ----
+export function snapshotSave(ship, skyT) {
+  return {
+    version: SAVE_VERSION,
+    ship: { x: ship.x, z: ship.z, yaw: ship.yaw, trim: ship.trim },
+    skyT,
+    savedAt: Date.now(),
+  };
+}
+
+// null unless the meta is a well-formed save THIS client can carry
+export function acceptSave(meta) {
+  if (!meta || typeof meta !== 'object') return null;
+  if (typeof meta.version !== 'number' || meta.version > SAVE_VERSION) return null;
+  const s = meta.ship;
+  if (!s || ![s.x, s.z, s.yaw, s.trim].every(Number.isFinite)) return null;
+  return {
+    version: meta.version,
+    ship: { x: s.x, z: s.z, yaw: s.yaw, trim: Math.max(0, Math.min(1, s.trim)) },
+    skyT: Number.isFinite(meta.skyT) ? meta.skyT : 0,
+    savedAt: meta.savedAt || 0,
+  };
+}
+
+// ---- IndexedDB plumbing (browser only) ----
+function openDB() {
+  return new Promise((res, rej) => {
+    const rq = indexedDB.open(DB, 1);
+    rq.onupgradeneeded = () => rq.result.createObjectStore(STORE);
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error);
+  });
+}
+
+export async function saveGame(meta) {
+  const db = await openDB();
+  await new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(meta, KEY);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+  db.close();
+}
+
+export async function loadGame() {
+  const db = await openDB();
+  const meta = await new Promise((res, rej) => {
+    const rq = db.transaction(STORE).objectStore(STORE).get(KEY);
+    rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+  });
+  db.close();
+  return acceptSave(meta);
+}
+
+export async function hasSave() { return (await loadGame()) !== null; }
+
+export async function clearSave() {
+  const db = await openDB();
+  await new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(KEY);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+  db.close();
+}

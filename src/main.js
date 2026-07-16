@@ -17,6 +17,8 @@ import { Sky } from './sky.js';
 import { DAY_LENGTH, solarState, lunarState, moonPhase } from './skymath.js';
 import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness } from './lightrig.js';
 import { MapUI } from './mapui.js';
+import { bootTitle } from './title.js';
+import { loadGame, saveGame, snapshotSave } from './save.js';
 import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
 } from './earth.js';
@@ -30,7 +32,9 @@ const POS_NAMES = [
 ];
 
 class Game {
-  constructor() {
+  // save: an acceptSave()-vetted meta or null; auth: the identity blob
+  constructor(save = null, auth = null) {
+    this.auth = auth;
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setSize(innerWidth, innerHeight);
@@ -54,6 +58,15 @@ class Game {
     this.ship = newShipState(spawn.x, spawn.z);
     this.ship.yaw = 0.5; // bow toward the Jamaican coast
     this.ship.trim = 0.5;
+    if (save) {
+      this.ship.x = save.ship.x; this.ship.z = save.ship.z;
+      this.ship.yaw = save.ship.yaw; this.ship.trim = save.ship.trim;
+      this.dayStart = save.skyT; // the voyage resumes under the same sky
+    }
+    this.saveClock = 12; // first autosave soon after boarding
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this.persist();
+    });
     this.coastDist = COAST_CAP;
     this.geoClock = 0;
     this.aground = false;
@@ -111,6 +124,11 @@ class Game {
     this.t = 0;
     this.last = performance.now();
     this.renderer.setAnimationLoop(() => this.frame());
+  }
+
+  // the one-slot solo save (save.js); fire-and-forget, losses cost seconds
+  persist() {
+    saveGame(snapshotSave(this.ship, this.t + this.dayStart)).catch(() => {});
   }
 
   // Moorstead's two-tier rig (invariant 5): Fine = ACES + PCFSoft shadows +
@@ -180,6 +198,10 @@ class Game {
     } else {
       this.ship.rudder *= 1 - Math.min(1, dt * 2);
     }
+
+    // autosave the voyage every 20 s
+    this.saveClock -= dt;
+    if (this.saveClock <= 0) { this.saveClock = 20; this.persist(); }
 
     // geography, throttled: coast distance drives the gait and the checks
     this.geoClock -= dt;
@@ -319,5 +341,10 @@ class Game {
   }
 }
 
-const game = new Game();
-window.saltstead = game; // the live handle, moorstead-style
+// title first, Moorstead-style: the game only boots when the title hands off
+bootTitle({
+  onStart: async (mode, auth) => {
+    const save = mode === 'continue' ? await loadGame() : null;
+    window.saltstead = new Game(save, auth); // the live handle, moorstead-style
+  },
+});
