@@ -7,6 +7,8 @@ const DB = 'saltstead', STORE = 'meta', KEY = 'game';
 
 import { acceptLog } from './shiplog.js';
 
+const clamp01 = (v, dflt) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : dflt);
+
 // ---- pure ----
 // loot: { gold, map, lootSeed, crew, fleet, log, banked, won, hull } —
 // additive fields, version stays 1 (older saves simply read as a poor pirate
@@ -18,6 +20,11 @@ export function snapshotSave(ship, skyT, loot = {}) {
     ship: { x: ship.x, z: ship.z, yaw: ship.yaw, trim: ship.trim },
     skyT,
     hull: typeof loot.hull === 'string' ? loot.hull : 'sloop',
+    // battle damage rides the save: a refresh must never repair her (the
+    // two-stage wreck rule in combat.js has teeth only if crippled persists)
+    dmgRig: clamp01(loot.dmgRig, 1),
+    dmgHull: clamp01(loot.dmgHull, 1),
+    crippled: !!loot.crippled,
     gold: loot.gold || 0,
     map: loot.map || null,
     lootSeed: loot.lootSeed || 1,
@@ -45,6 +52,9 @@ export function acceptSave(meta) {
     // the hull id is vetted by the shipyard on load (hullById falls back to
     // the sloop) — the save only promises a short string
     hull: typeof meta.hull === 'string' ? meta.hull.slice(0, 16) : 'sloop',
+    dmgRig: clamp01(meta.dmgRig, 1),
+    dmgHull: clamp01(meta.dmgHull, 1),
+    crippled: !!meta.crippled,
     gold: Number.isFinite(meta.gold) && meta.gold >= 0 ? Math.round(meta.gold) : 0,
     map: mapOK ? { seed: m.seed, lat: m.lat, lon: m.lon } : null,
     lootSeed: Number.isFinite(meta.lootSeed) && meta.lootSeed >= 1 ? meta.lootSeed : 1,

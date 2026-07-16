@@ -1,50 +1,95 @@
 # Saltstead
 
-*(working title)*
+A procedural sea-rover game on a scaled real-world Earth, playable in the browser at
+**[www.saltstead.app](https://www.saltstead.app)**. Alt-history premise: piracy never
+died. You start as a pirate-age sloop captain off Port Royal and climb the shipwright's
+ladder on a planet built from real geography.
 
-A sea-rover game on a scaled real-world Earth: plunder at sea, climb from a coble to a
-modern raider, crew of NPCs, every player their own ship. Sibling project to
-[Moorstead](https://www.moorstead.app) — same identity: browser-first, procedural-only,
-zero asset files, kid-safe multiplayer, deterministic worlds.
+Sibling project to [Moorstead](https://www.moorstead.app) — same identity:
+**browser-first, procedural-only, zero asset files, deterministic worlds,
+verify-gated**. Every hull, sail, wave, plank texture and sound is synthesized in code;
+the repository contains no binary assets.
 
 **Read [docs/DESIGN.md](docs/DESIGN.md) first** — the founding design document: the
 "piracy never died" era ladder, the non-uniform Earth scale, the sea-must-not-be-boring
-pillar, what ports from Moorstead, the phase plan and named risks.
+pillar, the phase plan and named risks.
 
-## Status: Phase 1 — the real Earth
+## The world
 
-Phase 0 (the sailing prototype — deck, helm, wind, waves, third-person camera) passed
-its kill/go gate. The world is now the REAL world: Natural Earth 50m coastlines baked
-into code (`scripts/build-earthdata.mjs` → `src/earthdata.js`, 1,415 rings), streamed
-as low-poly terrain chunks around the ship. You spawn off Port Royal, Jamaica. Shallow
-water grounds you; past ~800 m offshore the **open-sea gait** ramps to 4× so crossings
-compress while inshore sailing stays 1:1.
+The map is the REAL world: Natural Earth coastlines, rivers and mountain ranges baked
+into code (`scripts/build-earthdata.mjs` → `src/earthdata.js`), streamed as low-poly
+terrain around the ship. Land is 1:250; past ~800 m offshore the **open-sea gait**
+ramps to 4× so ocean crossings compress while inshore sailing stays 1:1. Biomes follow
+latitude, real rivers run as channels, and Snowdonia has crags because the dragons
+need them.
 
-Land has real relief: mountain ranges rise where Natural Earth says ranges are
-(Snowdonia included — the dragons need crags), real rivers carve valleys and run as
-blue channels, and biomes follow latitude (tropics, desert belts, snowline, polar ice).
-The sky is Moorstead's ported to a planetary frame: 30-minute day/night cycle, golden
-hours, an accelerated moon calendar, and a real star catalogue that tilts with your
-latitude — Polaris sinks as you sail south and the Southern Cross rises, so the stars
-are a working navigation instrument.
+The sky is a working instrument: a 30-minute day/night cycle, a real star catalogue
+that tilts with latitude (Polaris sinks as you sail south), and **live weather** —
+the game fetches the real forecast at your ship's true coordinates.
 
-To regenerate the Earth data (generated file committed; raw downloads are not):
+## How to play
 
-```
-curl -L -o tools/ne_50m_land.geojson https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_land.geojson
-curl -L -o tools/ne_50m_rivers.geojson https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_rivers_lake_centerlines.geojson
-curl -L -o tools/ne_10m_regions.geojson https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_geography_regions_polys.geojson
-node scripts/build-earthdata.mjs
-```
+### The basics
 
-- Walk the deck with WASD, drag to orbit the camera, wheel to zoom.
-- Stand near the tiller and press **E** to take the helm.
-- At the helm: **A/D** steer, **W/S** sheet in / ease the mainsail.
-- Trim matters: the mainsheet bar glows green when your trim is right for your
-  point of sail. In irons you stall; beam reach is king.
-- `window.saltstead` is the live game handle in the console.
+- **WASD** walks the deck; drag to orbit the camera, wheel to zoom.
+- **T** takes the tiller (and hands it back). At the helm: **A/D** steer,
+  **W/S** sheet in / ease the sails.
+- Trim matters: the mainsheet bar glows green when your trim suits your point of
+  sail. In irons you stall; a beam reach is king. A good sailor outruns a bad one.
+- **E** is the doing key: board, capture, dig, dive, bank, step ashore, put in at
+  port. **F** fires the broadside, **R** swaps round/chain shot.
+- **M** world chart, **L** ship's log, **N** star chart, **H** help book.
 
-## Run
+### Making a living (the sloop years)
+
+Your starting sloop is the fastest, shallowest thing afloat — and no warship. Run
+down unarmed **merchantmen** and board them; chase the fat, slow **Indiamen** for
+treble purses; dig up **treasure maps**; salvage the derelicts of the Bermuda
+Triangle. When a blue-hulled **navy corvette** turns toward you, run — you are
+faster than her, and **shallow water ends every chase** (her keel dare not follow
+yours). The **Captain's Briefing** pops on every new voyage and every new hull
+with the survival doctrine for what you sail.
+
+### Ports and the shipwright's ladder
+
+Four pirate **havens** (Port Royal, Nassau, Tortuga, Île Sainte-Marie) fence prizes
+at full price, no questions asked. Beyond them, **dockyards ring the whole world** —
+Havana to Nagasaki, Lisbon to Valparaíso — and every one repairs, signs on hands,
+and keeps a **shipwright**, so a voyage never beats back to the Caribbean for a
+topmast. Honest ports pay only half for a prize, though.
+
+Get rich and the shipwright builds you up the **ladder**: the **brig** throws two
+guns a side with twenty berths, but turns slowly and draws too much to beach. Every
+hull changes how you survive.
+
+### Sinking — what it costs
+
+Nobody dies in Saltstead, but the sea keeps accounts, in two doses:
+
+1. **Foundering** (holed through once): the crew heaves **a third of your gold**
+   overboard to keep her afloat, and she limps on **CRIPPLED** until a yard mends
+   her.
+2. **Wrecked** (holed through again while crippled): **she sinks.** Everyone lives —
+   the longboat lands the crew, your map, the log and **a tenth of the chest** at
+   the nearest port — but the ship, the prizes astern and the rest of the gold
+   belong to the sea, and you drop **a rung down the ladder** (a wrecked sloop
+   captain is staked a patched sloop; the voyage always goes on).
+
+Damage and the crippled flag ride the save — refreshing the page repairs nothing.
+The defense against ruin is seamanship plus two habits: **repair early**, and
+**bank what you can't bear to lose** in Davy Jones' Locker (banked gold is beyond
+the sea's reach, wreck or no wreck).
+
+### The legends
+
+Highlights of the world at their real geography: the Bermuda Triangle scrambles
+your instruments among salvage-rich derelicts, the Kraken haunts the Norwegian
+deeps, dragons stoop from Snowdonia, the Corryvreckan whirlpool slingshots the
+brave and dismasts the greedy, the Flying Dutchman rounds the Cape in storms, the
+1715 Plate Fleet lies in Florida's shallows, El Dorado hides up the Amazon, and
+Davy Jones' Locker over the Mariana Trench banks treasure forever.
+
+## Run it locally
 
 ```
 npm install
@@ -53,15 +98,29 @@ npm run verify     # the headless gate — must be green before any deploy
 npm run build      # production build
 ```
 
+`window.saltstead` is the live game handle in the dev console (`.ship`, `.gold`,
+`.hullId`, `.ocean.uniforms`, …).
+
+To regenerate the Earth data (the generated file is committed; raw downloads are not):
+
+```
+curl -L -o tools/ne_50m_land.geojson https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_land.geojson
+curl -L -o tools/ne_50m_rivers.geojson https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_rivers_lake_centerlines.geojson
+curl -L -o tools/ne_10m_regions.geojson https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_geography_regions_polys.geojson
+node scripts/build-earthdata.mjs
+```
+
 ## The verify gate
 
-Same contract as Moorstead: pure logic lives in modules that import no THREE/DOM
-(`src/waves.js`, `src/sailing.js`, `src/shipframe.js`, `src/shipphysics.js`), and each
-has a headless script defending it:
+Same contract as Moorstead: pure game logic lives in modules that import no THREE or
+DOM (waves, sailing, ship physics, the earth model, combat, merchants, plunder,
+treasure, ports, the shipyard ladder, monsters, legends…), and each is defended by a
+headless script in `scripts/verify-*.mjs`. `npm run verify` runs all of them (28
+checks at the time of writing) and **must be green before any deploy**. Every feature
+lands with a verify script; the gate is the contract.
 
-| Script | Defends |
-|---|---|
-| `verify-waves` | CPU/GPU wave parity — the sea the eye sees is the sea the hull feels |
-| `verify-sailing` | the point-of-sail curve; "a good sailor outruns a bad one" |
-| `verify-shipframe` | ship-local frame round-trips; deck clamp; the helm is reachable |
-| `verify-ship` | speed convergence, stalling in irons, rudder bite, buoyancy bounds |
+## Deploy
+
+`npm run deploy` — gates on a clean tree, on-main, and pushed; runs verify + build;
+patch-bumps; commits; ships to Vercel (saltstead.app → www.saltstead.app). Never
+deploy with a red gate.

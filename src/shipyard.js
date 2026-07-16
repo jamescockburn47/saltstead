@@ -35,10 +35,13 @@ export const HULLS = [
       'Your bolt-hole is the SHALLOWS. The sloop draws almost nothing \u2014 run '
         + 'her over the shoals, right up the beach if you must; deep hulls '
         + 'cannot follow and will break off the chase.',
-      'There is no death in Saltstead, only expense: holed through, the crew '
-        + 'heaves a third of your gold overboard to keep her afloat. Any port '
-        + 'on the chart repairs, hires hands, and \u2014 when your chest is heavy '
-        + 'enough \u2014 builds you a BIGGER SHIP.',
+      'Nobody dies in Saltstead, but the sea keeps accounts. Holed through '
+        + 'once, the crew heaves a THIRD of your gold overboard and she limps '
+        + 'on, CRIPPLED. Holed through again before a yard mends her, she '
+        + 'SINKS: the longboat lands the crew, your map, and a tenth of the '
+        + 'chest at the nearest port \u2014 the rest, and the ship, are the '
+        + 'sea\u2019s. Repair early. Bank at the Locker what you can\u2019t bear '
+        + 'to lose.',
     ],
   },
   {
@@ -67,6 +70,11 @@ export const HULLS = [
       'The same doctrine still holds: fight what you can beat, fence prizes '
         + 'at the pirate havens for full price, repair at any dockyard on the '
         + 'chart, and keep one eye on the weather gauge.',
+      'And mind the stakes you now sail for. A crippled ship that takes one '
+        + 'more holing SINKS \u2014 and a sunken brig drops you back to a sloop '
+        + 'with a tenth of the chest. Three thousand doubloons is a lot of '
+        + 'ship to leave on a reef. Repair the moment she\u2019s hurt; bank your '
+        + 'fortune in the Locker before you pick the big fights.',
     ],
   },
 ];
@@ -79,6 +87,14 @@ export function hullById(id) {
 export function nextHull(id) {
   const i = HULLS.findIndex((h) => h.id === id);
   return i >= 0 && i + 1 < HULLS.length ? HULLS[i + 1] : null;
+}
+
+// the rung below — what a wreck drops you to (combat.js wreck rule). From
+// the bottom of the ladder it returns the bottom: a wrecked sloop captain
+// gets a patched sloop staked by the harbour, never nothing.
+export function prevHull(id) {
+  const i = HULLS.findIndex((h) => h.id === id);
+  return HULLS[Math.max(0, i - 1)];
 }
 
 export function canBuyHull(gold, currentId) {

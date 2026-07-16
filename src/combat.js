@@ -102,11 +102,34 @@ export function autoBattle(seed, atkCrew, defCrew) {
   return { won, losses: Math.min(losses, atkCrew), odds };
 }
 
-// foundering (player hull to 0): the crew keeps her afloat by heaving cargo
-// over the side — a third of the chest goes to the fishes, never the ship.
-// There is no death in Saltstead; there is expensive humiliation.
+// ---- foundering and wrecking (the two-stage rule) ----
+// There is no death in Saltstead; there is expensive humiliation — in two
+// escalating doses:
+//
+// 1. FOUNDERING (hull to 0, first time): the crew keeps her afloat by
+//    heaving cargo over the side — a third of the chest goes to the fishes,
+//    the hull is patched to CRIPPLED_HULL, and she is CRIPPLED until a yard
+//    makes her whole. The warning shot.
+// 2. WRECKED (holed through again while still crippled): the sea takes her.
+//    Everyone lives — the longboat carries the crew, a tithe of the chest
+//    (WRECK_KEEP), the treasure map and the log to the nearest port — but
+//    the hull, the prize fleet astern, and the rest of the gold go down.
+//    Gold banked in Davy Jones' Locker is untouchable: that is the point.
+//    A wrecked hull drops you a rung on the shipwright's ladder
+//    (shipyard.js prevHull); a wrecked sloop gets a patched sloop staked by
+//    the harbour, so the game can never dead-end.
+export const CRIPPLED_HULL = 0.3; // what the emergency patch holds at
+export const WRECK_KEEP = 0.1;    // the longboat carries a tithe of the chest
+
 export function founderCost(gold) {
   return Math.round(gold / 3);
+}
+
+// the wreck's ledger: what the longboat lands with. Pure numbers, the Game
+// mutates state.
+export function wreckSpoils(gold) {
+  const kept = Math.round(gold * WRECK_KEEP);
+  return { kept, lost: gold - kept };
 }
 
 // repairs at a haven: the yard bills by what's missing

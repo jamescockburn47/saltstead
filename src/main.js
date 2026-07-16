@@ -12,7 +12,7 @@ import { isWarden, loadAuth, displayName } from './identity.js';
 import { FoamLayer } from './foamlayer.js';
 import { newShipState, stepShip, shipAttitude, beaches } from './shipphysics.js';
 import { frameFor, clampToDeck, localToWorld } from './shipframe.js';
-import { hullById, nextHull, buyHull } from './shipyard.js';
+import { hullById, nextHull, prevHull, buyHull } from './shipyard.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
 import { waveHeight } from './waves.js';
 import { TerrainLayer } from './terrain.js';
@@ -46,6 +46,7 @@ import { TYPES, NAVY_SHOAL } from './merchants.js';
 import {
   GUN_RANGE, reloadTime, beamBearing, inArc, rollHit, newHullState, applyShot,
   speedFactor, isSinking, NAVY_RELOAD, autoBattle, boardingOdds, founderCost,
+  wreckSpoils, CRIPPLED_HULL,
   repairCost,
 } from './combat.js';
 import {
@@ -144,7 +145,11 @@ class Game {
     this.toast = { text: '', until: 0 };
 
     // ---- the fighting ship (combat.js) ----
-    this.hull = newHullState(); // YOUR rig and hull — damage is a session scar
+    // YOUR rig and hull — damage rides the save, so a refresh never repairs
+    // her (the wreck rule would be toothless otherwise)
+    this.hull = newHullState();
+    if (save) { this.hull.rig = save.dmgRig; this.hull.hull = save.dmgHull; }
+    this.crippled = save?.crippled || false; // foundered once: the next holing WRECKS her
     this.shotKind = 'round';    // R swaps round (sink her) / chain (slow her)
     this.gunCool = 0;
     this.shotSeed = this.lootSeed * 977 + 1; // deterministic, like every roll
@@ -281,6 +286,7 @@ class Game {
       gold: this.gold, map: this.treasureMap, lootSeed: this.lootSeed,
       crew: this.crew, fleet: this.fleet.size(), log: this.log,
       banked: this.banked, won: this.won, hull: this.hullId,
+      dmgRig: this.hull.rig, dmgHull: this.hull.hull, crippled: this.crippled,
     })).catch(() => {});
   }
 
@@ -332,6 +338,7 @@ class Game {
     if (cost <= 0 || this.gold < cost) return;
     this.gold -= cost;
     this.hull.rig = 1; this.hull.hull = 1;
+    this.crippled = false; // whole again — the wreck clock resets
     this.say(`The yard makes her whole again \u2014 ${cost} doubloons`, 5);
     this.logEvent(`Repaired at ${this.port.haven.name} (${cost} doubloons)`);
     this.refreshPort();
@@ -346,6 +353,7 @@ class Game {
     this.gold = deal.gold;
     this.setHull(def);
     this.hull.rig = 1; this.hull.hull = 1; // she comes off the stocks whole
+    this.crippled = false;
     this.say(`The yard builds you a ${def.name.toUpperCase()} \u2014 ${deal.paid} doubloons. `
       + 'She smells of fresh oakum and tar.', 8);
     this.logEvent(`The shipwright at ${this.port.haven.name} built a ${def.name} `
@@ -379,6 +387,58 @@ class Game {
     this.portui.show(this.port.haven);
     this.refreshPort();
     this.logEvent(`Put in at ${this.port.haven.name}`);
+  }
+
+  // ---- the wreck (combat.js two-stage rule, stage two) ----
+  // Holed through while already crippled: the sea takes her. Everyone lives —
+  // the longboat carries the crew, a tithe of the chest, the map and the log
+  // to the nearest port — but the hull, the prizes astern and the rest of the
+  // gold go down. The wreck drops you a rung on the shipwright's ladder;
+  // gold banked in the Locker is untouched (that is the point of the Locker).
+  wreckShip(cause) {
+    const ll = worldToLatLon(this.ship.x, this.ship.z);
+    const port = (this.port || nearestHaven(ll.lat, ll.lon)).haven;
+    const sank = this.hullDef.name;
+    const spoils = wreckSpoils(this.gold);
+    const prizeHands = this.fleet.size() * PRIZE_CREW; // they row clear too
+    this.fleet.clear();
+    this.gold = spoils.kept;
+    const down = prevHull(this.hullId);
+    this.setHull(down);
+    this.crew = Math.min(down.berths, this.crew + prizeHands);
+    // the harbour's patched stake: she sails, but the yard will want coin
+    this.hull.rig = 0.75; this.hull.hull = 0.75;
+    this.crippled = false;
+    // the longboat makes the nearest port; she lies to anchor just offshore
+    const w = latLonToWorld(port.lat, port.lon);
+    const spot = this.findAnchorage(w.x, w.z) || w;
+    this.ship.x = spot.x; this.ship.z = spot.z;
+    this.ship.speed = 0; this.ship.rudder = 0;
+    if (this.mode === 'ashore') this.boardShip();
+    this.navyCool.clear();
+    this.lastPrizeId = null;
+    this.geoClock = 0; // resample the geography at the new anchorage now
+    this.say(`SHE\u2019S GONE \u2014 ${cause} sends the ${sank} down. The longboat pulls for `
+      + `${port.name} with every soul aboard and ${spoils.kept} doubloons saved from the chest. `
+      + `The harbour stakes you a patched ${down.name.toLowerCase()}. The sea keeps the rest.`, 14);
+    this.logEvent(`WRECKED \u2014 ${cause} sank the ${sank}; ${spoils.lost} doubloons and the fleet `
+      + `went down. The longboat made ${port.name}; a patched ${down.name} from the harbour`);
+    this.persist();
+  }
+
+  // nearest honest water to a point — where the wreck's longboat leaves you
+  findAnchorage(cx, cz) {
+    const ll0 = worldToLatLon(cx, cz);
+    if (elevation(ll0.lat, ll0.lon) < -1.2) return { x: cx, z: cz };
+    for (let r = 60; r <= 1800; r += 60) {
+      for (let a = 0; a < 16; a++) {
+        const ang = (a / 16) * Math.PI * 2;
+        const x = cx + Math.sin(ang) * r, z = cz + Math.cos(ang) * r;
+        const ll = worldToLatLon(x, z);
+        if (elevation(ll.lat, ll.lon) < -1.2) return { x, z };
+      }
+    }
+    return null;
   }
 
   // N: the planisphere — and on a clear night, the navigator takes a sight
@@ -873,13 +933,19 @@ class Game {
           if (hit) {
             applyShot(this.hull, kind);
             if (isSinking(this.hull)) {
-              // no death in Saltstead — expensive humiliation: cargo over the
-              // side keeps her afloat, crippled until a yard makes her whole
-              const lost = founderCost(this.gold);
-              this.gold -= lost;
-              this.hull.hull = 0.3;
-              this.say(`SHE\u2019S FOUNDERING \u2014 the crew heaves ${lost} doubloons of cargo over the side to keep her afloat. Make for a haven and repair!`, 10);
-              this.logEvent(`Nearly sunk by a corvette \u2014 ${lost} doubloons jettisoned to stay afloat`);
+              // the two-stage rule (combat.js): foundering is the warning,
+              // a second holing while crippled is the wreck
+              if (this.crippled) {
+                this.wreckShip('a corvette\u2019s broadside');
+              } else {
+                this.crippled = true;
+                const lost = founderCost(this.gold);
+                this.gold -= lost;
+                this.hull.hull = CRIPPLED_HULL;
+                this.say(`SHE\u2019S FOUNDERING \u2014 the crew heaves ${lost} doubloons of cargo over the side to keep her afloat. `
+                  + 'She\u2019s CRIPPLED: one more holing and the sea takes her. Make for a port and repair!', 10);
+                this.logEvent(`Nearly sunk by a corvette \u2014 ${lost} doubloons jettisoned to stay afloat`);
+              }
             } else {
               this.say(kind === 'chain'
                 ? `CHAIN SHOT rips your rig (${(this.hull.rig * 100).toFixed(0)}%) \u2014 R for chain, F to answer her`
@@ -1305,11 +1371,12 @@ class Game {
     this.hud.guns.textContent = this.gunCool > 0
       ? `reloading\u2026 ${this.gunCool.toFixed(0)}s`
       : `READY \u2014 ${this.shotKind} shot`;
-    const hurt = this.hull.rig < 0.999 || this.hull.hull < 0.999;
+    const hurt = this.hull.rig < 0.999 || this.hull.hull < 0.999 || this.crippled;
     this.hud.damage.style.display = hurt ? 'block' : 'none';
     if (hurt) {
       this.hud.damage.textContent =
-        `RIG ${(this.hull.rig * 100).toFixed(0)}% \u00b7 HULL ${(this.hull.hull * 100).toFixed(0)}%`;
+        `RIG ${(this.hull.rig * 100).toFixed(0)}% \u00b7 HULL ${(this.hull.hull * 100).toFixed(0)}%`
+        + (this.crippled ? ' \u00b7 CRIPPLED \u2014 one more holing sinks her' : '');
     }
     this.hud.fleet.textContent = this.fleet.size()
       ? ` \u00b7 ${this.fleet.size()} prize${this.fleet.size() > 1 ? 's' : ''} astern` : '';

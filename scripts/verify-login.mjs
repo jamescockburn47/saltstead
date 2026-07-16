@@ -107,6 +107,17 @@ const fakeStorage = () => {
   const longHull = acceptSave({ ...snapshotSave(ship, 0), hull: 'x'.repeat(400) });
   ok(longHull.hull.length <= 16, 'a bloated hull string is trimmed');
 
+  // battle damage and the crippled flag ride the save — a refresh never
+  // repairs her, so the two-stage wreck rule keeps its teeth
+  const hurtS = acceptSave(snapshotSave(ship, 0, { dmgRig: 0.4, dmgHull: 0.3, crippled: true }));
+  ok(hurtS.dmgRig === 0.4 && hurtS.dmgHull === 0.3 && hurtS.crippled === true,
+    'her hurts survive the round-trip');
+  ok(bare.dmgRig === 1 && bare.dmgHull === 1 && bare.crippled === false,
+    'a fresh pirate sails a whole ship');
+  const cheatDmg = acceptSave({ ...snapshotSave(ship, 0), dmgRig: 9, dmgHull: -2, crippled: 'yes' });
+  ok(cheatDmg.dmgRig === 1 && cheatDmg.dmgHull === 0 && cheatDmg.crippled === true,
+    'mangled damage clamps to [0,1], crippled reads as a boolean');
+
   const page = { d: 2, w: 'First watch', p: '17\u00b051\u2032N 76\u00b054\u2032W', x: 'Boarded a merchantman' };
   const logged = acceptSave(snapshotSave(ship, 0, { log: [page] }));
   ok(logged.log.length === 1 && logged.log[0].x === page.x,

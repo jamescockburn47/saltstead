@@ -2,7 +2,7 @@
 // harder, berths more and draws deeper than the last; the briefing doctrine
 // exists for every hull; and the yard's ledger never sells what you can't
 // pay for.
-import { HULLS, hullById, nextHull, canBuyHull, buyHull } from '../src/shipyard.js';
+import { HULLS, hullById, nextHull, prevHull, canBuyHull, buyHull } from '../src/shipyard.js';
 import { beaches } from '../src/shipphysics.js';
 
 let failed = 0;
@@ -45,6 +45,11 @@ ok(hullById('sloop').id === 'sloop', 'hullById finds the sloop');
 ok(hullById('no-such-hull').id === 'sloop', 'an unknown hull reads as the sloop, never a crash');
 ok(nextHull('sloop')?.id === 'brig', 'the sloop\'s next rung is the brig');
 ok(nextHull(HULLS[HULLS.length - 1].id) === null, 'the top of the ladder has no next rung');
+
+// the wreck rule reads DOWN the ladder and never off the bottom
+ok(prevHull('brig').id === 'sloop', 'a wrecked brig drops to a sloop');
+ok(prevHull('sloop').id === 'sloop', 'a wrecked sloop captain is staked a sloop — never nothing');
+ok(prevHull('no-such-hull').id === 'sloop', 'an unknown hull wrecks down to the bottom rung, never a crash');
 
 // the yard's ledger
 const brigPrice = hullById('brig').price;

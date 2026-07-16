@@ -6,7 +6,8 @@ import {
   GUN_RANGE, BROADSIDE_ARC, RELOAD_BASE, SHOT_KINDS,
   reloadTime, beamBearing, inArc, hitChance, rollHit,
   newHullState, applyShot, speedFactor, isSinking, salvageValue,
-  boardingOdds, autoBattle, founderCost, repairCost,
+  boardingOdds, autoBattle, founderCost, repairCost, wreckSpoils,
+  CRIPPLED_HULL, WRECK_KEEP,
 } from '../src/combat.js';
 
 let failed = 0;
@@ -95,6 +96,19 @@ ok(salvageValue(200) < 120 && salvageValue(200) > 50, 'a fraction floats');
 
 // the ledger: foundering hurts, repairs bill by what's missing
 ok(founderCost(900) === 300, 'a third of the chest goes to the fishes');
+
+// the wreck's ledger: the longboat carries a tithe, the sea takes the rest,
+// and the two stages are ordered — foundering costs less than wrecking
+{
+  const w = wreckSpoils(1000);
+  ok(w.kept === 100 && w.lost === 900, 'the longboat lands with a tithe of the chest');
+  ok(w.kept + w.lost === 1000, 'the ledger balances — no gold minted in the surf');
+  ok(wreckSpoils(0).kept === 0, 'a poor pirate wrecks for free');
+  ok(1000 - founderCost(1000) > wreckSpoils(1000).kept,
+    'foundering (the warning) always costs less than the wreck it warns of');
+  ok(CRIPPLED_HULL > 0 && CRIPPLED_HULL < 0.5, 'the emergency patch holds, barely');
+  ok(WRECK_KEEP > 0, 'the sea never takes quite everything');
+}
 {
   const st = newHullState();
   ok(repairCost(st) === 0, 'a whole ship owes the yard nothing');

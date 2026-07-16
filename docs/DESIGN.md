@@ -66,8 +66,8 @@ it never pays directly.
 
 Broadsides on F (R swaps round/chain shot), damage-as-states on both sides,
 navy corvettes that hunt and shoot back, sinking + floating salvage, the
-boarding autobattle for armed ships, foundering-as-jettison (no death, a third
-of the chest), and yard repairs at any haven. The design that got built:
+boarding autobattle for armed ships, the two-stage founder/wreck rule (below),
+and yard repairs at any port. The design that got built:
 
 The fight is **positioning, not aiming**. Third-person + low-poly means the skill
 expression is the same one sailing already trains: wind, angle, timing.
@@ -95,6 +95,29 @@ expression is the same one sailing already trains: wind, angle, timing.
    real cost of recklessness.
 6. **Multiplayer**: co-op broadsides against navy convoys first; PvP only in opt-in
    contested waters (the same rule as the identity section).
+
+### The founder/wreck rule (what sinking costs YOU)
+
+No death in Saltstead — but the sea keeps accounts, in two escalating doses
+(combat.js `founderCost` / `wreckSpoils`, wired in main.js `wreckShip`):
+
+1. **Foundering** — first time the hull reaches 0: the crew heaves a **third of
+   the chest** over the side, the hull is emergency-patched to `CRIPPLED_HULL`
+   (0.3), and the ship is **CRIPPLED** (flagged on the HUD, persisted in the
+   save) until a yard repairs her. The warning shot.
+2. **Wrecked** — holed through again while still crippled: **she sinks.**
+   Everyone lives; the longboat lands the crew (prize crews row clear too), the
+   treasure map, the ship's log and a **tithe of the chest** (`WRECK_KEEP`, 10%)
+   at the nearest port. Lost: the hull (drop one rung on the shipwright's ladder
+   — `prevHull`; a wrecked sloop is staked a patched sloop, the game can never
+   dead-end), the prize fleet astern, and the rest of the gold. **Banked gold in
+   Davy Jones' Locker is untouched** — the wreck rule is what makes the Locker
+   matter.
+
+Damage and the crippled flag **ride the save**, so a page refresh is never a
+repair. The intended lesson curve: foundering teaches "repair early"; the wreck
+teaches "bank before you brawl". Only round shot can sink you — the dragon and
+the whirlpool tear rig, the Kraken grips — so the rule lives where the navy is.
 
 ## Prizes and the fleet (yes — you can take her whole)
 
