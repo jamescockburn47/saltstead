@@ -47,7 +47,10 @@ you find a sail at night.
 
 ### Making a living (the sloop years)
 
-Your starting sloop is the fastest, shallowest thing afloat — and no warship. Run
+Your starting sloop is the fastest, shallowest thing afloat — and no warship. The
+**lookout sings out** every sail that comes in range ("SAIL HO!" with a compass
+point), and sighted ships ink onto the minimap — merchants in ink, the navy in
+blue, dead ships in grey. Run
 down unarmed **merchantmen** and board them; chase the fat, slow **Indiamen** for
 treble purses; dig up **treasure maps**; salvage the derelicts of the Bermuda
 Triangle. When a blue-hulled **navy corvette** turns toward you, run — you are

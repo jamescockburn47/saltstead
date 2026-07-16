@@ -106,6 +106,16 @@ export class MerchantLayer {
     return out;
   }
 
+  // every live hull with her papers — the lookout and the charts read this
+  sails() {
+    const out = [];
+    for (const e of this.live.values()) {
+      if (e.sinkT !== null) continue;
+      out.push({ id: e.m.id, type: e.m.type, x: e.m.x, z: e.m.z, yaw: e.m.yaw, looted: e.m.looted });
+    }
+    return out;
+  }
+
   // nearest un-stripped, un-sinking ship: { id, dist, m } or null
   nearestPrize(px, pz) {
     let best = null;

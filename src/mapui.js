@@ -27,18 +27,22 @@ function blit(img) {
   return c;
 }
 
-function drawShip(ctx, x, y, yaw, scale = 1) {
+function drawShip(ctx, x, y, yaw, scale = 1, color = BLOOD) {
   ctx.save();
   ctx.translate(x, y);
   // world yaw 0 = +z = south on the chart; the chart's north is up
   ctx.rotate(Math.PI - yaw);
-  ctx.fillStyle = BLOOD;
+  ctx.fillStyle = color;
   ctx.beginPath();
   ctx.moveTo(0, -6 * scale); ctx.lineTo(4 * scale, 5 * scale);
   ctx.lineTo(0, 2.5 * scale); ctx.lineTo(-4 * scale, 5 * scale);
   ctx.closePath(); ctx.fill();
   ctx.restore();
 }
+
+// other sails ink by trade: honest canvas in ink, the King's navy in blue,
+// the dead in weathered grey
+const SAIL_TINT = { navy: '#2c4a7a', derelict: '#6a6f72' };
 
 function drawLegend(ctx, x, y, kind) {
   ctx.strokeStyle = INK; ctx.fillStyle = INK; ctx.lineWidth = 1.5;
@@ -80,9 +84,11 @@ export class MapUI {
     this.worldWrap.style.display = this.worldOpen ? 'flex' : 'none';
   }
 
-  // called each frame; lat/lon/yaw are the SHIP's, digSite the treasure X
-  update(lat, lon, yaw, digSite = null) {
+  // called each frame; lat/lon/yaw are the SHIP's, digSite the treasure X,
+  // sails the other ships in lookout range ({ lat, lon, yaw, type })
+  update(lat, lon, yaw, digSite = null, sails = []) {
     this.digSite = digSite;
+    this.sails = sails;
     this.updateMini(lat, lon, yaw);
     if (this.worldOpen) this.updateWorld(lat, lon, yaw);
   }
@@ -115,6 +121,12 @@ export class MapUI {
       const p = chartXY(this.digSite.lat, this.digSite.lon, this.localView);
       if (p.x >= 0 && p.x < LOCAL_N && p.y >= 0 && p.y < LOCAL_N)
         this.drawX(ctx, p.x * k, p.y * k, 6);
+    }
+    // the lookout's sightings, small and coloured by trade
+    for (const o of this.sails || []) {
+      const p = chartXY(o.lat, o.lon, this.localView);
+      if (p.x >= 0 && p.x < LOCAL_N && p.y >= 0 && p.y < LOCAL_N)
+        drawShip(ctx, p.x * k, p.y * k, o.yaw, 0.65, SAIL_TINT[o.type] || INK);
     }
     const s = chartXY(lat, lon, this.localView);
     drawShip(ctx, s.x * k, s.y * k, yaw);

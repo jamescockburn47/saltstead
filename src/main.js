@@ -43,7 +43,7 @@ import { PortUI } from './portui.js';
 import { canSight, takeSight, sightText } from './navigation.js';
 import { StarChartUI } from './starchartui.js';
 import { LogUI } from './logui.js';
-import { TYPES, NAVY_SHOAL } from './merchants.js';
+import { TYPES, NAVY_SHOAL, LOOKOUT_R, compassPoint } from './merchants.js';
 import {
   GUN_RANGE, reloadTime, beamBearing, inArc, rollHit, newHullState, applyShot,
   speedFactor, isSinking, NAVY_RELOAD, autoBattle, boardingOdds, founderCost,
@@ -142,6 +142,7 @@ class Game {
     // merchants land here; the encounter gait reads it every frame
     this.contacts = [];
     this.merchants = new MerchantLayer(this.scene);
+    this.hailed = new Set(); // ships the lookout has already sung out
     this.wildlife = new WildlifeLayer(this.scene);
     this.fleet = new FleetLayer(this.scene);
     this.fleet.restore(this.savedFleet, this.ship.x, this.ship.z, this.ship.yaw);
@@ -944,6 +945,27 @@ class Game {
     this.merchants.update(t, dt, this.ship.x, this.ship.z, this.wind.from,
       this.shoalWater, lanternsUp);
 
+    // the lookout sings out each sail ONCE as she comes in view from the
+    // tops (LOOKOUT_R reaches far past the deck fog — that's the tops'
+    // whole job), one hail at a time so a busy sea doesn't shout you down
+    if (this.t > (this.hailCool || 0)) {
+      for (const s of this.merchants.sails()) {
+        if (this.hailed.has(s.id) || s.looted) continue;
+        if (Math.hypot(s.x - this.ship.x, s.z - this.ship.z) > LOOKOUT_R) continue;
+        this.hailed.add(s.id);
+        this.hailCool = this.t + 8;
+        const what = {
+          trader: 'merchant sail', indiaman: 'an INDIAMAN, deep-laden',
+          navy: 'a NAVY corvette', derelict: 'a dead ship adrift',
+        }[s.type] || 'a sail';
+        const tail = s.type === 'navy' ? ' \u2014 mind her guns'
+          : s.type === 'derelict' ? ' \u2014 salvage for the taking' : '';
+        this.say(`SAIL HO! ${what} to the `
+          + `${compassPoint(this.ship.x, this.ship.z, s.x, s.z)}${tail}`, 6);
+        break;
+      }
+    }
+
     // corvettes in range work their guns: the King's navy shoots FIRST
     {
       const hostile = this.merchants.nearestHostile(this.ship.x, this.ship.z);
@@ -1406,7 +1428,12 @@ class Game {
     }
     this.hud.legend.style.display = this.zone ? 'block' : 'none';
     if (this.zone) this.hud.legend.textContent = this.zone.legend.name.toUpperCase();
-    this.maps.update(showLat, showLon, showYaw, this.treasureMap);
+    // other sails ink onto the charts, so the lookout's hail can be FOLLOWED
+    const sailMarks = this.merchants.sails().map((s) => {
+      const ll = worldToLatLon(s.x, s.z);
+      return { lat: ll.lat, lon: ll.lon, yaw: s.yaw, type: s.type };
+    });
+    this.maps.update(showLat, showLon, showYaw, this.treasureMap, sailMarks);
     this.hud.gold.textContent = this.banked > 0
       ? `${this.gold} \u00b7 vault ${this.banked}` : this.gold;
     this.hud.weather.textContent = this.weatherState;

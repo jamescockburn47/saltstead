@@ -4,9 +4,9 @@
 // heave to when stripped, and the active cell walk covers the radius.
 import {
   cellMerchants, stepMerchant, activeCells, zoneDerelicts, CELL, ACTIVE_R,
-  FLEE_R, HUNT_R, CRUISE, PANIC, TYPES, NAVY_SHOAL,
+  FLEE_R, HUNT_R, CRUISE, PANIC, TYPES, NAVY_SHOAL, LOOKOUT_R, compassPoint,
 } from '../src/merchants.js';
-import { isLand, worldToLatLon, latLonToWorld } from '../src/earth.js';
+import { isLand, worldToLatLon, latLonToWorld, ENCOUNTER_FAR } from '../src/earth.js';
 import { inZone } from '../src/legendfx.js';
 import { SLOOP } from '../src/shipphysics.js';
 
@@ -38,6 +38,39 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
   ok(total >= 40, `the lanes are busy (${total} ships in 64 mixed cells)`);
   ok(seen.trader > 0, 'traders work the lanes');
 }
+
+// the HOME waters carry sail: the berth re-roll means the archipelago seas
+// (where the land veto used to eat half the table) still trade. A guest
+// spawning off Port Royal must have someone in lookout range of her first
+// hour's sailing — this is the "I saw no other ships" regression test.
+{
+  for (const [name, lat, lon] of [
+    ['Port Royal', 17.85, -76.9], ['Windward Passage', 19.5, -74.0],
+    ['mid-Atlantic', 24.0, -45.0], ['Biscay', 48.0, -8.0],
+  ]) {
+    const p = latLonToWorld(lat, lon);
+    let n = 0, nearest = Infinity;
+    for (const [cx, cz] of activeCells(p.x, p.z)) {
+      for (const m of cellMerchants(cx, cz)) {
+        const d = Math.hypot(m.x - p.x, m.z - p.z);
+        if (d <= ACTIVE_R) { n++; nearest = Math.min(nearest, d); }
+      }
+    }
+    ok(n >= 3, `${name}: the waters are worked (${n} sails within ${ACTIVE_R} m)`);
+    ok(nearest <= LOOKOUT_R * 1.5,
+      `${name}: someone near the lookout's reach (nearest ${Math.round(nearest)} m)`);
+  }
+}
+
+// the lookout outranges the encounter gait: you HEAR about a sail before
+// the current dies, never the other way round
+ok(LOOKOUT_R > ENCOUNTER_FAR, 'the tops see beyond hailing range');
+
+// the hail's compass points match the world frame (+x east, -z north)
+ok(compassPoint(0, 0, 0, -100) === 'north', 'north is -z');
+ok(compassPoint(0, 0, 100, 0) === 'east', 'east is +x');
+ok(compassPoint(0, 0, 0, 100) === 'south', 'south is +z');
+ok(compassPoint(0, 0, -100, -100) === 'nor\u2019west', 'quarters split true');
 
 // the wider ocean carries every honest type at roughly the design mix
 {

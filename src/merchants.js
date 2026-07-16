@@ -37,21 +37,29 @@ export const TYPES = {
 export const CRUISE = TYPES.trader.cruise; // the old names still mean the old ship
 export const PANIC = TYPES.trader.panic;
 
-// deterministic spawn specs for one cell: [] or 1–3 ships. Cells whose
-// spawn point is on/near land trade nothing (they're coastal folk, not us).
+// deterministic spawn specs for one cell: [] or 1–3 ships, roughly 1.3 a
+// cell (playtest: the old half-empty table made the ocean feel dead).
 // Inside the Bermuda Triangle the lanes go QUIET and the derelicts drift.
-// Density is tuned so a five-minute blue-water leg MEETS somebody (playtest:
-// the old half-empty table made the ocean feel dead) — roughly 1.3 sails a
-// cell before the land veto.
+//
+// A ship whose rolled berth lands on/near land RE-ROLLS at other
+// deterministic points in the cell instead of vanishing — without this the
+// archipelago seas (the Caribbean! the game's own home waters) lost more
+// than half their trade to the land veto and read as dead ocean.
+const BERTH_TRIES = 6;
 export function cellMerchants(cx, cz) {
   const roll = unit2(cx * 3.7, cz * 9.1);
-  const count = roll < 0.2 ? 0 : roll < 0.6 ? 1 : roll < 0.9 ? 2 : 3;
+  const count = roll < 0.12 ? 0 : roll < 0.5 ? 1 : roll < 0.85 ? 2 : 3;
   const out = [];
   for (let i = 0; i < count; i++) {
-    const x = (cx + 0.15 + 0.7 * unit2(cx + i * 31, cz * 1.3)) * CELL;
-    const z = (cz + 0.15 + 0.7 * unit2(cx * 1.7, cz + i * 47)) * CELL;
+    let x = 0, z = 0, afloat = false;
+    for (let a = 0; a < BERTH_TRIES && !afloat; a++) {
+      x = (cx + 0.08 + 0.84 * unit2(cx + i * 31 + a * 101, cz * 1.3 + a * 17)) * CELL;
+      z = (cz + 0.08 + 0.84 * unit2(cx * 1.7 + a * 59, cz + i * 47 + a * 23)) * CELL;
+      const ll = worldToLatLon(x, z);
+      afloat = !isLand(ll.lat, ll.lon) && coastDistGame(ll.lat, ll.lon) >= 600;
+    }
+    if (!afloat) continue; // a genuinely landlocked cell trades nothing
     const ll = worldToLatLon(x, z);
-    if (isLand(ll.lat, ll.lon) || coastDistGame(ll.lat, ll.lon) < 600) continue;
     let type;
     if (inZone(ll.lat, ll.lon, 'bermuda-triangle')) {
       type = 'derelict'; // nobody TRADES through the triangle any more
@@ -105,6 +113,20 @@ export function zoneDerelicts() {
 }
 
 const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+// The lookout's range: from the tops you see sail LONG before the deck fog
+// swallows hulls — this is how the player finds the trade the spawn table
+// lays out. main.js hails each ship once as she comes into view.
+export const LOOKOUT_R = 5000;
+
+// the hail's compass point, ship -> target. World frame: +x east, -z north
+// (chart north is up, yaw 0 faces +z = south).
+const POINTS = ['north', 'nor\u2019east', 'east', 'sou\u2019east',
+  'south', 'sou\u2019west', 'west', 'nor\u2019west'];
+export function compassPoint(px, pz, tx, tz) {
+  const ang = Math.atan2(tx - px, -(tz - pz)); // 0 = north, +ve = east about
+  return POINTS[((Math.round(ang / (Math.PI / 4)) % 8) + 8) % 8];
+}
 
 // water shallower than this (terrain elevation above it) is corvette-proof:
 // her deep keel dare not follow where a beaching sloop can run. The escape
