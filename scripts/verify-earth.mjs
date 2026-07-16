@@ -3,7 +3,8 @@
 // is deterministic, and the open-sea gait ramps correctly.
 import {
   latLonToWorld, worldToLatLon, isLand, coastDistGame, signedCoastGame,
-  elevation, gaitFactor, RING_COUNT, POINT_COUNT, M_PER_DEG, COAST_CAP,
+  elevation, gaitFactor, riverDistGame, mountainness,
+  RING_COUNT, POINT_COUNT, RIVER_COUNT, MTN_COUNT, M_PER_DEG, COAST_CAP, RIVER_CAP,
 } from '../src/earth.js';
 
 let failed = 0;
@@ -51,6 +52,29 @@ ok(elevation(17.5, -76.8) < 0 && elevation(17.5, -76.8) > -60, 'Caribbean shelf 
 ok(elevation(18.11, -77.28) === elevation(18.11, -77.28), 'deterministic');
 const e1 = elevation(53.2, -1.5), e2 = elevation(53.2, -1.5);
 ok(e1 === e2 && e1 > 0, 'inland England repeatable and dry');
+
+// rivers: the great ones are where they should be, the deep sea has none
+ok(RIVER_COUNT > 500, `river table populated (${RIVER_COUNT} lines)`);
+ok(riverDistGame(-3.1, -60.0) < 0.2 * M_PER_DEG, 'the Amazon runs past Manaus');
+ok(riverDistGame(51.45, 0.3) < 0.3 * M_PER_DEG, 'the Thames estuary has its river');
+ok(riverDistGame(30, -45) === RIVER_CAP, 'no rivers in the mid-Atlantic');
+
+// mountains: real ranges rise, lowlands do not
+ok(MTN_COUNT > 150, `mountain-range table populated (${MTN_COUNT} rings)`);
+ok(mountainness(46.5, 10.0) === 1, 'the Alps are a range');
+ok(mountainness(53.07, -4.08) > 0.5, 'Snowdonia is a range (the dragons approve)');
+ok(mountainness(38.5, -98.4) === 0, 'Kansas is flat');
+const alpsMax = Math.max(elevation(46.5, 10.0), elevation(46.4, 10.2), elevation(46.6, 9.8));
+ok(alpsMax > 80, `the Alps stand tall (${alpsMax.toFixed(0)} m game)`);
+ok(alpsMax > elevation(38.5, -98.4) * 2, 'the Alps tower over Kansas');
+
+// river valleys carve: the channel sits below its own banks
+{
+  // walk a small neighbourhood of the upper Amazon and compare channel vs shoulder
+  const onRiver = elevation(-3.32, -60.6);
+  const offRiver = elevation(-3.32 + 0.5, -60.6 + 0.5);
+  ok(onRiver < offRiver, `the valley is lower than the plain (${onRiver.toFixed(1)} vs ${offRiver.toFixed(1)})`);
+}
 
 // gait: 1x inshore, 4x in the open, smooth in between
 ok(gaitFactor(0) === 1 && gaitFactor(800) === 1, 'no gait inshore');

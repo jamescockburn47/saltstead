@@ -20,10 +20,20 @@ as low-poly terrain chunks around the ship. You spawn off Port Royal, Jamaica. S
 water grounds you; past ~800 m offshore the **open-sea gait** ramps to 4× so crossings
 compress while inshore sailing stays 1:1.
 
-To regenerate the Earth data (the generated file is committed; the raw download is not):
+Land has real relief: mountain ranges rise where Natural Earth says ranges are
+(Snowdonia included — the dragons need crags), real rivers carve valleys and run as
+blue channels, and biomes follow latitude (tropics, desert belts, snowline, polar ice).
+The sky is Moorstead's ported to a planetary frame: 30-minute day/night cycle, golden
+hours, an accelerated moon calendar, and a real star catalogue that tilts with your
+latitude — Polaris sinks as you sail south and the Southern Cross rises, so the stars
+are a working navigation instrument.
+
+To regenerate the Earth data (generated file committed; raw downloads are not):
 
 ```
 curl -L -o tools/ne_50m_land.geojson https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_land.geojson
+curl -L -o tools/ne_50m_rivers.geojson https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_rivers_lake_centerlines.geojson
+curl -L -o tools/ne_10m_regions.geojson https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_geography_regions_polys.geojson
 node scripts/build-earthdata.mjs
 ```
 

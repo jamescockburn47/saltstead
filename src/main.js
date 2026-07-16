@@ -13,6 +13,8 @@ import { DECK, HELM, clampToDeck, nearHelm, localToWorld } from './shipframe.js'
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS } from './sailing.js';
 import { waveHeight } from './waves.js';
 import { TerrainLayer } from './terrain.js';
+import { Sky } from './sky.js';
+import { DAY_LENGTH } from './skymath.js';
 import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
 } from './earth.js';
@@ -38,10 +40,8 @@ class Game {
 
     this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 1200);
 
-    const hemi = new THREE.HemisphereLight(0xcfe8ff, 0x1a3a50, 0.85);
-    const sun = new THREE.DirectionalLight(0xfff2d8, 1.5);
-    sun.position.set(120, 160, -80);
-    this.scene.add(hemi, sun);
+    this.sky = new Sky(this.scene);
+    this.dayStart = DAY_LENGTH * 0.35; // spawn mid-morning
 
     this.ocean = new Ocean(this.scene);
     this.foam = new FoamLayer(this.scene);
@@ -225,6 +225,8 @@ class Game {
     this.camera.lookAt(target);
 
     this.ocean.update(t, this.ship.x, this.ship.z);
+    const skyLL = worldToLatLon(this.ship.x, this.ship.z);
+    this.sky.update(t + this.dayStart, skyLL.lat, this.camera.position);
 
     // HUD
     this.hud.speed.textContent = (this.ship.speed * 1.944).toFixed(1) + ' kn';

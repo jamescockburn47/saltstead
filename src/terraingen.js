@@ -2,7 +2,8 @@
 // guards it. A chunk is a low-poly heightfield sampled from the Earth module,
 // coloured by height: seabed shallows, wet sand, dune grass, moor, crag.
 
-import { elevation, worldToLatLon, coastDistGame } from './earth.js';
+import { elevation, worldToLatLon, coastDistGame, riverDistGame, RIVER_HALF } from './earth.js';
+import { fbm2 } from './noise.js';
 
 export const CHUNK = 96;   // metres square
 export const RES = 16;     // quads per side (17x17 verts)
@@ -14,15 +15,25 @@ export function chunkWorthBuilding(cx, cz) {
   return coastDistGame(lat, lon) < CHUNK * 2.2;
 }
 
-// height -> flat-shaded palette (RGB 0..1)
-export function colourFor(h) {
+// height + latitude -> flat-shaded biome palette (RGB 0..1). Deterministic.
+export function colourFor(h, lat = 45, lon = 0) {
   if (h < -6) return [0.13, 0.25, 0.33];   // deep shelf
   if (h < -0.4) return [0.72, 0.68, 0.5];  // shallows / drying sand
   if (h < 2.2) return [0.83, 0.76, 0.55];  // beach
-  if (h < 9) return [0.38, 0.52, 0.28];    // grass
-  if (h < 20) return [0.42, 0.44, 0.3];    // moor
+  const aLat = Math.abs(lat);
+  // snow: polar always; elsewhere the snowline drops as latitude climbs
+  const snowline = Math.max(6, 60 - (aLat - 40) * 1.6);
+  if (aLat > 66 || h > snowline) return [0.92, 0.93, 0.95];
+  // desert belts (~15-33 deg), noise-broken so edges aren't stripes
+  if (aLat > 14 && aLat < 34 && h < 26 && fbm2(lon * 0.6 + 9, lat * 0.6) > 0.42) {
+    return [0.78, 0.66, 0.44];
+  }
+  if (h < 9) return aLat < 28 ? [0.3, 0.55, 0.26] : [0.38, 0.52, 0.28]; // tropics greener
+  if (h < 24) return [0.42, 0.44, 0.3];    // moor
   return [0.52, 0.5, 0.47];                // crag
 }
+
+export const RIVER_COLOUR = [0.2, 0.42, 0.52];
 
 // positions (world-space), RGBA-free colours, and triangle indices for chunk
 // (cx, cz). Deterministic: same chunk, same mesh, every client (invariant 6).
@@ -40,7 +51,8 @@ export function buildChunkData(cx, cz) {
       if (h > -1.5) hasDry = true;
       const k = (j * n + i) * 3;
       pos[k] = x; pos[k + 1] = h; pos[k + 2] = z;
-      const c = colourFor(h);
+      const c = (h > -0.4 && riverDistGame(lat, lon) < RIVER_HALF * 0.9)
+        ? RIVER_COLOUR : colourFor(h, lat, lon);
       col[k] = c[0]; col[k + 1] = c[1]; col[k + 2] = c[2];
     }
   }

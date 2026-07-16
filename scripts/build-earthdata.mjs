@@ -1,62 +1,93 @@
-// build-earthdata: bakes Natural Earth 50m land polygons into src/earthdata.js
-// — quantized coastline rings + a coarse land mask, as data-in-code (the
-// moorsgeo trick at planet scale; invariant: no binary asset files at runtime).
+// build-earthdata: bakes Natural Earth public-domain vectors into
+// src/earthdata.js — data-in-code (the moorsgeo trick at planet scale;
+// invariant: no binary asset files at runtime).
 //
-// Input:  tools/ne_50m_land.geojson (downloaded, gitignored — see README)
+// Inputs (downloaded, gitignored — see README):
+//   tools/ne_50m_land.geojson      — coastline polygons
+//   tools/ne_50m_rivers.geojson    — river centrelines
+//   tools/ne_10m_regions.geojson   — geography regions (mountain ranges)
 // Output: src/earthdata.js (generated, committed)
 //
-// Encoding: all ring coords quantized to 0.01 degrees, thinned, stored as
-// absolute Int16 pairs [lon, lat] in one flat array; ring boundaries in an
-// Int32 offset table; 0.5-degree even-odd land mask for the offshore case.
+// Encoding: coords quantized to 0.01 degrees, thinned, absolute Int16 pairs
+// [lon, lat] flat; per-table Int32 offset arrays mark ring/line boundaries.
+// Land rings are CLOSED; river lines are OPEN; mountain rings are CLOSED.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const SCALE = 100;            // 0.01 degree quantization
-const THIN = 2;               // drop points closer than 0.02 deg to the last kept
-const MASK_W = 720, MASK_H = 360; // 0.5 degree cells
+const SCALE = 100;
+const MASK_W = 720, MASK_H = 360;
 
-const gj = JSON.parse(readFileSync('tools/ne_50m_land.geojson', 'utf8'));
-
-const rings = [];
-for (const f of gj.features) {
-  const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates]
-    : f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates : [];
-  for (const poly of polys) {
-    for (const ring of poly) { // exterior + holes: even-odd treats them alike
-      const q = [];
-      let plon = null, plat = null;
-      for (const [lon, lat] of ring) {
-        const ql = Math.round(lon * SCALE), qa = Math.round(lat * SCALE);
-        if (plon !== null && Math.abs(ql - plon) < THIN && Math.abs(qa - plat) < THIN) continue;
-        q.push(ql, qa);
-        plon = ql; plat = qa;
-      }
-      // drop the explicit closing point; rings close implicitly
-      if (q.length >= 4 && q[0] === q[q.length - 2] && q[1] === q[q.length - 1]) q.length -= 2;
-      if (q.length >= 8) rings.push(q); // fewer than 4 points is no island
+function quantizeLines(lineArrays, thin) {
+  const out = [];
+  for (const line of lineArrays) {
+    const q = [];
+    let plon = null, plat = null;
+    for (const [lon, lat] of line) {
+      const ql = Math.round(lon * SCALE), qa = Math.round(lat * SCALE);
+      if (plon !== null && Math.abs(ql - plon) < thin && Math.abs(qa - plat) < thin) continue;
+      q.push(ql, qa);
+      plon = ql; plat = qa;
     }
+    if (q.length >= 4 && q[0] === q[q.length - 2] && q[1] === q[q.length - 1]) q.length -= 2;
+    if (q.length >= 4) out.push(q);
   }
+  return out;
 }
 
-const totalPts = rings.reduce((s, r) => s + r.length / 2, 0);
-const offsets = new Int32Array(rings.length + 1);
-const coords = new Int16Array(totalPts * 2);
-let w = 0;
-rings.forEach((r, i) => {
-  offsets[i] = w / 2;
-  coords.set(r, w);
-  w += r.length;
-});
-offsets[rings.length] = w / 2;
+function ringsOf(features) {
+  const lines = [];
+  for (const f of features) {
+    const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates]
+      : f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates : [];
+    for (const poly of polys) for (const ring of poly) lines.push(ring);
+  }
+  return lines;
+}
 
-// ---- land mask: even-odd scanline over ALL ring edges per 0.5-deg row ----
+function linesOf(features) {
+  const lines = [];
+  for (const f of features) {
+    const ls = f.geometry.type === 'LineString' ? [f.geometry.coordinates]
+      : f.geometry.type === 'MultiLineString' ? f.geometry.coordinates : [];
+    for (const l of ls) lines.push(l);
+  }
+  return lines;
+}
+
+function pack(rings) {
+  const total = rings.reduce((s, r) => s + r.length / 2, 0);
+  const offsets = new Int32Array(rings.length + 1);
+  const coords = new Int16Array(total * 2);
+  let w = 0;
+  rings.forEach((r, i) => { offsets[i] = w / 2; coords.set(r, w); w += r.length; });
+  offsets[rings.length] = w / 2;
+  return { offsets, coords, total };
+}
+
+// ---- land ----
+const landGJ = JSON.parse(readFileSync('tools/ne_50m_land.geojson', 'utf8'));
+const landRings = quantizeLines(ringsOf(landGJ.features), 2)
+  .filter((r) => r.length >= 8);
+const land = pack(landRings);
+
+// ---- rivers (all scaleranks; thinned harder — they read from sail distance) ----
+const riverGJ = JSON.parse(readFileSync('tools/ne_50m_rivers.geojson', 'utf8'));
+const riverLines = quantizeLines(linesOf(riverGJ.features), 3);
+const rivers = pack(riverLines);
+
+// ---- mountain ranges (10m regions, Range/mtn only, thinned hard) ----
+const regGJ = JSON.parse(readFileSync('tools/ne_10m_regions.geojson', 'utf8'));
+const mtnFeatures = regGJ.features.filter((f) => f.properties.FEATURECLA === 'Range/mtn');
+const mtnRings = quantizeLines(ringsOf(mtnFeatures), 5).filter((r) => r.length >= 8);
+const mtns = pack(mtnRings);
+
+// ---- land mask: even-odd scanline per 0.5-deg row ----
 const mask = new Uint8Array((MASK_W * MASK_H) / 8);
 for (let row = 0; row < MASK_H; row++) {
-  const lat = 90 - (row + 0.5) * (180 / MASK_H); // row 0 = north
-  const qlat = lat * SCALE;
+  const qlat = (90 - (row + 0.5) * (180 / MASK_H)) * SCALE;
   const xs = [];
-  for (let ri = 0; ri < rings.length; ri++) {
-    const r = rings[ri], n = r.length / 2;
+  for (const r of landRings) {
+    const n = r.length / 2;
     for (let i = 0; i < n; i++) {
       const x1 = r[i * 2], y1 = r[i * 2 + 1];
       const j = (i + 1) % n;
@@ -77,34 +108,38 @@ for (let row = 0; row < MASK_H; row++) {
   }
 }
 
-// ---- sanity before we write anything ----
+// ---- sanity before writing ----
 const landAt = (lat, lon) => {
   const col = Math.min(MASK_W - 1, Math.max(0, Math.round((lon + 180) / (360 / MASK_W) - 0.5)));
   const row = Math.min(MASK_H - 1, Math.max(0, Math.round((90 - lat) / (180 / MASK_H) - 0.5)));
   const bit = row * MASK_W + col;
   return !!(mask[bit >> 3] & (1 << (bit & 7)));
 };
-const checks = [
+for (const [name, lat, lon, want] of [
   ['London', 51.5, -0.1, true], ['Kansas', 38.5, -98.4, true],
   ['Sahara', 23.0, 10.0, true], ['Siberia', 65.0, 100.0, true],
   ['mid-Atlantic', 30.0, -45.0, false], ['mid-Pacific', 0.0, -150.0, false],
   ['North Sea', 56.5, 3.0, false], ['Jamaica', 18.11, -77.28, true],
-];
-for (const [name, lat, lon, want] of checks) {
-  if (landAt(lat, lon) !== want) { console.error(`SANITY FAIL: ${name} land=${!want}`); process.exit(1); }
+]) {
+  if (landAt(lat, lon) !== want) { console.error(`SANITY FAIL: ${name}`); process.exit(1); }
 }
 
 const b64 = (arr) => Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength).toString('base64');
-const out = `// GENERATED by scripts/build-earthdata.mjs from Natural Earth 50m land
-// (public domain). Do not edit by hand — rerun the build script.
-// ${rings.length} coastline rings, ${totalPts} points, 0.01-deg quantized.
+const out = `// GENERATED by scripts/build-earthdata.mjs from Natural Earth (public
+// domain): 50m land, 50m rivers, 10m geography regions. Do not edit by hand.
+// land: ${landRings.length} rings / ${land.total} pts; rivers: ${riverLines.length} lines / ${rivers.total} pts;
+// mountain ranges: ${mtnRings.length} rings / ${mtns.total} pts. 0.01-deg quantized.
 export const COORD_SCALE = ${SCALE};
 export const MASK_W = ${MASK_W};
 export const MASK_H = ${MASK_H};
-export const RING_OFFSETS_B64 = '${b64(offsets)}';
-export const COORDS_B64 = '${b64(coords)}';
+export const RING_OFFSETS_B64 = '${b64(land.offsets)}';
+export const COORDS_B64 = '${b64(land.coords)}';
 export const MASK_B64 = '${b64(mask)}';
+export const RIVER_OFFSETS_B64 = '${b64(rivers.offsets)}';
+export const RIVER_COORDS_B64 = '${b64(rivers.coords)}';
+export const MTN_OFFSETS_B64 = '${b64(mtns.offsets)}';
+export const MTN_COORDS_B64 = '${b64(mtns.coords)}';
 `;
 writeFileSync('src/earthdata.js', out);
-console.log(`earthdata: ${rings.length} rings, ${totalPts} points, `
-  + `${(out.length / 1024).toFixed(0)} KB of JS, mask ${MASK_W}x${MASK_H} — sanity checks green`);
+console.log(`earthdata: land ${landRings.length}/${land.total}, rivers ${riverLines.length}/${rivers.total}, `
+  + `mtns ${mtnRings.length}/${mtns.total}, ${(out.length / 1024).toFixed(0)} KB JS — sanity green`);
