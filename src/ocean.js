@@ -13,8 +13,22 @@ const SIZE = 720, SEG = 180;
 
 export class Ocean {
   constructor(scene) {
-    const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
+    // non-indexed so every TRIANGLE carries its own centroid attribute: the
+    // glitter lights whole facets (the sea's own language), not the square
+    // voxel cells the idiom used on Moorstead
+    let geo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
     geo.rotateX(-Math.PI / 2);
+    geo = geo.toNonIndexed();
+    {
+      const pos = geo.attributes.position;
+      const cen = new Float32Array(pos.count * 2);
+      for (let v = 0; v < pos.count; v += 3) {
+        const cx = (pos.getX(v) + pos.getX(v + 1) + pos.getX(v + 2)) / 3;
+        const cz = (pos.getZ(v) + pos.getZ(v + 1) + pos.getZ(v + 2)) / 3;
+        for (let k = 0; k < 3; k++) { cen[(v + k) * 2] = cx; cen[(v + k) * 2 + 1] = cz; }
+      }
+      geo.setAttribute('aCentroid', new THREE.BufferAttribute(cen, 2));
+    }
     this.uniforms = {
       uTime: { value: 0 },
       uOrigin: { value: new THREE.Vector2(0, 0) },
@@ -36,15 +50,18 @@ export class Ocean {
     });
     mat.onBeforeCompile = (sh) => {
       for (const k of Object.keys(this.uniforms)) sh.uniforms[k] = this.uniforms[k];
-      sh.vertexShader = 'uniform float uTime;\nuniform vec2 uOrigin;\nvarying vec2 vWXZ;\n' + sh.vertexShader
+      sh.vertexShader = 'uniform float uTime;\nuniform vec2 uOrigin;\nattribute vec2 aCentroid;\nvarying vec2 vWXZ;\nvarying vec2 vTriC;\n' + sh.vertexShader
         .replace('#include <begin_vertex>',
           '#include <begin_vertex>\n'
           + '  float wx = position.x + uOrigin.x;\n'
           + '  float wz = position.z + uOrigin.y;\n'
           + '  vWXZ = vec2(wx, wz);\n'
+          // constant across each triangle (all 3 verts share aCentroid), so
+          // the varying IS the facet id; mod keeps the hash in float precision
+          + '  vTriC = mod(aCentroid + uOrigin, vec2(4096.0));\n'
           + `  transformed.y += ${glslWaveSum()};`);
       sh.fragmentShader = 'uniform float uTime;\nuniform vec3 uCamPos;\nuniform vec2 uSunAzim;\n'
-        + 'uniform float uSunLow;\nuniform float uGlitter;\nuniform float uFresnel;\nuniform vec3 uFresCol;\nvarying vec2 vWXZ;\n'
+        + 'uniform float uSunLow;\nuniform float uGlitter;\nuniform float uFresnel;\nuniform vec3 uFresCol;\nvarying vec2 vWXZ;\nvarying vec2 vTriC;\n'
         + 'float wHash(vec2 p){ p = fract(p * vec2(123.34, 345.45)); p += dot(p, p + 34.345); return fract(p.x * p.y); }\n'
         + sh.fragmentShader
           .replace('#include <color_fragment>',
@@ -55,10 +72,15 @@ export class Ocean {
             + '  float wVL = max(length(wView), 1e-3);\n'
             + '  float wAlign = max(0.0, dot(wView / wVL, uSunAzim));\n'
             + '  float wCorr = pow(wAlign, mix(6.0, 24.0, uSunLow)) * (1.0 + uSunLow);\n'
-            // aperiodic cellular sparkle: per-cell speed AND phase from a second
-            // hash so no shared frequency survives the population sum ([sword-2])
-            + '  float wH = wHash(floor(vWXZ * 0.6));\n'
-            + '  float wH2 = wHash(floor(vWXZ * 0.6) + 19.19);\n'
+            // per-FACET sparkle: hashes key off the triangle centroid, so a
+            // glint is one whole tilted facet catching the light — triangular
+            // glitter for a triangular sea ([sword-2] anti-pulse kept: each
+            // facet has its own twinkle speed AND phase). Centroids sit on
+            // multiples of 4/3 m, so *1.5 lands exact integers: the round
+            // scrubs off interpolation ulp-noise the hash would amplify
+            + '  vec2 wCell = floor(vTriC * 1.5 + 0.5);\n'
+            + '  float wH = wHash(wCell * 0.37);\n'
+            + '  float wH2 = wHash(wCell * 0.37 + 19.19);\n'
             + '  float wTw = 0.55 + 0.45 * sin(uTime * (1.5 + wH2 * 2.5) + wH2 * 6.2831);\n'
             + '  float wG = step(1.0 - 0.42 * wCorr, wH) * wTw * (0.5 + 0.5 * wH);\n'
             + '  float wDist = smoothstep(12.0, 40.0, wVL);\n'
