@@ -17,10 +17,12 @@ export function canBoard(dist, relSpeed) {
 // a merchant's purse: 40–220 doubloons, and roughly a third carry a treasure
 // map in the master's cabin — the map is the hook that points you at the world
 export const MAP_CHANCE = 0.35;
+export const HANDS_CHANCE = 0.34; // fleet.js JOIN_CHANCE — piracy recruits from its victims
 export function lootRoll(seed) {
   return {
     gold: Math.round(40 + u01(seed, 17.3) * 180),
     map: u01(seed, 91.7) < MAP_CHANCE,
+    hands: u01(seed, 61.3) < HANDS_CHANCE, // a sailor signs articles
   };
 }
 

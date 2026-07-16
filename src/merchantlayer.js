@@ -63,4 +63,21 @@ export class MerchantLayer {
     if (e) e.m.looted = true;
     this.looted.add(id);
   }
+
+  // hand the hull over (prize capture): remove from the lanes for good and
+  // return her pose, or null if she's gone
+  take(id) {
+    const e = this.live.get(id);
+    if (!e) return null;
+    this.scene.remove(e.group);
+    this.live.delete(id);
+    this.looted.add(id); // her berth in the spawn table stays empty
+    return { x: e.m.x, z: e.m.z, yaw: e.m.yaw };
+  }
+
+  // pose of a live merchant (for the capture window check)
+  poseOf(id) {
+    const e = this.live.get(id);
+    return e ? { x: e.m.x, z: e.m.z, yaw: e.m.yaw, looted: e.m.looted } : null;
+  }
 }

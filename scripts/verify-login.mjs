@@ -67,6 +67,10 @@ const fakeStorage = () => {
   ok(!('speed' in back.ship), 'speed is not persisted (you resume becalmed)');
   ok(back.gold === 340 && back.lootSeed === 4, 'the purse survives the round-trip');
   ok(back.map && back.map.lat === 18.05 && back.map.seed === 3, 'the treasure map survives');
+  const crewed = acceptSave(snapshotSave(ship, 0, { crew: 11, fleet: 2 }));
+  ok(crewed.crew === 11 && crewed.fleet === 2, 'crew and fleet survive the round-trip');
+  const greedy = acceptSave({ ...snapshotSave(ship, 0), fleet: 9, crew: -2 });
+  ok(greedy.fleet === 3 && greedy.crew === 8, 'fleet clamped to the cap, bad crew resets');
   const bare = acceptSave(snapshotSave(ship, 0));
   ok(bare.gold === 0 && bare.map === null && bare.lootSeed === 1,
     'a lootless save reads as a poor pirate (additive fields, invariant 1)');

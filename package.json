@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "node scripts/deploy.mjs",
-    "verify": "node scripts/verify-waves.mjs && node scripts/verify-sailing.mjs && node scripts/verify-shipframe.mjs && node scripts/verify-ship.mjs && node scripts/verify-foam.mjs && node scripts/verify-wood.mjs && node scripts/verify-legends.mjs && node scripts/verify-earth.mjs && node scripts/verify-chart.mjs && node scripts/verify-terraingen.mjs && node scripts/verify-sky.mjs && node scripts/verify-light.mjs && node scripts/verify-login.mjs && node scripts/verify-plunder.mjs && node scripts/verify-treasure.mjs && node scripts/verify-merchants.mjs && node scripts/verify-weather.mjs && node scripts/verify-wildlife.mjs",
+    "verify": "node scripts/verify-waves.mjs && node scripts/verify-sailing.mjs && node scripts/verify-shipframe.mjs && node scripts/verify-ship.mjs && node scripts/verify-foam.mjs && node scripts/verify-wood.mjs && node scripts/verify-legends.mjs && node scripts/verify-earth.mjs && node scripts/verify-chart.mjs && node scripts/verify-terraingen.mjs && node scripts/verify-sky.mjs && node scripts/verify-light.mjs && node scripts/verify-login.mjs && node scripts/verify-plunder.mjs && node scripts/verify-treasure.mjs && node scripts/verify-merchants.mjs && node scripts/verify-weather.mjs && node scripts/verify-wildlife.mjs && node scripts/verify-fleet.mjs",
     "verify:waves": "node scripts/verify-waves.mjs",
     "verify:sailing": "node scripts/verify-sailing.mjs",
     "verify:shipframe": "node scripts/verify-shipframe.mjs",
@@ -27,7 +27,8 @@
     "verify:treasure": "node scripts/verify-treasure.mjs",
     "verify:merchants": "node scripts/verify-merchants.mjs",
     "verify:weather": "node scripts/verify-weather.mjs",
-    "verify:wildlife": "node scripts/verify-wildlife.mjs"
+    "verify:wildlife": "node scripts/verify-wildlife.mjs",
+    "verify:fleet": "node scripts/verify-fleet.mjs"
   },
   "dependencies": {
     "three": "^0.166.0"

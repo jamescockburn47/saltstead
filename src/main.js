@@ -21,6 +21,8 @@ import { bootTitle } from './title.js';
 import { loadGame, saveGame, snapshotSave } from './save.js';
 import { MerchantLayer } from './merchantlayer.js';
 import { WildlifeLayer } from './wildlifelayer.js';
+import { FleetLayer } from './fleetlayer.js';
+import { canTakePrize, START_CREW, PRIZE_CREW, MIN_CREW, FLEET_MAX } from './fleet.js';
 import { canBoard, lootRoll, chestRoll } from './plunder.js';
 import { findDigSite, digDist, DIG_RADIUS, DIG_TIME } from './treasure.js';
 import {
@@ -69,6 +71,8 @@ class Game {
     this.treasureMap = null;   // { seed, lat, lon } — the X on the charts
     this.digTimer = 0;
     this.lootSeed = 1;         // rolls forward with every prize taken
+    this.crew = START_CREW;    // hands aboard — the currency of capture
+    this.savedFleet = 0;       // prizes to restore once the scene exists
     if (save) {
       this.ship.x = save.ship.x; this.ship.z = save.ship.z;
       this.ship.yaw = save.ship.yaw; this.ship.trim = save.ship.trim;
@@ -76,6 +80,8 @@ class Game {
       this.gold = save.gold;
       this.treasureMap = save.map;
       this.lootSeed = save.lootSeed;
+      this.crew = save.crew;
+      this.savedFleet = save.fleet;
     }
     this.saveClock = 12; // first autosave soon after boarding
     document.addEventListener('visibilitychange', () => {
@@ -89,6 +95,9 @@ class Game {
     this.contacts = [];
     this.merchants = new MerchantLayer(this.scene);
     this.wildlife = new WildlifeLayer(this.scene);
+    this.fleet = new FleetLayer(this.scene);
+    this.fleet.restore(this.savedFleet, this.ship.x, this.ship.z, this.ship.yaw);
+    this.lastPrizeId = null; // the stripped hull still alongside (capture window)
     this.toast = { text: '', until: 0 };
     const sloop = buildSloop();
     this.shipGroup = sloop.group;
@@ -146,6 +155,8 @@ class Game {
       gold: document.getElementById('gold'),
       toast: document.getElementById('toast'),
       weather: document.getElementById('weather'),
+      crew: document.getElementById('crewn'),
+      fleet: document.getElementById('fleetn'),
     };
 
     this.maps = new MapUI();
@@ -161,6 +172,7 @@ class Game {
   persist() {
     saveGame(snapshotSave(this.ship, this.t + this.dayStart, {
       gold: this.gold, map: this.treasureMap, lootSeed: this.lootSeed,
+      crew: this.crew, fleet: this.fleet.size(),
     })).catch(() => {});
   }
 
@@ -226,6 +238,7 @@ class Game {
       return;
     }
     if (this.boardable) { this.boardPrize(); return; }
+    if (this.captureable) { this.takePrize(); return; }
     if (this.digReady && this.digTimer <= 0) {
       this.digTimer = DIG_TIME;
       this.say('The longboat pulls for the shore\u2026');
@@ -284,9 +297,14 @@ class Game {
   boardPrize() {
     const prize = this.boardable;
     this.merchants.strip(prize.id);
+    this.lastPrizeId = prize.id; // the capture window opens
     const roll = lootRoll(this.lootSeed);
     this.gold += roll.gold;
     let msg = `Boarded! ${roll.gold} doubloons in her hold`;
+    if (roll.hands) {
+      this.crew++;
+      msg += ' \u2014 a sailor signs articles';
+    }
     if (roll.map && !this.treasureMap) {
       const ll = worldToLatLon(this.ship.x, this.ship.z);
       const site = findDigSite(this.lootSeed, ll.lat, ll.lon);
@@ -297,6 +315,17 @@ class Game {
     }
     this.lootSeed++;
     this.say(msg, 7);
+    this.persist();
+  }
+
+  takePrize() {
+    const pose = this.merchants.take(this.lastPrizeId);
+    this.lastPrizeId = null;
+    if (!pose) return;
+    this.crew -= PRIZE_CREW;
+    this.fleet.add(pose.x, pose.z, pose.yaw);
+    this.say(`A prize crew of ${PRIZE_CREW} takes her \u2014 she falls in astern. `
+      + `(${this.crew} hands left aboard)`, 7);
     this.persist();
   }
 
@@ -374,10 +403,27 @@ class Game {
     const gait = encounterGait(gaitFactor(this.coastDist), contactDist);
     this.shipSighted = contactDist < ENCOUNTER_FAR;
 
+    // your own prizes sail in your wake, sharing your current
+    this.fleet.update(t, dt, this.ship.x, this.ship.z, this.ship.yaw,
+      this.ship.speed * gait, this.wind.from);
+
     // boarding window: alongside a prize with speed matched
     const prize = this.merchants.nearestPrize(this.ship.x, this.ship.z);
     this.boardable = (prize && canBoard(prize.dist, this.ship.speed * gait - prize.m.speed))
       ? prize : null;
+
+    // the capture window: a freshly stripped hull still alongside + spare hands
+    this.captureable = false;
+    if (this.lastPrizeId) {
+      const pose = this.merchants.poseOf(this.lastPrizeId);
+      if (!pose) {
+        this.lastPrizeId = null;
+      } else {
+        const d = Math.hypot(pose.x - this.ship.x, pose.z - this.ship.z);
+        if (d > 60) this.lastPrizeId = null; // you sailed off — the window closes
+        else this.captureable = canTakePrize(this.crew, this.fleet.size());
+      }
+    }
 
     // the dig: from the deck the crew rows in and does the shovel work; on
     // foot you stand on the X yourself and dig
@@ -543,6 +589,9 @@ class Game {
     this.maps.update(ll.lat, ll.lon, this.ship.yaw, this.treasureMap);
     this.hud.gold.textContent = this.gold;
     this.hud.weather.textContent = this.weatherState;
+    this.hud.crew.textContent = this.crew;
+    this.hud.fleet.textContent = this.fleet.size()
+      ? ` \u00b7 ${this.fleet.size()} prize${this.fleet.size() > 1 ? 's' : ''} astern` : '';
     this.hud.hint.textContent = this.mode === 'ashore'
       ? (this.digTimer > 0
         ? 'Digging\u2026'
@@ -551,7 +600,9 @@ class Game {
           : 'WASD \u2014 explore ashore \u00b7 E \u2014 back to the ship')
       : this.boardable
         ? 'E \u2014 BOARD HER!'
-        : this.digTimer > 0
+        : this.captureable
+          ? `E \u2014 put a prize crew aboard (${PRIZE_CREW} hands) \u00b7 she joins your fleet`
+          : this.digTimer > 0
           ? 'The crew is digging\u2026'
           : this.digReady
             ? 'E \u2014 send the longboat to dig'

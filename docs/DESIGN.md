@@ -91,6 +91,40 @@ expression is the same one sailing already trains: wind, angle, timing.
 6. **Multiplayer**: co-op broadsides against navy convoys first; PvP only in opt-in
    contested waters (the same rule as the identity section).
 
+## Prizes and the fleet (yes — you can take her whole)
+
+Boarding doesn't have to end at the strongbox. If you have the hands to spare,
+you put a **prize crew** aboard and she's YOURS — she falls in astern and sails
+in your wake. The fleet is the game's second progression rail, beside the hull
+tiers.
+
+1. **Crew is the currency of capture.** You start with 8 hands; a prize needs
+   3 to man her. Take three prizes and you're stretched to the bone — the cap
+   is your payroll, not an arbitrary number (hard cap 3 prizes in the sloop
+   era; leadership grows with notoriety). Some captured sailors sign articles
+   and join you (~a third of prizes) — piracy recruits from its victims,
+   which is historically exactly right.
+2. **What a fleet is FOR:**
+   - **Sell her at port** (when ports land) — a whole hull is the biggest
+     single payday in the game, worth many strongboxes.
+   - **Transfer your flag** — the era ladder has two rails: buy your next
+     ship at a shipwright, or TAKE one. Step aboard a captured brig and the
+     sloop becomes the prize you sell.
+   - **Line of battle** (when cannons land) — your prizes fight beside you;
+     a fleet action against a navy convoy is the intended endgame.
+   - **Cargo running** — each hull multiplies freight capacity.
+3. **Prizes cost you.** Undermanned prizes sail slower than your flagship —
+   a fleet makes you rich and SLOW, the classic pirate dilemma (Every hand
+   on a prize is a hand not sailing your own ship.) Wages come later with
+   ports; the fleet is where they'll bite.
+4. **The fleet is one unit to the world**: your own ships never trigger the
+   encounter slowdown or count as contacts — the current treats the convoy
+   as one sail.
+5. **Multiplayer rule:** another PLAYER's ship can never be permanently
+   stolen — losing a boarding action in contested waters costs cargo and
+   ransom, never the hull. Fleets are visible to other players (a line of
+   prizes astern IS the notoriety display).
+
 ## The plunder economy
 
 How gold ENTERS the world (sources, in intended order of discovery):
