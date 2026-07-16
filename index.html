@@ -6,9 +6,10 @@
   <title>Saltstead</title>
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #0a1622;
-      font-family: Georgia, 'Times New Roman', serif; }
+      font-family: Georgia, 'Times New Roman', serif;
+      overscroll-behavior: none; /* kill two-finger swipe-back / pull-to-refresh (kiosk.js catches the rest) */ }
     #app { position: fixed; inset: 0; }
-    #app canvas { display: block; cursor: grab; }
+    #app canvas { display: block; cursor: grab; touch-action: none; }
     #app canvas:active { cursor: grabbing; }
     .hud { position: fixed; color: #eef6fb; text-shadow: 0 1px 3px rgba(0,0,0,.6);
       user-select: none; pointer-events: none; }
@@ -122,6 +123,28 @@
     #help .cap button { background: none; border: 1px solid rgba(58,44,28,.5);
       color: #3a2c1c; padding: 5px 14px; font: inherit; font-size: 12px;
       border-radius: 3px; cursor: pointer; }
+    #feedback { position: fixed; inset: 0; display: none; align-items: center;
+      justify-content: center; background: rgba(8,14,20,.78); z-index: 40; }
+    #feedback .house { width: min(460px, 92vw); display: flex; flex-direction: column;
+      gap: 10px; background: #efe6cf; color: #3a2c1c; padding: 18px 24px 20px;
+      border: 2px solid rgba(58,44,28,.9); border-radius: 4px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.6); }
+    #feedback h2 { margin: 0; font-weight: normal; letter-spacing: 3px; font-size: 20px; }
+    #feedback .pitch { font-size: 13px; line-height: 1.6; opacity: .8; font-style: italic; }
+    #feedback .fbkind { display: flex; gap: 18px; font-size: 14px; }
+    #feedback .fbkind label { cursor: pointer; }
+    #feedback input, #feedback textarea { background: rgba(255,255,255,.55);
+      border: 1px solid rgba(58,44,28,.55); color: #3a2c1c; padding: 8px 10px;
+      font: inherit; font-size: 14px; border-radius: 3px; resize: vertical; }
+    #feedback input::placeholder, #feedback textarea::placeholder { color: rgba(58,44,28,.45); }
+    #feedback button { background: rgba(58,44,28,.08); border: 1px solid rgba(58,44,28,.55);
+      color: #3a2c1c; padding: 10px 12px; font: inherit; font-size: 14px;
+      border-radius: 3px; cursor: pointer; }
+    #feedback button:hover:not(:disabled) { background: rgba(58,44,28,.16); }
+    #feedback button:disabled { opacity: .4; cursor: default; }
+    #feedback #fbclose { background: none; opacity: .75; text-align: center; }
+    #feedback #fberr { min-height: 16px; font-size: 12px; color: #8a3a2a; }
+    #feedback #fbok { display: none; font-size: 13px; color: #2a5c34; }
   </style>
 </head>
 <body>
@@ -176,6 +199,7 @@
       <button id="btnlogout" class="quiet">Sign out</button>
     </div>
     <button id="btnhow" class="quiet how">How to play</button>
+    <button id="btnfeedback" class="quiet how">Feedback &amp; bugs</button>
   </div>
   <canvas id="minimap" width="296" height="296"></canvas>
   <div id="worldmap"><canvas width="1440" height="720"></canvas>
@@ -311,7 +335,26 @@
         and navy heat, cargo running — and multiplayer: every captain their own
         ship, meeting on one shared ocean.</p>
     </div>
-    <div class="cap"><span>H or Esc — back to the sea</span><button id="helpclose">Close</button></div>
+    <div class="cap"><span>H or Esc — back to the sea</span>
+      <span><button id="helpfeedback">Feedback &amp; bugs</button>
+      <button id="helpclose">Close</button></span></div>
+  </div></div>
+  <div id="feedback"><div class="house">
+    <h2>FEEDBACK &amp; BUGS</h2>
+    <div class="pitch">Spotted something broken, or have a thought on the game?
+      It goes straight to the harbourmaster&rsquo;s ledger.</div>
+    <div class="fbkind">
+      <label><input type="radio" name="fbkind" value="bug" checked> Bug</label>
+      <label><input type="radio" name="fbkind" value="feedback"> Feedback</label>
+    </div>
+    <input id="fbemail" type="email" maxlength="120" autocomplete="off"
+      placeholder="Email (optional, if you want a reply)">
+    <textarea id="fbmsg" rows="6" maxlength="2000"
+      placeholder="What happened? Steps to reproduce help for bugs."></textarea>
+    <div id="fberr"></div>
+    <div id="fbok"></div>
+    <button id="fbsend">Send to the harbourmaster</button>
+    <button id="fbclose">Close</button>
   </div></div>
   <div id="port"><div class="house">
     <h2>PORT</h2>

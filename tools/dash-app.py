@@ -1,8 +1,8 @@
 """Saltstead harbourmaster's ledger — invite codes, accounts, and login tokens.
 
 :8097 on LAN/Tailscale only. The Cloudflare tunnel (saltstead.sovren.xyz ->
-Caddy :8091) routes exactly one public endpoint here: POST /auth/claim.
-The ledger UI and the mint/revoke endpoints never leave the house.
+Caddy :8091) routes exactly two public endpoints here: POST /auth/claim and
+POST /feedback. The ledger UI and the mint/revoke endpoints never leave the house.
 
 Deployed at ~/saltstead/dash/app.py on the EVO (repo copy: tools/dash-app.py).
 """
@@ -22,9 +22,12 @@ CODES_F = DASH / "codes.json"
 ACCOUNTS_F = DASH / "accounts.json"
 TOKENS_F = DASH / "tokens.json"
 VISITS_F = DASH / "visits.json"
+FEEDBACK_F = DASH / "feedback.json"
+FEEDBACK_RATE_F = DASH / "feedback_rate.json"
 
 PID_RE = re.compile(r"^[a-z0-9-]{4,40}$")
 CODE_RE = re.compile(r"^[a-z]+-[a-z]+-\d{2}$")
+EMAIL_RE = re.compile(r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$")
 
 # nautical mint words — the code IS the account key, so keep them memorable
 MINT_W1 = ("brine", "gull", "kraken", "spume", "reef", "squall", "fathom", "corsair",
@@ -62,6 +65,35 @@ def _mint_code(warden=False):
         _save(CODES_F, codes)
         return code
     raise RuntimeError("could not mint a unique invite code")
+
+
+def _client_ip(req):
+    # the Cloudflare tunnel means everything reaches the socket as 127.0.0.1.
+    # Vercel-rewritten requests (the game client) carry the player in
+    # x-forwarded-for; direct tunnel visitors carry it in cf-connecting-ip.
+    # (Moorstead's ledger checks neither properly and files every public
+    # report under localhost, sharing one rate cap between all hands.)
+    return (req.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            or req.headers.get("cf-connecting-ip", "").strip()
+            or (req.client.host if req.client else "?"))
+
+
+def _utc_day(now=None):
+    return int((now or time.time()) // 86400)
+
+
+def _rate_ok(ip, limit, rate_file):
+    day = _utc_day()
+    rates = _load(rate_file, {})
+    rec = rates.get(ip, {"day": day, "n": 0})
+    if rec.get("day") != day:
+        rec = {"day": day, "n": 0}
+    if rec["n"] >= limit:
+        return False
+    rec["n"] += 1
+    rates[ip] = rec
+    _save(rate_file, rates)
+    return True
 
 
 def _prune_tokens(tokens):
@@ -113,6 +145,67 @@ async def claim(req: Request):
     token = _mint_token(code, acct_id, room, acct["name"], warden)
     return {"ok": True, "name": acct["name"], "room": room,
             "acct": acct_id, "token": token, "warden": warden}
+
+
+# ---------------- the other public door: feedback & bug reports ----------------
+@app.post("/feedback")
+async def feedback(req: Request):
+    """Public: player feedback or bug report with page / in-game context."""
+    ip = _client_ip(req)
+    if not _rate_ok(ip, limit=8, rate_file=FEEDBACK_RATE_F):
+        return {"ok": False, "err": "Easy now — only a few reports a day, sailor."}
+    try:
+        d = await req.json()
+    except Exception:
+        return {"ok": False, "err": "bad request"}
+    kind = str(d.get("kind", "feedback")).strip().lower()
+    if kind not in ("bug", "feedback"):
+        kind = "feedback"
+    message = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", str(d.get("message", "")).strip())[:2000]
+    if len(message) < 8:
+        return {"ok": False, "err": "Tell us a bit more — at least a sentence."}
+    email = str(d.get("email", "")).strip().lower()[:120]
+    if email and not EMAIL_RE.match(email):
+        return {"ok": False, "err": "That email doesn't look right."}
+    name = re.sub(r"[^\w \-']", "", str(d.get("name", "")).strip())[:24]
+    pid = str(d.get("pid", ""))[:40].lower()
+    ctx = d.get("context") if isinstance(d.get("context"), dict) else {}
+    ctx_safe = {
+        "page": str(ctx.get("page", ""))[:24],
+        "url": str(ctx.get("url", ""))[:240],
+        "ua": str(ctx.get("ua", ""))[:240],
+        "loc": str(ctx.get("loc", ""))[:36],
+        "state": str(ctx.get("state", ""))[:16],
+        "tag": str(ctx.get("tag", ""))[:48],
+    }
+    try:
+        ctx_safe["day"] = max(0, min(int(ctx.get("day", 0) or 0), 99999))
+        ctx_safe["gold"] = max(0, min(int(ctx.get("gold", 0) or 0), 10**9))
+    except Exception:
+        pass
+    pos = ctx.get("pos") if isinstance(ctx.get("pos"), dict) else {}
+    try:
+        ctx_safe["pos"] = {
+            "x": max(-10**8, min(int(pos.get("x", 0) or 0), 10**8)),
+            "z": max(-10**8, min(int(pos.get("z", 0) or 0), 10**8)),
+        }
+    except Exception:
+        ctx_safe["pos"] = {}
+    entry = {
+        "id": secrets.token_hex(6),
+        "ts": time.time(),
+        "kind": kind,
+        "message": message,
+        "email": email,
+        "name": name,
+        "pid": pid if PID_RE.match(pid) else "",
+        "ip": ip,
+        "context": ctx_safe,
+    }
+    log = _load(FEEDBACK_F, [])
+    log.append(entry)
+    _save(FEEDBACK_F, log[-1000:])
+    return {"ok": True, "msg": "Noted on the harbourmaster's ledger — thank you."}
 
 
 # ---------------- LAN-only: the ledger ----------------
@@ -167,6 +260,11 @@ def list_codes():
     return {"codes": out}
 
 
+@app.get("/api/feedback")
+def list_feedback():
+    return {"feedback": list(reversed(_load(FEEDBACK_F, [])[-40:]))}
+
+
 PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <title>Saltstead — the Harbourmaster's Ledger</title>
 <style>
@@ -185,6 +283,13 @@ button:hover{background:#1d4260}
 .mintrow{margin:14px 0 22px;display:flex;gap:10px}
 .revoke{padding:2px 8px;font-size:11px;background:#3a1a1a;border-color:#5c2c2c}
 .muted{color:#6f8291;font-size:12px}
+h2{color:#9fb3bf;letter-spacing:2px;font-size:15px;margin:34px 0 8px}
+.fb{max-width:760px;border-top:1px solid #16222e;padding:8px 0;font-size:13px}
+.fb .kind{font-weight:700;margin-right:8px}
+.fb .kind.bug{color:#d47a6a}
+.fb .kind.feedback{color:#8fd6a0}
+.fb .msg{margin:4px 0;white-space:pre-wrap}
+.fb .ctx{color:#6f8291;font-size:11px}
 </style></head><body>
 <h1>SALTSTEAD &mdash; THE HARBOURMASTER&rsquo;S LEDGER</h1>
 <div class="sub">Letters of marque. Mint one per player, hand it over however you like
@@ -194,6 +299,8 @@ button:hover{background:#1d4260}
   <button onclick="mint(true)">Mint a WARDEN code</button>
 </div>
 <div id="codes">Loading&hellip;</div>
+<h2>FEEDBACK &amp; BUGS (last 40)</h2>
+<div id="fb">Loading&hellip;</div>
 <script>
 async function mint(warden){
   const r = await fetch('/api/mint',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -222,7 +329,25 @@ async function load(){
   h += '</table>';
   document.getElementById('codes').innerHTML = h;
 }
-load(); setInterval(load, 15000);
+const esc = s => String(s||'').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function loadFb(){
+  const d = await (await fetch('/api/feedback')).json();
+  const fb = d.feedback||[];
+  if(!fb.length){ document.getElementById('fb').innerHTML = '<div class="muted">Nothing yet.</div>'; return; }
+  let h='';
+  for(const f of fb){
+    const c=f.context||{};
+    const bits=[new Date(f.ts*1000).toLocaleString(), f.name, f.email, c.page, c.loc,
+      c.state, c.day!=null?('day '+c.day):'', c.gold!=null?(c.gold+' dbl'):''].filter(Boolean);
+    h += '<div class="fb"><span class="kind '+esc(f.kind)+'">'+esc(f.kind).toUpperCase()+'</span>'
+      +'<span class="muted">'+bits.map(esc).join(' &middot; ')+'</span>'
+      +'<div class="msg">'+esc(f.message)+'</div>'
+      +'<div class="ctx">'+esc(c.ua||'')+'</div></div>';
+  }
+  document.getElementById('fb').innerHTML = h;
+}
+load(); loadFb(); setInterval(()=>{load(); loadFb();}, 15000);
 </script></body></html>"""
 
 

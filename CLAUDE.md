@@ -19,7 +19,7 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 
 ## Build & verify
 
-- `npm run verify` — the headless gate (25 checks). **Must be green before deploy.**
+- `npm run verify` — the headless gate (26 checks). **Must be green before deploy.**
   Add a verify script with every feature; prefer testing pure modules headlessly over
   eyeballing.
 - Dev: `npm run dev` (port 5173). `window.saltstead` is the live Game handle
@@ -49,13 +49,17 @@ UMA headroom allows either.
 ### Saltstead's harbourmaster ledger (invite codes + warden)
 
 `~/saltstead/dash/app.py` on the EVO (repo copy: `tools/dash-app.py`), systemd unit
-`saltstead-dash` on **:8097**. Mint/revoke codes on the ledger UI at
-`http://evo:8097/` — **LAN/Tailscale only**. Only `POST /auth/claim` is public:
-Vercel rewrites `/dash/*` → `saltstead.sovren.xyz` (Cloudflare tunnel) → Caddy
-`:8091` (allowlist) → :8097. Codes minted with `warden: true` grant warden standing
-(gold hatband + epaulettes on the captain, `isWarden(auth)` in `identity.js`); the
-claim response carries `warden` into the auth blob. Caddy backup:
-`Caddyfile.bak-20260716-saltstead`; tunnel backup: `config.yml.bak-20260716-saltstead`.
+`saltstead-dash` on **:8097**. Mint/revoke codes and read player feedback on the
+ledger UI at `http://evo:8097/` — **LAN/Tailscale only**. Two endpoints are public:
+`POST /auth/claim` (invites) and `POST /feedback` (in-game feedback tool +
+`reportQuiet` telemetry, `src/feedback.js`): Vercel rewrites `/dash/*` →
+`saltstead.sovren.xyz` (Cloudflare tunnel) → Caddy `:8091` (allowlist) → :8097.
+Caddy's global `trusted_proxies private_ranges` keeps the real player IP in
+x-forwarded-for (the feedback rate cap is per-IP, 8/day). Codes minted with
+`warden: true` grant warden standing (gold hatband + epaulettes on the captain,
+`isWarden(auth)` in `identity.js`); the claim response carries `warden` into the
+auth blob. Caddy backups: `Caddyfile.bak-20260716-saltstead`, `-feedback`; tunnel
+backup: `config.yml.bak-20260716-saltstead`.
 
 ## Setting
 

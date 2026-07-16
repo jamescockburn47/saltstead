@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { Ocean } from './ocean.js';
 import { buildSloop } from './ship.js';
 import { buildCaptain } from './captain.js';
-import { isWarden } from './identity.js';
+import { isWarden, loadAuth, displayName } from './identity.js';
 import { FoamLayer } from './foamlayer.js';
 import { newShipState, stepShip, shipAttitude, beaches, SLOOP } from './shipphysics.js';
 import { DECK, HELM, clampToDeck, localToWorld } from './shipframe.js';
@@ -61,6 +61,11 @@ import { CombatLayer } from './combatlayer.js';
 import { MonsterLayer } from './monsterlayer.js';
 import { LegendLayer } from './legendlayer.js';
 import { unit2 } from './noise.js';
+import { installKiosk } from './kiosk.js';
+import { gatherContext, submitFeedback } from './feedback.js';
+
+// swallow the browser's own chrome gestures + auto-fullscreen on first touch
+installKiosk();
 
 const POS_NAMES = [
   [IRONS, 'In irons'],
@@ -182,6 +187,7 @@ class Game {
 
     this.keys = new Set();
     addEventListener('keydown', (e) => {
+      if (typingInField()) return; // the feedback box eats its own keystrokes
       this.keys.add(e.code);
       if (e.code === 'KeyE') this.onE();
       if (e.code === 'KeyT') this.toggleTiller();
@@ -237,7 +243,7 @@ class Game {
     this.atSea = null; // null until first geography sample settles it
     this.wasAground = false;
     addEventListener('keydown', (e) => {
-      if (e.repeat) return;
+      if (e.repeat || typingInField()) return;
       if (e.code === 'KeyL') this.logui.toggle(this.log);
       if (e.code === 'KeyN') this.toggleStars();
       if (e.code === 'Escape') {
@@ -1305,6 +1311,10 @@ class Game {
   }
 }
 
+// typing in a form field (invite code, feedback box) must never sail the ship
+const typingInField = () =>
+  /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
+
 // the how-to book — reachable from the title screen and the deck alike
 const helpWrap = document.getElementById('help');
 const helpOpen = () => helpWrap.style.display === 'flex';
@@ -1312,10 +1322,52 @@ const showHelp = (v) => { helpWrap.style.display = v ? 'flex' : 'none'; };
 document.getElementById('btnhow').addEventListener('click', () => showHelp(true));
 document.getElementById('helpbtn').addEventListener('click', () => showHelp(true));
 document.getElementById('helpclose').addEventListener('click', () => showHelp(false));
+
+// feedback & bugs — the harbourmaster's ledger takes reports from the title
+// screen and mid-voyage alike (the help book carries the in-game button)
+const fbWrap = document.getElementById('feedback');
+const fbOpen = () => fbWrap.style.display === 'flex';
+const fbErr = document.getElementById('fberr');
+const fbOk = document.getElementById('fbok');
+const fbMsg = document.getElementById('fbmsg');
+function showFeedback(v) {
+  fbWrap.style.display = v ? 'flex' : 'none';
+  if (v) { fbErr.textContent = ''; fbOk.style.display = 'none'; fbMsg.focus(); }
+}
+document.getElementById('btnfeedback').addEventListener('click', () => showFeedback(true));
+document.getElementById('helpfeedback').addEventListener('click', () => { showHelp(false); showFeedback(true); });
+document.getElementById('fbclose').addEventListener('click', () => showFeedback(false));
+document.getElementById('fbsend').addEventListener('click', async () => {
+  const message = fbMsg.value.trim();
+  const email = document.getElementById('fbemail').value.trim().toLowerCase();
+  const kind = fbWrap.querySelector('input[name="fbkind"]:checked')?.value || 'feedback';
+  if (message.length < 8) { fbErr.textContent = 'A bit more detail \u2014 at least a sentence.'; return; }
+  fbErr.textContent = 'Sending\u2026';
+  fbOk.style.display = 'none';
+  const game = window.saltstead || null;
+  try {
+    const d = await submitFeedback({
+      kind, message, email,
+      name: displayName(loadAuth(localStorage)),
+      context: gatherContext(game, game ? 'at-sea' : 'title'),
+    });
+    if (!d.ok) { fbErr.textContent = d.err || 'That didn\u2019t work \u2014 try again.'; return; }
+    fbErr.textContent = '';
+    fbMsg.value = '';
+    fbOk.textContent = d.msg || 'Noted on the ledger \u2014 thank you.';
+    fbOk.style.display = 'block';
+  } catch {
+    fbErr.textContent = 'The harbourmaster is not answering \u2014 try again later.';
+  }
+});
+
 addEventListener('keydown', (e) => {
-  if (e.repeat || document.activeElement?.tagName === 'INPUT') return;
-  if (e.code === 'KeyH') showHelp(!helpOpen());
-  if (e.code === 'Escape' && helpOpen()) showHelp(false);
+  if (e.repeat || typingInField()) return;
+  if (e.code === 'KeyH' && !fbOpen()) showHelp(!helpOpen());
+  if (e.code === 'Escape') {
+    if (fbOpen()) showFeedback(false);
+    else if (helpOpen()) showHelp(false);
+  }
 });
 
 // title first, Moorstead-style: the game only boots when the title hands off
