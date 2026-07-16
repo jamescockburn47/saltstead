@@ -18,7 +18,10 @@ export class FleetLayer {
     const sloop = buildSloop();
     sloop.group.scale.setScalar(1.12); // she keeps her merchant beam
     this.scene.add(sloop.group);
-    this.prizes.push({ f: { x, z, yaw, speed: 0 }, group: sloop.group, setSail: sloop.setSail });
+    this.prizes.push({
+      f: { x, z, yaw, speed: 0 },
+      group: sloop.group, setSail: sloop.setSail, setLantern: sloop.setLantern,
+    });
   }
 
   // the whole column goes at once (sold in port)
@@ -35,8 +38,9 @@ export class FleetLayer {
     }
   }
 
-  // flagPace: the flagship's ground speed (hull speed * gait)
-  update(t, dt, flagX, flagZ, flagYaw, flagPace, windFrom) {
+  // flagPace: the flagship's ground speed (hull speed * gait). night: the
+  // prize crews hang lanterns like everyone else.
+  update(t, dt, flagX, flagZ, flagYaw, flagPace, windFrom, night = false) {
     for (let i = 0; i < this.prizes.length; i++) {
       const p = this.prizes[i];
       const s = stationPoint(flagX, flagZ, flagYaw, i);
@@ -44,6 +48,7 @@ export class FleetLayer {
       p.group.position.set(p.f.x, waveHeight(p.f.x, p.f.z, t) - 0.45, p.f.z);
       p.group.rotation.y = p.f.yaw;
       p.setSail(p.f.yaw, 0.5, windFrom, Math.min(1, p.f.speed / 6));
+      p.setLantern(night);
     }
   }
 }

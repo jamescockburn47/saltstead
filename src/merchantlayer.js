@@ -44,8 +44,10 @@ export class MerchantLayer {
   }
 
   // shoal: the player floats where a warship's keel dare not go (main.js
-  // samples the terrain against merchants.js NAVY_SHOAL)
-  update(t, dt, px, pz, windFrom, shoal = false) {
+  // samples the terrain against merchants.js NAVY_SHOAL). night: living
+  // crews hang masthead lanterns after dark (derelicts stay dark — nobody's
+  // aboard to light one, which is its own warning).
+  update(t, dt, px, pz, windFrom, shoal = false, night = false) {
     // stream in
     for (const spec of this.spawnable(px, pz)) {
       if (this.live.has(spec.id) || this.sunk.has(spec.id)) continue;
@@ -55,7 +57,10 @@ export class MerchantLayer {
       sloop.group.scale.setScalar(TYPES[m.type].scale);
       tintShip(sloop.group, m.type);
       this.scene.add(sloop.group);
-      this.live.set(spec.id, { m, group: sloop.group, setSail: sloop.setSail, dmg: newHullState(), sinkT: null });
+      this.live.set(spec.id, {
+        m, group: sloop.group, setSail: sloop.setSail,
+        setLantern: sloop.setLantern, dmg: newHullState(), sinkT: null,
+      });
     }
     // step + stream out
     for (const [id, e] of this.live) {
@@ -72,6 +77,7 @@ export class MerchantLayer {
         e.group.position.set(e.m.x, y, e.m.z);
         e.group.rotation.set(0.5 * u, e.m.yaw, 0.25 * u);
         e.setSail(e.m.yaw, 0, windFrom, 0);
+        e.setLantern(false); // the sea puts her light out
         if (u >= 1) {
           this.scene.remove(e.group);
           this.live.delete(id);
@@ -85,6 +91,7 @@ export class MerchantLayer {
       e.group.rotation.set(0, e.m.yaw, (1 - e.dmg.hull) * 0.12); // holed, she lists
       const dead = e.m.looted || e.m.type === 'derelict';
       e.setSail(e.m.yaw, dead ? 0 : 0.5, windFrom, dead ? 0 : 0.6 * e.dmg.rig);
+      e.setLantern(night && !dead);
     }
     // flotsam bobs where its ship went down
     for (const f of this.flotsam) {

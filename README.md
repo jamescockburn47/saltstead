@@ -18,14 +18,19 @@ pillar, the phase plan and named risks.
 
 The map is the REAL world: Natural Earth coastlines, rivers and mountain ranges baked
 into code (`scripts/build-earthdata.mjs` → `src/earthdata.js`), streamed as low-poly
-terrain around the ship. Land is 1:250; past ~800 m offshore the **open-sea gait**
-ramps to 4× so ocean crossings compress while inshore sailing stays 1:1. Biomes follow
+terrain around the ship. Land is 1:250; the **open-sea gait** picks up ~300 m off the
+beach and runs 20× by ~2.5 km, so ocean crossings compress while inshore sailing
+stays 1:1. Biomes follow
 latitude, real rivers run as channels, and Snowdonia has crags because the dragons
 need them.
 
 The sky is a working instrument: a 30-minute day/night cycle, a real star catalogue
 that tilts with latitude (Polaris sinks as you sail south), and **live weather** —
-the game fetches the real forecast at your ship's true coordinates.
+the game fetches the real forecast at your ship's true coordinates and dresses the
+sky to match: cumulus drifting downwind, rain streaking past in a squall. The wind
+never drops below 10 m/s (a becalmed game is a boring game), and from dusk to dawn
+every living ship hangs a **masthead lantern** — a far-off point of light is how
+you find a sail at night.
 
 ## How to play
 

@@ -258,10 +258,13 @@ export function elevation(lat, lon) {
 // ship is genuinely flying along.
 const smooth01 = (t) => { const c = Math.max(0, Math.min(1, t)); return c * c * (3 - 2 * c); };
 export const GAIT_MAX = 20;
+// The bands sit CLOSE in (playtest: the old 800/2200 m onsets left five dull
+// minutes between weighing anchor and the sea starting to move): the current
+// picks up 300 m off the beach and runs full blue-water gait by ~2.5 km.
 export function gaitFactor(coastDist) {
   return 1
-    + 4 * smooth01((coastDist - 800) / 1200)      // coastal -> offshore
-    + (GAIT_MAX - 5) * smooth01((coastDist - 2200) / 2000); // offshore -> blue water
+    + 4 * smooth01((coastDist - 300) / 700)       // coastal -> offshore
+    + (GAIT_MAX - 5) * smooth01((coastDist - 1000) / 1500); // offshore -> blue water
 }
 
 // the current slackens in company: two hulls at 12x would close at ~200 m/s

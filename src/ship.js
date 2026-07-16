@@ -2,8 +2,9 @@
 // buildShip(spec, masts) raises any rung of the shipwright's ladder: the
 // sloop's proportions scaled by the spec's frame (shipframe.js frameFor),
 // with a second mast and course for the bigger hulls. Returns
-// { group, deck, setSail } — group carries position + attitude, the captain
-// is parented to `deck` so the whole ship is one moving frame.
+// { group, deck, setSail, setLantern } — group carries position + attitude,
+// the captain is parented to `deck` so the whole ship is one moving frame,
+// setLantern lights the masthead after dark.
 
 import * as THREE from 'three';
 import { SLOOP } from './shipphysics.js';
@@ -149,6 +150,17 @@ export function buildShip(spec = SLOOP, masts = 1) {
   tiller.position.set(F.helm.x, D.y + 0.45 * s, F.helm.z - 0.3 * s);
   group.add(tiller);
 
+  // the masthead lantern: a warm point at the maintop, lit after dark by
+  // setLantern. fog:false — a ship's light carries beyond the haze that
+  // swallows her hull, which is exactly how you find a sail at night.
+  const lantern = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16 * s, 8, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffc978, fog: false }));
+  lantern.position.set(0, D.y + 7.65 * s, 1.2 * s);
+  lantern.visible = false;
+  group.add(lantern);
+  const setLantern = (on) => { lantern.visible = !!on; };
+
   // heading, trim [0..1], windFrom -> swing the rigs and belly the sails
   function setSail(heading, trim, windFrom, power) {
     const side = tackSign(heading, windFrom);
@@ -160,7 +172,7 @@ export function buildShip(spec = SLOOP, masts = 1) {
     jib.rotation.y = side * (0.15 + trim * 0.5);
   }
 
-  return { group, deck, setSail };
+  return { group, deck, setSail, setLantern };
 }
 
 // the unit hull, for every caller that just wants "a ship" (merchant lanes,

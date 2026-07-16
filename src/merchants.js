@@ -37,12 +37,15 @@ export const TYPES = {
 export const CRUISE = TYPES.trader.cruise; // the old names still mean the old ship
 export const PANIC = TYPES.trader.panic;
 
-// deterministic spawn specs for one cell: [] or 1–2 ships. Cells whose
+// deterministic spawn specs for one cell: [] or 1–3 ships. Cells whose
 // spawn point is on/near land trade nothing (they're coastal folk, not us).
 // Inside the Bermuda Triangle the lanes go QUIET and the derelicts drift.
+// Density is tuned so a five-minute blue-water leg MEETS somebody (playtest:
+// the old half-empty table made the ocean feel dead) — roughly 1.3 sails a
+// cell before the land veto.
 export function cellMerchants(cx, cz) {
   const roll = unit2(cx * 3.7, cz * 9.1);
-  const count = roll < 0.5 ? 0 : roll < 0.87 ? 1 : 2;
+  const count = roll < 0.2 ? 0 : roll < 0.6 ? 1 : roll < 0.9 ? 2 : 3;
   const out = [];
   for (let i = 0; i < count; i++) {
     const x = (cx + 0.15 + 0.7 * unit2(cx + i * 31, cz * 1.3)) * CELL;

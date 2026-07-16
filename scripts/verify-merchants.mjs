@@ -31,7 +31,11 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
       }
     }
   }
-  ok(total > 5, `the lanes are populated (${total} ships in 64 cells)`);
+  // playtest density: a five-minute blue-water leg must MEET somebody. The
+  // sample swath crosses continents (the land veto eats those cells), so
+  // ~0.7/cell here means the honest OCEAN cells carry better than one sail
+  // each — double the pre-playtest table.
+  ok(total >= 40, `the lanes are busy (${total} ships in 64 mixed cells)`);
   ok(seen.trader > 0, 'traders work the lanes');
 }
 

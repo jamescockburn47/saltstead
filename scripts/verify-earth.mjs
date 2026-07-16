@@ -77,13 +77,14 @@ ok(alpsMax > elevation(38.5, -98.4) * 2, 'the Alps tower over Kansas');
   ok(onRiver < offRiver, `the valley is lower than the plain (${onRiver.toFixed(1)} vs ${offRiver.toFixed(1)})`);
 }
 
-// gait: 1x inshore, 5x offshore, GAIT_MAX in blue water, smooth and monotonic
+// gait: 1x at the beach, moving within 300 m, GAIT_MAX by ~2.5 km — the
+// current lives CLOSE to shore now (playtest fix), smooth and monotonic
 ok(GAIT_MAX === 20, 'blue-water gait is 20x');
-ok(gaitFactor(0) === 1 && gaitFactor(800) === 1, 'no gait inshore');
-ok(gaitFactor(2100) >= 4.9 && gaitFactor(2100) < 5.6, `offshore plateau ~5x (${gaitFactor(2100).toFixed(2)})`);
-ok(gaitFactor(4200) === GAIT_MAX && gaitFactor(50000) === GAIT_MAX, 'full blue-water gait');
-const mid = gaitFactor(1400);
-ok(mid > 1.5 && mid < 4.5, `gait ramps smoothly (${mid.toFixed(2)} at 1400m)`);
+ok(gaitFactor(0) === 1 && gaitFactor(300) === 1, 'no gait right at the beach');
+ok(gaitFactor(700) > 2, `the sea is already moving 700 m off (${gaitFactor(700).toFixed(2)}x)`);
+ok(gaitFactor(2500) === GAIT_MAX && gaitFactor(50000) === GAIT_MAX, 'full blue-water gait by 2.5 km');
+const mid = gaitFactor(1200);
+ok(mid > 4 && mid < 12, `gait ramps smoothly (${mid.toFixed(2)} at 1200m)`);
 let prev = -1, mono = true;
 for (let d = 0; d <= 6000; d += 50) { const g = gaitFactor(d); if (g < prev - 1e-9) mono = false; prev = g; }
 ok(mono, 'monotonic ramp all the way out');

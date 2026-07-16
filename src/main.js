@@ -10,6 +10,7 @@ import { buildShip } from './ship.js';
 import { buildCaptain } from './captain.js';
 import { isWarden, loadAuth, displayName } from './identity.js';
 import { FoamLayer } from './foamlayer.js';
+import { SkyFx } from './skyfx.js';
 import { newShipState, stepShip, shipAttitude, beaches } from './shipphysics.js';
 import { frameFor, clampToDeck, localToWorld } from './shipframe.js';
 import { hullById, nextHull, prevHull, buyHull } from './shipyard.js';
@@ -99,6 +100,7 @@ class Game {
 
     this.ocean = new Ocean(this.scene);
     this.foam = new FoamLayer(this.scene);
+    this.skyfx = new SkyFx(this.scene); // the VISIBLE weather: clouds + rain
     this.terrain = new TerrainLayer(this.scene);
 
     // spawn in the Caribbean, off Port Royal — the Phase 1 haven
@@ -180,7 +182,9 @@ class Game {
     this.shipGroup = built.group;
     this.shipGroup.rotation.order = 'YXZ';
     this.setSail = built.setSail;
+    this.setLantern = built.setLantern;
     this.scene.add(this.shipGroup);
+    this.riseMastLight();
 
     this.captain = buildCaptain(isWarden(auth));
     this.cap = { x: 0, z: -2.2, facing: 0, moving: false };
@@ -383,13 +387,25 @@ class Game {
     this.shipGroup = built.group;
     this.shipGroup.rotation.order = 'YXZ';
     this.setSail = built.setSail;
+    this.setLantern = built.setLantern;
     this.scene.add(this.shipGroup);
+    this.riseMastLight();
     if (this.mode !== 'ashore') this.shipGroup.add(this.captain.group);
     const p = clampToDeck(this.cap.x, this.cap.z, 0.2, this.shipFrame.deck);
     this.cap.x = p.x; this.cap.z = p.z;
     this.hud.shipname.textContent =
       `${def.name} \u00b7 ${def.guns} gun${def.guns > 1 ? 's' : ''} a side`;
     this.applyQuality(this.gfxQuality); // shadows onto the new meshes
+  }
+
+  // the flagship's masthead throws real light on her own deck and sails —
+  // one PointLight, player only (the NPC lanterns are emissive dots; twenty
+  // point lights would sink a laptop). Re-hung whenever the hull is rebuilt.
+  riseMastLight() {
+    const F = this.shipFrame;
+    this.mastLight = new THREE.PointLight(0xffc978, 0, 30 * F.scale, 1.6);
+    this.mastLight.position.set(0, F.deck.y + 7.4 * F.scale, 1.2 * F.scale);
+    this.shipGroup.add(this.mastLight);
   }
 
   putIn() {
@@ -853,6 +869,14 @@ class Game {
     const skyT = t + this.dayStart;
     const sol = solarState(skyT); // the sky rules the Dutchman and the sights
 
+    // dusk to dawn, every living ship hangs a lantern at the masthead —
+    // yours throws real light on the sails, the rest burn as far-off points
+    // (fog-proof, so a sail at night is FOUND by her light)
+    const lanternsUp = sol.dayness < 0.42;
+    this.setLantern(lanternsUp);
+    this.mastLight.intensity += ((lanternsUp ? 14 : 0) - this.mastLight.intensity)
+      * Math.min(1, dt * 2);
+
     // a living wind: direction breathes AROUND the base bearing (bounded, so
     // it can never spin onto the bow and stall the game), strength gusts.
     // The base itself is REAL weather when open-meteo answers (geo block
@@ -909,16 +933,16 @@ class Game {
       if (live && !this.weatherLock) {
         this.weatherState = live.state;
         this.gloom = live.gloom;
-        // floor at 5 m/s: a genuinely becalmed day is true to the Atlantic
-        // but false to the game (pillar: the sea must not be boring)
-        this.windBase.speed += (Math.max(5, live.windMs) - this.windBase.speed) * 0.012;
+        // soft floor here; the HARD floor is windProfile's WIND_FLOOR (10),
+        // so a becalmed forecast can never make the game boring
+        this.windBase.speed += (Math.max(6, live.windMs) - this.windBase.speed) * 0.012;
         const dFrom = wrapAngle(live.windFromRad - this.windBase.from);
         this.windBase.from += dFrom * 0.012;
       }
     }
     // the trade lanes live: merchants stream, sail, flee, and count as contacts
     this.merchants.update(t, dt, this.ship.x, this.ship.z, this.wind.from,
-      this.shoalWater);
+      this.shoalWater, lanternsUp);
 
     // corvettes in range work their guns: the King's navy shoots FIRST
     {
@@ -1045,7 +1069,7 @@ class Game {
 
     // your own prizes sail in your wake, sharing your current
     this.fleet.update(t, dt, this.ship.x, this.ship.z, this.ship.yaw,
-      this.ship.speed * gait, this.wind.from);
+      this.ship.speed * gait, this.wind.from, lanternsUp);
 
     // boarding window: alongside a prize with speed matched
     const prize = this.merchants.nearestPrize(this.ship.x, this.ship.z);
@@ -1302,6 +1326,9 @@ class Game {
     const gloomEff = zoneId === 'bermuda-triangle'
       ? Math.max(this.gloom, TRIANGLE_GLOOM) : this.gloom;
     this.sky.update(skyT, skyLL.lat, this.camera.position, gloomEff);
+    // the weather made visible: cumulus drifting downwind, rain on the lens
+    this.skyfx.update(t, dt, this.ship.x, this.ship.z, this.camera.position,
+      this.wind.from, this.weatherState, gloomEff, sol.dayness);
     this.ocean.update(t, this.ship.x, this.ship.z, this.camera.position, glit,
       this.sky.domeUniforms.uHor.value, this.swell);
     this.foam.setLight(Math.min(1, sol.dayness
