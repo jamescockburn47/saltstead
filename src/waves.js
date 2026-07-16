@@ -17,15 +17,26 @@ const TAU = Math.PI * 2;
 
 export const MAX_WAVE_HEIGHT = WAVES.reduce((s, w) => s + w.amp, 0);
 
+// Sea state: ONE linear multiplier on the whole sum, mirrored to the GPU as
+// the uSwell uniform (ocean.js) — inshore chop is gentle, blue water heaves,
+// a storm heaves harder, and CPU/GPU parity survives because both sides
+// scale the SAME sum by the same factor.
+export const SEA_STATE_MIN = 0.6, SEA_STATE_MAX = 2.0;
+let seaState = 1;
+export function setSeaState(k) {
+  seaState = Math.max(SEA_STATE_MIN, Math.min(SEA_STATE_MAX, k));
+}
+export function getSeaState() { return seaState; }
+
 // Water surface height at world (x, z) at time t (seconds). Sum of sines —
-// deliberately the exact expression glslWaveSum() emits.
+// deliberately the exact expression glslWaveSum() emits, times the sea state.
 export function waveHeight(x, z, t) {
   let y = 0;
   for (const w of WAVES) {
     const k = TAU / w.len;
     y += w.amp * Math.sin(k * (w.dirX * x + w.dirZ * z) - k * w.speed * t);
   }
-  return y;
+  return y * seaState;
 }
 
 // The same sum as a GLSL expression over `wx`, `wz` (world xz) and `uTime`.

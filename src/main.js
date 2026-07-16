@@ -20,12 +20,15 @@ import { MapUI } from './mapui.js';
 import { bootTitle } from './title.js';
 import { loadGame, saveGame, snapshotSave } from './save.js';
 import { MerchantLayer } from './merchantlayer.js';
+import { WildlifeLayer } from './wildlifelayer.js';
 import { canBoard, lootRoll, chestRoll } from './plunder.js';
 import { findDigSite, digDist, DIG_RADIUS, DIG_TIME } from './treasure.js';
 import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
   encounterGait, ENCOUNTER_FAR,
 } from './earth.js';
+import { windProfile, seaStateFor, LiveWeather } from './weather.js';
+import { setSeaState } from './waves.js';
 
 const POS_NAMES = [
   [IRONS, 'In irons'],
@@ -85,6 +88,7 @@ class Game {
     // merchants land here; the encounter gait reads it every frame
     this.contacts = [];
     this.merchants = new MerchantLayer(this.scene);
+    this.wildlife = new WildlifeLayer(this.scene);
     this.toast = { text: '', until: 0 };
     const sloop = buildSloop();
     this.shipGroup = sloop.group;
@@ -99,6 +103,14 @@ class Game {
 
     this.mode = 'walk'; // 'walk' | 'helm'
     this.wind = { from: 2.3, speed: 7 };
+    // the procedural wind machine's base; real weather (open-meteo at the
+    // ship's REAL lat/lon) eases these when it lands — a layer, never a
+    // dependency (the Moorstead weather-live rule)
+    this.windBase = { from: 2.3, speed: 7 };
+    this.weather = new LiveWeather();
+    this.weatherState = 'clear';
+    this.gloom = 0;
+    this.swell = 1;
     this.cam = { yaw: Math.PI * 0.85, pitch: 0.32, dist: 8, targetDist: 8 };
 
     this.keys = new Set();
@@ -133,6 +145,7 @@ class Game {
       gait: document.getElementById('gaitbadge'),
       gold: document.getElementById('gold'),
       toast: document.getElementById('toast'),
+      weather: document.getElementById('weather'),
     };
 
     this.maps = new MapUI();
@@ -200,15 +213,72 @@ class Game {
     }
   }
 
-  // E is contextual: prize alongside > longboat dig > the helm
+  // E is contextual: (ashore: dig > re-board) / prize alongside > dig >
+  // step ashore > the helm
   onE() {
+    if (this.mode === 'ashore') {
+      if (this.digReady && this.digTimer <= 0) {
+        this.digTimer = DIG_TIME;
+        this.say('You drive the spade into the sand\u2026');
+        return;
+      }
+      this.boardShip(); // the longboat ferries you back from any beach
+      return;
+    }
     if (this.boardable) { this.boardPrize(); return; }
     if (this.digReady && this.digTimer <= 0) {
       this.digTimer = DIG_TIME;
       this.say('The longboat pulls for the shore\u2026');
       return;
     }
+    // the helm wins when you're standing at it; the shore wins elsewhere
+    if (this.mode === 'walk' && nearHelm(this.cap.x, this.cap.z)) { this.toggleHelm(); return; }
+    if (this.canStepAshore()) { this.goAshore(); return; }
     this.toggleHelm();
+  }
+
+  // ---- shore leave ----
+  canStepAshore() {
+    return this.mode === 'walk' && this.ship.speed < 1
+      && (this.aground || this.coastDist < 300);
+  }
+
+  // nearest dry ground within longboat reach of a point
+  findLanding(cx, cz) {
+    for (let r = 5; r <= 380; r += 8) {
+      for (let a = 0; a < 16; a++) {
+        const ang = (a / 16) * Math.PI * 2;
+        const x = cx + Math.sin(ang) * r, z = cz + Math.cos(ang) * r;
+        const ll = worldToLatLon(x, z);
+        if (elevation(ll.lat, ll.lon) > 0.15) return { x, z };
+      }
+    }
+    return null;
+  }
+
+  goAshore() {
+    // with a treasure map in hand and the X in reach, the longboat rows for
+    // the X's own beach — no swimming lagoons to reach your own dig
+    let cx = this.ship.x, cz = this.ship.z;
+    if (this.treasureMap && digDist(this.ship.x, this.ship.z, this.treasureMap) < DIG_RADIUS) {
+      const w = latLonToWorld(this.treasureMap.lat, this.treasureMap.lon);
+      cx = w.x; cz = w.z;
+    }
+    const land = this.findLanding(cx, cz);
+    if (!land) { this.say('No safe landing here \u2014 find a beach.'); return; }
+    this.mode = 'ashore';
+    this.shore = { x: land.x, z: land.z, facing: 0 };
+    this.scene.add(this.captain.group); // reparent out of the ship
+    this.cam.targetDist = 8;
+    this.say('The longboat puts you ashore. The crew holds the ship.', 5);
+  }
+
+  boardShip() {
+    this.mode = 'walk';
+    this.shipGroup.add(this.captain.group);
+    this.cap.x = 0; this.cap.z = -2.2; this.cap.facing = 0;
+    this.cam.targetDist = 8;
+    this.say('The longboat brings you back aboard.', 4);
   }
 
   boardPrize() {
@@ -237,10 +307,18 @@ class Game {
     this.t += dt;
     const t = this.t, k = this.keys;
 
-    // a living wind: direction breathes AROUND a base bearing (bounded, so it
-    // can never spin onto the bow and stall the game), strength gusts
-    this.wind.from = 2.3 + 0.3 * Math.sin(t * 0.011) + 0.12 * Math.sin(t * 0.037);
-    this.wind.speed = 7 + 2.2 * Math.sin(t * 0.07) + 1.1 * Math.sin(t * 0.21);
+    // a living wind: direction breathes AROUND the base bearing (bounded, so
+    // it can never spin onto the bow and stall the game), strength gusts.
+    // The base itself is REAL weather when open-meteo answers (geo block
+    // below), and the wind BUILDS offshore: sheltered inshore, near double
+    // in blue water — stacked with the gait, a crossing genuinely flies.
+    this.wind.from = this.windBase.from + 0.3 * Math.sin(t * 0.011) + 0.12 * Math.sin(t * 0.037);
+    const gusts = 0.3 * Math.sin(t * 0.07) + 0.15 * Math.sin(t * 0.21);
+    this.wind.speed = windProfile(this.coastDist, this.windBase.speed * (1 + gusts));
+
+    // the sea takes the wind's shape, eased so the swell never pops
+    this.swell += (seaStateFor(this.wind.speed) - this.swell) * Math.min(1, dt * 0.05);
+    setSeaState(this.swell);
 
     if (this.mode === 'helm') {
       const rt = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
@@ -250,6 +328,8 @@ class Game {
     } else {
       this.ship.rudder *= 1 - Math.min(1, dt * 2);
     }
+    // with the captain ashore the crew heaves to and HOLDS her
+    if (this.mode === 'ashore') this.ship.speed = 0;
 
     // autosave the voyage every 20 s
     this.saveClock -= dt;
@@ -261,9 +341,29 @@ class Game {
       this.geoClock = 0.25;
       const ll = worldToLatLon(this.ship.x, this.ship.z);
       this.coastDist = coastDistGame(ll.lat, ll.lon);
+      // real weather at the ship's real coordinates — the Azores get Azores
+      // wind. Eased in over ~20 s so a fresh sample never snaps the sails.
+      const live = this.weather.poll(ll.lat, ll.lon);
+      if (live) {
+        this.weatherState = live.state;
+        this.gloom = live.gloom;
+        // floor at 5 m/s: a genuinely becalmed day is true to the Atlantic
+        // but false to the game (pillar: the sea must not be boring)
+        this.windBase.speed += (Math.max(5, live.windMs) - this.windBase.speed) * 0.012;
+        const dFrom = wrapAngle(live.windFromRad - this.windBase.from);
+        this.windBase.from += dFrom * 0.012;
+      }
     }
     // the trade lanes live: merchants stream, sail, flee, and count as contacts
     this.merchants.update(t, dt, this.ship.x, this.ship.z, this.wind.from);
+
+    // wildlife reads the waters: gulls inshore, dolphins offshore, the
+    // albatross in blue water, a fin in the warm shallows
+    {
+      const wll = worldToLatLon(this.ship.x, this.ship.z);
+      this.wildlife.update(t, dt, this.ship.x, this.ship.z,
+        this.shipGroup.position.y + 11, this.ship.speed, this.coastDist, Math.abs(wll.lat));
+    }
     const allContacts = this.contacts.concat(this.merchants.contacts());
 
     // meeting another ship kills the fair current — you slow to hailing speed
@@ -279,18 +379,25 @@ class Game {
     this.boardable = (prize && canBoard(prize.dist, this.ship.speed * gait - prize.m.speed))
       ? prize : null;
 
-    // the dig: anchored in the cove, the crew does the shovel work
+    // the dig: from the deck the crew rows in and does the shovel work; on
+    // foot you stand on the X yourself and dig
     this.digReady = false;
     if (this.treasureMap) {
-      const dd = digDist(this.ship.x, this.ship.z, this.treasureMap);
-      this.digReady = dd < DIG_RADIUS && this.ship.speed < 1;
+      if (this.mode === 'ashore') {
+        this.digReady = digDist(this.shore.x, this.shore.z, this.treasureMap) < 30;
+      } else {
+        const dd = digDist(this.ship.x, this.ship.z, this.treasureMap);
+        this.digReady = dd < DIG_RADIUS && this.ship.speed < 1;
+      }
       if (this.digTimer > 0) {
         this.digTimer -= dt;
         if (this.digTimer <= 0) {
           const pay = chestRoll(this.treasureMap.seed);
           this.gold += pay;
           this.treasureMap = null;
-          this.say(`The crew strikes wood \u2014 a chest of ${pay} doubloons!`, 8);
+          this.say(this.mode === 'ashore'
+            ? `The spade strikes wood \u2014 a chest of ${pay} doubloons!`
+            : `The crew strikes wood \u2014 a chest of ${pay} doubloons!`, 8);
           this.persist();
         }
       }
@@ -336,27 +443,45 @@ class Game {
       this.camera.updateProjectionMatrix();
     }
 
-    // captain: walk the deck (camera-relative input, ship-local position)
+    // captain: walk the deck (ship-local) or the shore (world terrain)
     this.cap.moving = false;
-    if (this.mode === 'walk') {
-      const ix = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
-      const iz = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
+    const ix = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
+    const iz = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
+    if (this.mode === 'walk' && (ix || iz)) {
+      const fwd = new THREE.Vector3();
+      this.camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+      const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0));
+      const dir = new THREE.Vector3().addScaledVector(fwd, iz).addScaledVector(right, ix).normalize();
+      // world direction -> ship-local (yaw only)
+      const s = Math.sin(this.ship.yaw), c = Math.cos(this.ship.yaw);
+      const lx = dir.x * c - dir.z * s, lz = dir.x * s + dir.z * c;
+      const p = clampToDeck(this.cap.x + lx * 2.6 * dt, this.cap.z + lz * 2.6 * dt);
+      this.cap.x = p.x; this.cap.z = p.z;
+      this.cap.facing = Math.atan2(lx, lz);
+      this.cap.moving = true;
+    }
+    if (this.mode === 'ashore') {
       if (ix || iz) {
         const fwd = new THREE.Vector3();
         this.camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
         const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0));
         const dir = new THREE.Vector3().addScaledVector(fwd, iz).addScaledVector(right, ix).normalize();
-        // world direction -> ship-local (yaw only)
-        const s = Math.sin(this.ship.yaw), c = Math.cos(this.ship.yaw);
-        const lx = dir.x * c - dir.z * s, lz = dir.x * s + dir.z * c;
-        const p = clampToDeck(this.cap.x + lx * 2.6 * dt, this.cap.z + lz * 2.6 * dt);
-        this.cap.x = p.x; this.cap.z = p.z;
-        this.cap.facing = Math.atan2(lx, lz);
-        this.cap.moving = true;
+        const nx = this.shore.x + dir.x * 3.4 * dt, nz = this.shore.z + dir.z * 3.4 * dt;
+        const nll = worldToLatLon(nx, nz);
+        if (elevation(nll.lat, nll.lon) > -0.6) { // wade to the chest, no deeper
+          this.shore.x = nx; this.shore.z = nz;
+          this.shore.facing = Math.atan2(dir.x, dir.z);
+          this.cap.moving = true;
+        }
       }
+      const sll = worldToLatLon(this.shore.x, this.shore.z);
+      this.captain.group.position.set(
+        this.shore.x, Math.max(elevation(sll.lat, sll.lon), -0.3), this.shore.z);
+      this.captain.group.rotation.y = this.shore.facing;
+    } else {
+      this.captain.group.position.set(this.cap.x, DECK.y, this.cap.z);
+      this.captain.group.rotation.y = this.cap.facing;
     }
-    this.captain.group.position.set(this.cap.x, DECK.y, this.cap.z);
-    this.captain.group.rotation.y = this.cap.facing;
     this.captain.animate(dt, this.cap.moving);
 
     // third-person orbit camera, on-foot close / captain's view at the helm
@@ -383,9 +508,9 @@ class Game {
     const lun = lunarState(skyT);
     const glit = glitterSource(sol, lun, moonBrightness(moonPhase(skyT)));
     const skyLL = worldToLatLon(this.ship.x, this.ship.z);
-    this.sky.update(skyT, skyLL.lat, this.camera.position);
+    this.sky.update(skyT, skyLL.lat, this.camera.position, this.gloom);
     this.ocean.update(t, this.ship.x, this.ship.z, this.camera.position, glit,
-      this.sky.domeUniforms.uHor.value);
+      this.sky.domeUniforms.uHor.value, this.swell);
     this.foam.setLight(Math.min(1, sol.dayness
       + 0.3 * sol.nightness * moonBrightness(moonPhase(skyT)) * Math.max(0, lun.alt)));
     if (this.gfxQuality === 'fine') {
@@ -417,19 +542,30 @@ class Game {
     }
     this.maps.update(ll.lat, ll.lon, this.ship.yaw, this.treasureMap);
     this.hud.gold.textContent = this.gold;
-    this.hud.hint.textContent = this.boardable
-      ? 'E \u2014 BOARD HER!'
-      : this.digTimer > 0
-        ? 'The crew is digging\u2026'
+    this.hud.weather.textContent = this.weatherState;
+    this.hud.hint.textContent = this.mode === 'ashore'
+      ? (this.digTimer > 0
+        ? 'Digging\u2026'
         : this.digReady
-          ? 'E \u2014 send the longboat to dig'
-          : this.aground
-            ? 'AGROUND \u2014 steer for deeper water'
+          ? 'E \u2014 dig for the treasure'
+          : 'WASD \u2014 explore ashore \u00b7 E \u2014 back to the ship')
+      : this.boardable
+        ? 'E \u2014 BOARD HER!'
+        : this.digTimer > 0
+          ? 'The crew is digging\u2026'
+          : this.digReady
+            ? 'E \u2014 send the longboat to dig'
             : this.mode === 'helm'
-              ? 'A/D — steer · W/S — sheet in / ease · E — leave the helm · M — chart'
+              ? (this.aground
+                ? 'AGROUND \u2014 E to leave the helm, then step ashore'
+                : 'A/D — steer · W/S — sheet in / ease · E — leave the helm · M — chart')
               : nearHelm(this.cap.x, this.cap.z)
                 ? 'E — take the helm'
-                : 'WASD — walk the deck · drag — look · wheel — zoom · M — chart';
+                : this.canStepAshore()
+                  ? 'E \u2014 step ashore'
+                  : this.aground
+                    ? 'AGROUND \u2014 steer for deeper water'
+                    : 'WASD — walk the deck · drag — look · wheel — zoom · M — chart';
     this.hud.toast.style.display = t < this.toast.until ? 'block' : 'none';
     if (t < this.toast.until) this.hud.toast.textContent = this.toast.text;
     // a nudge toward good trim, teaching by whisper not tutorial

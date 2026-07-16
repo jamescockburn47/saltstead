@@ -77,16 +77,17 @@ ok(alpsMax > elevation(38.5, -98.4) * 2, 'the Alps tower over Kansas');
   ok(onRiver < offRiver, `the valley is lower than the plain (${onRiver.toFixed(1)} vs ${offRiver.toFixed(1)})`);
 }
 
-// gait: 1x inshore, 4x offshore, 12x in blue water, smooth and monotonic
+// gait: 1x inshore, 5x offshore, GAIT_MAX in blue water, smooth and monotonic
+ok(GAIT_MAX === 20, 'blue-water gait is 20x');
 ok(gaitFactor(0) === 1 && gaitFactor(800) === 1, 'no gait inshore');
-ok(gaitFactor(2100) >= 3.9 && gaitFactor(2100) < 4.5, `offshore plateau ~4x (${gaitFactor(2100).toFixed(2)})`);
-ok(gaitFactor(4200) === 12 && gaitFactor(50000) === 12, 'full blue-water gait 12x');
+ok(gaitFactor(2100) >= 4.9 && gaitFactor(2100) < 5.6, `offshore plateau ~5x (${gaitFactor(2100).toFixed(2)})`);
+ok(gaitFactor(4200) === GAIT_MAX && gaitFactor(50000) === GAIT_MAX, 'full blue-water gait');
 const mid = gaitFactor(1400);
-ok(mid > 1.5 && mid < 3.5, `gait ramps smoothly (${mid.toFixed(2)} at 1400m)`);
+ok(mid > 1.5 && mid < 4.5, `gait ramps smoothly (${mid.toFixed(2)} at 1400m)`);
 let prev = -1, mono = true;
 for (let d = 0; d <= 6000; d += 50) { const g = gaitFactor(d); if (g < prev - 1e-9) mono = false; prev = g; }
 ok(mono, 'monotonic ramp all the way out');
-ok(gaitFactor(coastDistGame(30, -45)) === 12, 'mid-Atlantic sails at full blue-water gait');
+ok(gaitFactor(coastDistGame(30, -45)) === GAIT_MAX, 'mid-Atlantic sails at full blue-water gait');
 
 // encounter gait: alone the current runs full; in company it dies to 1x
 ok(encounterGait(GAIT_MAX, Infinity) === GAIT_MAX, 'empty sea, full current');
@@ -103,4 +104,4 @@ ok(encounterGait(1, 100) === 1, 'inshore (gait already 1) the encounter is a no-
 }
 
 if (failed) { console.error(`verify-earth: ${failed} FAILED`); process.exit(1); }
-console.log(`verify-earth: OK — ${RING_COUNT} rings/${POINT_COUNT} pts, ground-truth tour green, gait ramps 1x->12x`);
+console.log(`verify-earth: OK — ${RING_COUNT} rings/${POINT_COUNT} pts, ground-truth tour green, gait ramps 1x->${GAIT_MAX}x`);

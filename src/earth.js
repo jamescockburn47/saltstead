@@ -251,14 +251,17 @@ export function elevation(lat, lon) {
 }
 
 // open-sea gait, two stages: 1x inshore so harbours and coastlines are sailed
-// at human scale, 4x once clear of the coast, then a second ramp to 12x in
-// true blue water so an ocean crossing is minutes, not a tea break.
+// at human scale, 5x once clear of the coast, then a second ramp to 20x in
+// true blue water so an ocean crossing is a couple of minutes, not a tea
+// break. The wind ALSO builds offshore (weather.js windProfile), so the two
+// multiply: blue water is fast because the world compresses AND because the
+// ship is genuinely flying along.
 const smooth01 = (t) => { const c = Math.max(0, Math.min(1, t)); return c * c * (3 - 2 * c); };
-export const GAIT_MAX = 12;
+export const GAIT_MAX = 20;
 export function gaitFactor(coastDist) {
   return 1
-    + 3 * smooth01((coastDist - 800) / 1200)      // coastal -> offshore
-    + (GAIT_MAX - 4) * smooth01((coastDist - 2200) / 2000); // offshore -> blue water
+    + 4 * smooth01((coastDist - 800) / 1200)      // coastal -> offshore
+    + (GAIT_MAX - 5) * smooth01((coastDist - 2200) / 2000); // offshore -> blue water
 }
 
 // the current slackens in company: two hulls at 12x would close at ~200 m/s

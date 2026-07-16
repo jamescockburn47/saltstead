@@ -32,6 +32,7 @@ export class Ocean {
     this.uniforms = {
       uTime: { value: 0 },
       uOrigin: { value: new THREE.Vector2(0, 0) },
+      uSwell: { value: 1 }, // sea state — MUST track waves.js getSeaState()
       // the sword-of-the-sun rig (Moorstead mesher.js addWater, ported):
       // glitter lives ONLY in a corridor from the camera toward the light's
       // azimuth; k blends broad noon pool -> narrow blazing blade at a low sun
@@ -50,7 +51,7 @@ export class Ocean {
     });
     mat.onBeforeCompile = (sh) => {
       for (const k of Object.keys(this.uniforms)) sh.uniforms[k] = this.uniforms[k];
-      sh.vertexShader = 'uniform float uTime;\nuniform vec2 uOrigin;\nattribute vec2 aCentroid;\nvarying vec2 vWXZ;\nvarying vec2 vTriC;\n' + sh.vertexShader
+      sh.vertexShader = 'uniform float uTime;\nuniform vec2 uOrigin;\nuniform float uSwell;\nattribute vec2 aCentroid;\nvarying vec2 vWXZ;\nvarying vec2 vTriC;\n' + sh.vertexShader
         .replace('#include <begin_vertex>',
           '#include <begin_vertex>\n'
           + '  float wx = position.x + uOrigin.x;\n'
@@ -59,7 +60,7 @@ export class Ocean {
           // constant across each triangle (all 3 verts share aCentroid), so
           // the varying IS the facet id; mod keeps the hash in float precision
           + '  vTriC = mod(aCentroid + uOrigin, vec2(4096.0));\n'
-          + `  transformed.y += ${glslWaveSum()};`);
+          + `  transformed.y += uSwell * (${glslWaveSum()});`);
       sh.fragmentShader = 'uniform float uTime;\nuniform vec3 uCamPos;\nuniform vec2 uSunAzim;\n'
         + 'uniform float uSunLow;\nuniform float uGlitter;\nuniform float uFresnel;\nuniform vec3 uFresCol;\nvarying vec2 vWXZ;\nvarying vec2 vTriC;\n'
         + 'float wHash(vec2 p){ p = fract(p * vec2(123.34, 345.45)); p += dot(p, p + 34.345); return fract(p.x * p.y); }\n'
@@ -101,8 +102,9 @@ export class Ocean {
   }
 
   // glit: { ax, az, low, amp } from lightrig.glitterSource
-  update(t, cx, cz, camPos, glit, horizon) {
+  update(t, cx, cz, camPos, glit, horizon, swell = 1) {
     this.uniforms.uTime.value = t;
+    this.uniforms.uSwell.value = swell;
     const sx = Math.round(cx / this.step) * this.step;
     const sz = Math.round(cz / this.step) * this.step;
     this.mesh.position.set(sx, 0, sz);

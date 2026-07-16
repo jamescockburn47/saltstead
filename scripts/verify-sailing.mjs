@@ -44,7 +44,7 @@ for (let e = -1; e <= 1; e += 0.1) {
 // tack + speed
 ok(tackSign(1, 0) === 1 && tackSign(-1, 0) === -1, 'tack sign follows wind side');
 ok(speedTarget(1, 8, 10) === 10, 'full power at reference wind = max speed');
-ok(speedTarget(1, 16, 10) <= 14, 'strong wind capped at 1.4x');
+ok(speedTarget(1, 16, 10) === 20 && speedTarget(1, 30, 10) === 20, 'gale capped at 2x');
 ok(speedTarget(0.5, 8, 10) < speedTarget(1, 8, 10), 'more power = faster');
 ok(speedTarget(1, 4, 10) < speedTarget(1, 8, 10), 'more wind = faster');
 ok(speedTarget(0, 8, 10) === 0, 'no power, no way');

@@ -132,6 +132,25 @@ pulled-back captain's view at the helm (pulling further back as ships get bigger
 Interaction is proximity + soft-lock, not crosshair. The captain needs a readable
 procedural character model with cosmetic progression (hats).
 
+## Shore leave
+
+Anchor near a beach (or run her aground) and E puts the captain ashore by
+longboat; the crew holds the ship. On foot you walk the real terrain — climb
+for a view, find the X, dig with your own spade (same chest as sending the
+crew, but you were THERE). E rows you back. Land still pays nothing directly
+(the chest's gold originated at sea); ports, taverns and shipwrights hang off
+this mode later.
+
+## Real weather, real wind (the Moorstead weather-live pattern)
+
+Open-Meteo at the ship's REAL lat/lon: the Azores get Azores wind, today. The
+live sample eases into the wind base (never snaps the sails); WMO codes map
+to clear/overcast/rain/fog/storm, which grey the sky and raise the swell. Two
+game-design overrides where truth loses to fun: becalmed days floor at 5 m/s,
+and the wind BUILDS offshore (1x inshore -> 1.9x blue water) regardless of
+the forecast, so crossings fly. Any fetch failure leaves the procedural wind
+machine in charge — live weather is a layer, never a dependency.
+
 ## The sea must not be boring (first-class pillar)
 
 1. **Active sailing** — wind direction/strength matter; trim and point of sail are a

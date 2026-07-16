@@ -65,8 +65,10 @@ export function tackSign(heading, windFrom) {
   return wrapAngle(heading - windFrom) >= 0 ? 1 : -1;
 }
 
-// Target hull speed (m/s) for a given power and wind strength.
+// Target hull speed (m/s) for a given power and wind strength. The cap is
+// 2x: a full offshore gale genuinely doubles the hull's pace — half of what
+// makes blue water feel FAST (the other half is the open-sea gait).
 export function speedTarget(power, windSpeed, maxSpeed) {
-  const windFactor = Math.max(0, Math.min(1.4, windSpeed / 8));
+  const windFactor = Math.max(0, Math.min(2, windSpeed / 8));
   return maxSpeed * power * windFactor;
 }
