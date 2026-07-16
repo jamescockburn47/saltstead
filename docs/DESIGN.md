@@ -158,6 +158,22 @@ Growth loop: bigger ship → bigger prizes sail your waters (spawn tables key of
 hull tier) → bigger scores → bigger ship. Notoriety rises with income and raises
 navy heat — the difficulty curve is the economy's own thermostat.
 
+## Ports that work (the first sink)
+
+A haven within anchorage reach + bare steerageway + E puts you in at the port.
+V1 is two transactions, because the loop needs a drain before it needs a shop:
+
+- **Sell your prizes** — the whole fleet goes at once; the prize crews come back
+  aboard (up to the sloop's berths). A prize sells for well over the richest
+  boarding purse — capturing beats stripping, which is the point of the fleet.
+- **Sign on hands** — the tavern trades gold for crew, which is the currency of
+  capture. Gold -> hands -> prizes -> gold: the loop closes.
+
+Later, same door: the shipwright (bigger hulls — THE progression purchase),
+repairs, victualling, rumours. Havens are legends rows (append-only): Port
+Royal, Nassau, Tortuga, Île Sainte-Marie — real pirate geography, spread so
+every ocean has a door.
+
 ## Third person
 
 You look down on your captain and your ship — the object of the whole progression

@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "node scripts/deploy.mjs",
-    "verify": "node scripts/verify-waves.mjs && node scripts/verify-sailing.mjs && node scripts/verify-shipframe.mjs && node scripts/verify-ship.mjs && node scripts/verify-foam.mjs && node scripts/verify-wood.mjs && node scripts/verify-legends.mjs && node scripts/verify-earth.mjs && node scripts/verify-chart.mjs && node scripts/verify-terraingen.mjs && node scripts/verify-sky.mjs && node scripts/verify-light.mjs && node scripts/verify-login.mjs && node scripts/verify-plunder.mjs && node scripts/verify-treasure.mjs && node scripts/verify-merchants.mjs && node scripts/verify-weather.mjs && node scripts/verify-wildlife.mjs && node scripts/verify-fleet.mjs && node scripts/verify-shiplog.mjs && node scripts/verify-navigation.mjs",
+    "verify": "node scripts/verify-waves.mjs && node scripts/verify-sailing.mjs && node scripts/verify-shipframe.mjs && node scripts/verify-ship.mjs && node scripts/verify-foam.mjs && node scripts/verify-wood.mjs && node scripts/verify-legends.mjs && node scripts/verify-earth.mjs && node scripts/verify-chart.mjs && node scripts/verify-terraingen.mjs && node scripts/verify-sky.mjs && node scripts/verify-light.mjs && node scripts/verify-login.mjs && node scripts/verify-plunder.mjs && node scripts/verify-treasure.mjs && node scripts/verify-merchants.mjs && node scripts/verify-weather.mjs && node scripts/verify-wildlife.mjs && node scripts/verify-fleet.mjs && node scripts/verify-shiplog.mjs && node scripts/verify-navigation.mjs && node scripts/verify-port.mjs",
     "verify:waves": "node scripts/verify-waves.mjs",
     "verify:sailing": "node scripts/verify-sailing.mjs",
     "verify:shipframe": "node scripts/verify-shipframe.mjs",
@@ -30,7 +30,8 @@
     "verify:wildlife": "node scripts/verify-wildlife.mjs",
     "verify:fleet": "node scripts/verify-fleet.mjs",
     "verify:shiplog": "node scripts/verify-shiplog.mjs",
-    "verify:navigation": "node scripts/verify-navigation.mjs"
+    "verify:navigation": "node scripts/verify-navigation.mjs",
+    "verify:port": "node scripts/verify-port.mjs"
   },
   "dependencies": {
     "three": "^0.166.0"

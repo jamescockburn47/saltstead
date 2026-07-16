@@ -21,6 +21,12 @@ export class FleetLayer {
     this.prizes.push({ f: { x, z, yaw, speed: 0 }, group: sloop.group, setSail: sloop.setSail });
   }
 
+  // the whole column goes at once (sold in port)
+  clear() {
+    for (const p of this.prizes) this.scene.remove(p.group);
+    this.prizes.length = 0;
+  }
+
   // restore n prizes straight onto their stations astern of the flagship
   restore(n, flagX, flagZ, flagYaw) {
     for (let i = 0; i < n; i++) {

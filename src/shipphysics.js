@@ -21,9 +21,11 @@ export function newShipState(x = 0, z = 0) {
 
 // wind: { from, speed }. gait: open-sea distance multiplier (earth.js
 // gaitFactor) — it scales the world slipping past, not the hull's dynamics,
-// so trim/turn feel is identical inshore and out. Mutates and returns s.
-export function stepShip(s, wind, dt, spec = SLOOP, gait = 1) {
-  const power = sailPower(s.yaw, wind.from, s.trim);
+// so trim/turn feel is identical inshore and out. furl: the crew hands the
+// sails (anchorage / under a beach) — no drive, she glides to rest on drag.
+// Mutates and returns s.
+export function stepShip(s, wind, dt, spec = SLOOP, gait = 1, furl = false) {
+  const power = furl ? 0 : sailPower(s.yaw, wind.from, s.trim);
   const target = speedTarget(power, wind.speed, spec.maxSpeed);
   const rate = target > s.speed ? spec.accel : spec.drag;
   s.speed += (target - s.speed) * (1 - Math.exp(-rate * dt));

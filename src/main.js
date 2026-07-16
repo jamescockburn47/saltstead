@@ -32,6 +32,10 @@ import {
 import { windProfile, seaStateFor, LiveWeather } from './weather.js';
 import { setSeaState } from './waves.js';
 import { makeEntry, pushEntry, acceptLog } from './shiplog.js';
+import {
+  nearestHaven, inAnchorage, sellFleet, canHire, HAND_COST, PORT_RADIUS,
+} from './port.js';
+import { PortUI } from './portui.js';
 import { canSight, takeSight, sightText } from './navigation.js';
 import { StarChartUI } from './starchartui.js';
 import { LogUI } from './logui.js';
@@ -168,6 +172,8 @@ class Game {
     this.maps = new MapUI();
     this.starchart = new StarChartUI();
     this.logui = new LogUI();
+    this.port = null; // { haven, dist } refreshed with the geography
+    this.portui = new PortUI(() => this.sellPrizes(), () => this.hireHand());
     // the weather-turn and landfall log entries fire on TRANSITIONS
     this.loggedWeather = this.weatherState;
     this.atSea = null; // null until first geography sample settles it
@@ -179,6 +185,7 @@ class Game {
       if (e.code === 'Escape') {
         if (this.starchart.open) this.starchart.toggle();
         if (this.logui.open) this.logui.toggle(this.log);
+        if (this.portui.open) this.portui.hide();
       }
     });
 
@@ -205,6 +212,38 @@ class Game {
     const ll = worldToLatLon(this.ship.x, this.ship.z);
     pushEntry(this.log, makeEntry(this.t + this.dayStart, ll.lat, ll.lon, text));
     if (this.logui.open) this.logui.render(this.log);
+  }
+
+  // ---- port transactions (the plunder economy's first sink) ----
+  sellPrizes() {
+    const n = this.fleet.size();
+    if (!n) return;
+    const sale = sellFleet(n, this.crew);
+    this.gold += sale.gold;
+    this.crew = sale.crewBack;
+    this.fleet.clear();
+    this.say(`${sale.sold} prize${sale.sold > 1 ? 's' : ''} sold \u2014 `
+      + `${sale.gold} doubloons; the prize crews come back aboard`, 7);
+    this.logEvent(`Sold ${sale.sold} prize${sale.sold > 1 ? 's' : ''} at `
+      + `${this.port.haven.name} for ${sale.gold} doubloons`);
+    this.portui.refresh(this.gold, this.crew, 0);
+    this.persist();
+  }
+
+  hireHand() {
+    if (!canHire(this.gold, this.crew)) return;
+    this.gold -= HAND_COST;
+    this.crew++;
+    this.say(`A hand signs articles \u2014 ${this.crew} aboard`, 4);
+    this.logEvent(`Signed on a hand at ${this.port.haven.name} (${HAND_COST} doubloons)`);
+    this.portui.refresh(this.gold, this.crew, this.fleet.size());
+    this.persist();
+  }
+
+  putIn() {
+    this.portui.show(this.port.haven);
+    this.portui.refresh(this.gold, this.crew, this.fleet.size());
+    this.logEvent(`Put in at ${this.port.haven.name}`);
   }
 
   // N: the planisphere — and on a clear night, the navigator takes a sight
@@ -276,6 +315,7 @@ class Game {
   // E is contextual: (ashore: dig > re-board) / prize alongside > dig >
   // step ashore > the helm
   onE() {
+    if (this.portui.open) { this.portui.hide(); return; }
     if (this.mode === 'ashore') {
       if (this.digReady && this.digTimer <= 0) {
         this.digTimer = DIG_TIME;
@@ -292,6 +332,9 @@ class Game {
       this.say('The longboat pulls for the shore\u2026');
       return;
     }
+    // a haven's anchorage outranks the beach — but the helm is left first
+    if (this.mode !== 'helm' && this.port
+      && inAnchorage(this.port.dist, this.ship.speed)) { this.putIn(); return; }
     // the helm wins when you're standing at it; the shore wins elsewhere
     if (this.mode === 'walk' && nearHelm(this.cap.x, this.cap.z)) { this.toggleHelm(); return; }
     if (this.canStepAshore()) { this.goAshore(); return; }
@@ -405,6 +448,10 @@ class Game {
       this.ship.rudder += (rt - this.ship.rudder) * Math.min(1, dt * 5);
       if (k.has('KeyW')) this.ship.trim = Math.max(0, this.ship.trim - dt * 0.45);
       if (k.has('KeyS')) this.ship.trim = Math.min(1, this.ship.trim + dt * 0.45);
+    } else if (this.port && this.port.dist <= PORT_RADIUS) {
+      // inside an anchorage with the captain off the helm, the crew hands
+      // the sails and lets her run off her way — that's how you arrive
+      this.ship.rudder *= 1 - Math.min(1, dt * 2);
     } else {
       // captain off the tiller: the crew holds her — if the wind's breathing
       // walks the bow into irons, they bear away until the sail draws again
@@ -424,6 +471,7 @@ class Game {
       this.geoClock = 0.25;
       const ll = worldToLatLon(this.ship.x, this.ship.z);
       this.coastDist = coastDistGame(ll.lat, ll.lon);
+      this.port = nearestHaven(ll.lat, ll.lon);
       // real weather at the ship's real coordinates — the Azores get Azores
       // wind. Eased in over ~20 s so a fresh sample never snaps the sails.
       const live = this.weather.poll(ll.lat, ll.lon);
@@ -505,7 +553,9 @@ class Game {
     }
 
     const px = this.ship.x, pz = this.ship.z;
-    stepShip(this.ship, this.wind, dt, SLOOP, gait);
+    const furled = (this.mode !== 'helm' && this.port && this.port.dist <= PORT_RADIUS)
+      || this.portui.open;
+    stepShip(this.ship, this.wind, dt, SLOOP, gait, furled);
 
     // grounding: inshore, the sea floor is real — checked at the BOW, so the
     // hull stops when the stem touches, not once the mast is in the dunes
@@ -680,6 +730,7 @@ class Game {
     this.hud.crew.textContent = this.crew;
     this.hud.fleet.textContent = this.fleet.size()
       ? ` \u00b7 ${this.fleet.size()} prize${this.fleet.size() > 1 ? 's' : ''} astern` : '';
+    const anchored = this.port && inAnchorage(this.port.dist, this.ship.speed);
     this.hud.hint.textContent = this.mode === 'ashore'
       ? (this.digTimer > 0
         ? 'Digging\u2026'
@@ -695,12 +746,16 @@ class Game {
           : this.digReady
             ? 'E \u2014 send the longboat to dig'
             : this.mode === 'helm'
-              ? (this.aground
+              ? (anchored
+                ? `ANCHORAGE \u2014 E to leave the helm, then put in at ${this.port.haven.name}`
+                : this.aground
                 ? 'AGROUND \u2014 E to leave the helm, then step ashore'
                 : 'A/D — steer · W/S — sheet · E — leave the helm · M — chart · N — stars · L — log')
               : nearHelm(this.cap.x, this.cap.z)
                 ? 'E — take the helm'
-                : this.canStepAshore()
+                : anchored
+                  ? `E \u2014 put in at ${this.port.haven.name}`
+                  : this.canStepAshore()
                   ? 'E \u2014 step ashore'
                   : this.aground
                     ? 'AGROUND \u2014 steer for deeper water'

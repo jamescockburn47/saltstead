@@ -22,6 +22,16 @@ const DT = 1 / 30;
   ok(Math.hypot(s.x, s.z) > 100, 'the ship actually went somewhere');
 }
 
+// sails furled (anchorage): drive dies whatever the trim, she glides to rest
+{
+  const s = newShipState(0, 0);
+  s.speed = 7;
+  const wind = { from: s.yaw - Math.PI / 2, speed: 12 }; // a driving beam wind
+  s.trim = optimalTrim(wrapAngle(s.yaw - wind.from));
+  for (let i = 0; i < 60 * 30; i++) stepShip(s, wind, DT, SLOOP, 1, true);
+  ok(s.speed < 0.3, `furled, she comes to rest even in a gale (${s.speed.toFixed(2)} m/s)`);
+}
+
 // dead into the wind: you slow to a stop
 {
   const s = newShipState(0, 0);

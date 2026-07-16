@@ -75,6 +75,27 @@ export const LEGENDS = [
       + 'other crews to the richest hulls.',
   },
   {
+    id: 'nassau', kind: 'haven', phase: 1,
+    name: 'Nassau', lat: 25.08, lon: -77.35, radius: 25,
+    pitch: 'The pirate republic on New Providence. No governor worth the name, '
+      + 'a harbour too shallow for men-of-war, and a beach market where a '
+      + 'prize sells with no questions asked — the Atlantic door.',
+  },
+  {
+    id: 'tortuga', kind: 'haven', phase: 1,
+    name: 'Tortuga', lat: 20.06, lon: -72.79, radius: 20,
+    pitch: 'The buccaneers\u2019 first stronghold, a turtle-backed rock off '
+      + 'Hispaniola. Taverns full of hands willing to sign articles, and a '
+      + 'fort that never asks where the cargo came from.',
+  },
+  {
+    id: 'sainte-marie', kind: 'haven', phase: 1,
+    name: '\u00cele Sainte-Marie', lat: -16.89, lon: 49.9, radius: 25,
+    pitch: 'The Indian Ocean pirate haven off Madagascar, astride the richest '
+      + 'trade lane on earth. Every Red Sea raider wintered here; the far '
+      + 'door, for captains who cross real oceans.',
+  },
+  {
     id: 'el-dorado', kind: 'hunt', phase: 3,
     name: 'El Dorado', lat: -3.1, lon: -60.0, radius: 300,
     pitch: 'The gilded city is somewhere up the Amazon. The great navigable '
