@@ -160,7 +160,8 @@ navy heat — the difficulty curve is the economy's own thermostat.
 
 ## Ports that work (the first sink)
 
-A haven within anchorage reach + bare steerageway + E puts you in at the port.
+Arrival is intuitive: run her right up the haven's beach (the hull rides the
+sand and stops) — or just slow inside the anchorage — and E puts you in.
 V1 is two transactions, because the loop needs a drain before it needs a shop:
 
 - **Sell your prizes** — the whole fleet goes at once; the prize crews come back

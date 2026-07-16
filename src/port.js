@@ -7,7 +7,6 @@ import { PRIZE_CREW } from './fleet.js';
 import { M_PER_DEG } from './earth.js';
 
 export const PORT_RADIUS = 900;   // metres of anchorage around a haven
-export const HARBOUR_RADIUS = 300; // the inner harbour: off the tiller here, the sails come off
 export const PORT_SPEED = 1.5;    // bare steerageway to put in
 export const PRIZE_VALUE = 400;   // a hull is worth more than the richest purse
 export const HAND_COST = 60;      // the tavern's signing bounty

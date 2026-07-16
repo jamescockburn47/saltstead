@@ -34,8 +34,7 @@ import { windProfile, seaStateFor, LiveWeather } from './weather.js';
 import { setSeaState } from './waves.js';
 import { makeEntry, pushEntry, acceptLog } from './shiplog.js';
 import {
-  nearestHaven, inAnchorage, sellFleet, canHire, HAND_COST, PORT_RADIUS,
-  HARBOUR_RADIUS,
+  nearestHaven, inAnchorage, sellFleet, canHire, HAND_COST,
 } from './port.js';
 import { PortUI } from './portui.js';
 import { canSight, takeSight, sightText } from './navigation.js';
@@ -455,13 +454,13 @@ class Game {
       this.ship.rudder += (rt - this.ship.rudder) * Math.min(1, dt * 5);
       if (k.has('KeyW')) this.ship.trim = Math.max(0, this.ship.trim - dt * 0.45);
       if (k.has('KeyS')) this.ship.trim = Math.min(1, this.ship.trim + dt * 0.45);
-    } else if (this.port && this.port.dist <= HARBOUR_RADIUS) {
-      // in the inner harbour with the captain off the tiller, she runs off
-      // her way and glides to a stop — that's how you arrive
+    } else if (this.aground) {
+      // beached with nobody at the tiller: she STAYS beached — no lashed
+      // tiller quietly walking her off the sand while the captain's forward
       this.ship.rudder *= 1 - Math.min(1, dt * 2);
     } else {
-      // captain off the tiller: the crew holds her — if the wind's breathing
-      // walks the bow into irons, they bear away until the sail draws again
+      // off the tiller it's lashed: hold the course, but if the wind's
+      // breathing walks the bow into irons, bear away until the sail draws
       const relNow = wrapAngle(this.ship.yaw - this.wind.from);
       this.ship.rudder += (crewRudder(relNow) - this.ship.rudder) * Math.min(1, dt * 2);
     }
@@ -562,22 +561,25 @@ class Game {
     }
 
     const px = this.ship.x, pz = this.ship.z;
-    // sails come off ONLY in the inner harbour (or with the port panel up) —
-    // the outer anchorage must never becalm a ship that's just passing
-    const furled = (this.mode !== 'helm' && this.port && this.port.dist <= HARBOUR_RADIUS)
-      || this.portui.open;
+    // only the port panel furls the sails (so she doesn't sail off mid-trade);
+    // everywhere else you stop the intuitive way — run her up the beach
+    const furled = this.portui.open;
     stepShip(this.ship, this.wind, dt, SLOOP, gait, furled);
 
-    // grounding: inshore, the sea floor is real — checked at the BOW, so the
-    // hull stops when the stem touches, not once the mast is in the dunes
+    // beaching: the hull PULLS RIGHT UP to the land — she stops when the bow
+    // noses onto actual sand (elevation above the waterline), not in the
+    // offshore shallows. shipAttitude rides the ground, so she sits ON it.
     const groundAt = (x, z) => { const g = worldToLatLon(x, z); return elevation(g.lat, g.lon); };
     if (this.coastDist < 400) {
       const bowX = this.ship.x + Math.sin(this.ship.yaw) * SLOOP.length * 0.5;
       const bowZ = this.ship.z + Math.cos(this.ship.yaw) * SLOOP.length * 0.5;
-      if (groundAt(bowX, bowZ) > -0.9 || groundAt(this.ship.x, this.ship.z) > -0.9) {
+      if (groundAt(bowX, bowZ) > 0.05 || groundAt(this.ship.x, this.ship.z) > 0.05) {
         this.ship.x = px; this.ship.z = pz;
         this.ship.speed = 0;
         this.aground = true;
+        // beached, the rudder alone barely bites — the captain poles her
+        // round off the sand, so swinging her back to sea takes seconds
+        if (this.mode === 'helm') this.ship.yaw += this.ship.rudder * 0.45 * dt;
       } else this.aground = false;
     } else this.aground = false;
 
@@ -710,7 +712,7 @@ class Game {
     }
     if (this.aground !== this.wasAground) {
       this.wasAground = this.aground;
-      if (this.aground) this.logEvent('Ran her aground \u2014 the keel takes the ground');
+      if (this.aground) this.logEvent('Beached her \u2014 the bow takes the sand');
     }
 
     // HUD
@@ -763,14 +765,14 @@ class Game {
               ? (anchored
                 ? `ANCHORAGE \u2014 T to leave the tiller, E to put in at ${this.port.haven.name}`
                 : this.aground
-                ? 'AGROUND \u2014 T to leave the tiller, E to step ashore'
+                ? 'BEACHED \u2014 T to leave the tiller, E to step ashore \u00b7 steer A/D to swing her off'
                 : 'A/D — steer · W/S — sheet · T — leave the tiller · M — chart · N — stars · L — log')
               : anchored
                 ? `E \u2014 put in at ${this.port.haven.name} \u00b7 T \u2014 take the tiller`
                 : this.canStepAshore()
                   ? 'E \u2014 step ashore \u00b7 T \u2014 take the tiller'
                   : this.aground
-                    ? 'AGROUND \u2014 T for the tiller, steer for deeper water'
+                    ? 'BEACHED \u2014 E to step ashore \u00b7 T to take the tiller'
                     : 'T — take the tiller · WASD — walk the deck · M — chart · N — stars · L — log';
     this.hud.toast.style.display = t < this.toast.until ? 'block' : 'none';
     if (t < this.toast.until) this.hud.toast.textContent = this.toast.text;
