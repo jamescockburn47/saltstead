@@ -74,10 +74,17 @@ const fakeStorage = () => {
   const bare = acceptSave(snapshotSave(ship, 0));
   ok(bare.gold === 0 && bare.map === null && bare.lootSeed === 1,
     'a lootless save reads as a poor pirate (additive fields, invariant 1)');
+  ok(Array.isArray(bare.log) && bare.log.length === 0, 'and its log reads as a blank book');
   const badMap = acceptSave({ ...meta, map: { lat: 'x' } });
   ok(badMap && badMap.map === null && badMap.gold === 340, 'a mangled map is dropped, not fatal');
   const badGold = acceptSave({ ...meta, gold: -50 });
   ok(badGold && badGold.gold === 0, 'negative gold refused');
+  const page = { d: 2, w: 'First watch', p: '17\u00b051\u2032N 76\u00b054\u2032W', x: 'Boarded a merchantman' };
+  const logged = acceptSave(snapshotSave(ship, 0, { log: [page] }));
+  ok(logged.log.length === 1 && logged.log[0].x === page.x,
+    "the ship's log survives the round-trip");
+  const tornBook = acceptSave({ ...snapshotSave(ship, 0), log: [page, { d: 'x' }, 7] });
+  ok(tornBook.log.length === 1, 'mangled log pages are torn out, good ones kept');
 
   ok(acceptSave(null) === null, 'no save = null');
   ok(acceptSave({}) === null, 'junk = null');

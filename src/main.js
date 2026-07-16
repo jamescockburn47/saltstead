@@ -31,6 +31,10 @@ import {
 } from './earth.js';
 import { windProfile, seaStateFor, LiveWeather } from './weather.js';
 import { setSeaState } from './waves.js';
+import { makeEntry, pushEntry, acceptLog } from './shiplog.js';
+import { canSight, takeSight, sightText } from './navigation.js';
+import { StarChartUI } from './starchartui.js';
+import { LogUI } from './logui.js';
 
 const POS_NAMES = [
   [IRONS, 'In irons'],
@@ -73,6 +77,7 @@ class Game {
     this.lootSeed = 1;         // rolls forward with every prize taken
     this.crew = START_CREW;    // hands aboard — the currency of capture
     this.savedFleet = 0;       // prizes to restore once the scene exists
+    this.log = [];             // the ship's log — the voyage writes itself
     if (save) {
       this.ship.x = save.ship.x; this.ship.z = save.ship.z;
       this.ship.yaw = save.ship.yaw; this.ship.trim = save.ship.trim;
@@ -82,6 +87,7 @@ class Game {
       this.lootSeed = save.lootSeed;
       this.crew = save.crew;
       this.savedFleet = save.fleet;
+      this.log = acceptLog(save.log);
     }
     this.saveClock = 12; // first autosave soon after boarding
     document.addEventListener('visibilitychange', () => {
@@ -160,11 +166,27 @@ class Game {
     };
 
     this.maps = new MapUI();
+    this.starchart = new StarChartUI();
+    this.logui = new LogUI();
+    // the weather-turn and landfall log entries fire on TRANSITIONS
+    this.loggedWeather = this.weatherState;
+    this.atSea = null; // null until first geography sample settles it
+    this.wasAground = false;
+    addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      if (e.code === 'KeyL') this.logui.toggle(this.log);
+      if (e.code === 'KeyN') this.toggleStars();
+      if (e.code === 'Escape') {
+        if (this.starchart.open) this.starchart.toggle();
+        if (this.logui.open) this.logui.toggle(this.log);
+      }
+    });
 
     this.applyQuality(localStorage['saltstead-gfx'] === 'plain' ? 'plain' : 'fine');
 
     this.t = 0;
     this.last = performance.now();
+    if (!save) this.logEvent('Weighed anchor off Port Royal \u2014 the voyage begins');
     this.renderer.setAnimationLoop(() => this.frame());
   }
 
@@ -172,11 +194,37 @@ class Game {
   persist() {
     saveGame(snapshotSave(this.ship, this.t + this.dayStart, {
       gold: this.gold, map: this.treasureMap, lootSeed: this.lootSeed,
-      crew: this.crew, fleet: this.fleet.size(),
+      crew: this.crew, fleet: this.fleet.size(), log: this.log,
     })).catch(() => {});
   }
 
   say(text, secs = 5) { this.toast = { text, until: this.t + secs }; }
+
+  // one page line in the ship's log, stamped with watch + position
+  logEvent(text) {
+    const ll = worldToLatLon(this.ship.x, this.ship.z);
+    pushEntry(this.log, makeEntry(this.t + this.dayStart, ll.lat, ll.lon, text));
+    if (this.logui.open) this.logui.render(this.log);
+  }
+
+  // N: the planisphere — and on a clear night, the navigator takes a sight
+  toggleStars() {
+    this.starchart.toggle();
+    if (!this.starchart.open) return;
+    const sol = solarState(this.t + this.dayStart);
+    const vis = canSight(sol.nightness, this.gloom);
+    if (vis.ok) {
+      const ll = worldToLatLon(this.ship.x, this.ship.z);
+      const sight = takeSight(this.t + this.dayStart, ll.lat);
+      const text = sightText(sight, ll.lat);
+      this.starchart.setCaption(text + ' \u00b7 N or Esc closes the chart');
+      this.logEvent(`Star sight \u2014 ${text}`);
+    } else {
+      this.starchart.setCaption(vis.reason === 'daylight'
+        ? 'The stars are up there, but the sun owns the sky \u2014 a sight needs the dark'
+        : 'Overcast \u2014 no stars tonight; the sky must clear before the navigator can shoot');
+    }
+  }
 
   // Moorstead's two-tier rig (invariant 5): Fine = ACES + PCFSoft shadows +
   // water glitter/fresnel; Plain = library defaults, amps parked at 0.
@@ -284,6 +332,7 @@ class Game {
     this.scene.add(this.captain.group); // reparent out of the ship
     this.cam.targetDist = 8;
     this.say('The longboat puts you ashore. The crew holds the ship.', 5);
+    this.logEvent('The captain went ashore by longboat; the crew holds the ship');
   }
 
   boardShip() {
@@ -315,6 +364,7 @@ class Game {
     }
     this.lootSeed++;
     this.say(msg, 7);
+    this.logEvent(msg.replace('Boarded! ', 'Boarded a merchantman \u2014 '));
     this.persist();
   }
 
@@ -326,6 +376,7 @@ class Game {
     this.fleet.add(pose.x, pose.z, pose.yaw);
     this.say(`A prize crew of ${PRIZE_CREW} takes her \u2014 she falls in astern. `
       + `(${this.crew} hands left aboard)`, 7);
+    this.logEvent(`Took her as a prize \u2014 a crew of ${PRIZE_CREW} put aboard, she falls in astern`);
     this.persist();
   }
 
@@ -447,6 +498,7 @@ class Game {
           this.say(this.mode === 'ashore'
             ? `The spade strikes wood \u2014 a chest of ${pay} doubloons!`
             : `The crew strikes wood \u2014 a chest of ${pay} doubloons!`, 8);
+          this.logEvent(`Dug at the X \u2014 a chest of ${pay} doubloons raised`);
           this.persist();
         }
       }
@@ -567,6 +619,39 @@ class Game {
         (exposureTarget(sol.dayness) - this.renderer.toneMappingExposure) * Math.min(1, dt * 0.4);
     }
 
+    // the planisphere tracks the live sky while it's open
+    if (this.starchart.open) {
+      this.starchart.update(skyT, skyLL.lat,
+        Math.max(0, sol.nightness - 0.25) * 1.33 * (1 - this.gloom));
+    }
+
+    // the log writes itself: weather turns, landfall/open sea, groundings
+    if (this.weatherState !== this.loggedWeather) {
+      this.loggedWeather = this.weatherState;
+      const phrase = {
+        clear: 'The sky clears', overcast: 'The sky greys over',
+        rain: 'Rain sets in', fog: 'Fog closes in', storm: 'A storm is upon us',
+      }[this.weatherState];
+      if (phrase) this.logEvent(phrase);
+    }
+    {
+      // hysteresis so a ragged coastline doesn't fill the book
+      let sea = this.atSea;
+      if (sea === null) sea = this.coastDist > 3000;
+      else if (sea && this.coastDist < 2000) sea = false;
+      else if (!sea && this.coastDist > 5000) sea = true;
+      if (this.atSea !== null && sea !== this.atSea) {
+        this.logEvent(sea
+          ? 'The land drops astern \u2014 open sea'
+          : 'Land ho \u2014 the coast rises on the horizon');
+      }
+      this.atSea = sea;
+    }
+    if (this.aground !== this.wasAground) {
+      this.wasAground = this.aground;
+      if (this.aground) this.logEvent('Ran her aground \u2014 the keel takes the ground');
+    }
+
     // HUD
     this.hud.speed.textContent = (this.ship.speed * 1.944).toFixed(1) + ' kn';
     this.hud.pos.textContent = POS_NAMES.find(([a]) => Math.abs(rel) <= a)[1];
@@ -612,14 +697,14 @@ class Game {
             : this.mode === 'helm'
               ? (this.aground
                 ? 'AGROUND \u2014 E to leave the helm, then step ashore'
-                : 'A/D — steer · W/S — sheet in / ease · E — leave the helm · M — chart')
+                : 'A/D — steer · W/S — sheet · E — leave the helm · M — chart · N — stars · L — log')
               : nearHelm(this.cap.x, this.cap.z)
                 ? 'E — take the helm'
                 : this.canStepAshore()
                   ? 'E \u2014 step ashore'
                   : this.aground
                     ? 'AGROUND \u2014 steer for deeper water'
-                    : 'WASD — walk the deck · drag — look · wheel — zoom · M — chart';
+                    : 'WASD — walk the deck · drag — look · M — chart · N — stars · L — log';
     this.hud.toast.style.display = t < this.toast.until ? 'block' : 'none';
     if (t < this.toast.until) this.hud.toast.textContent = this.toast.text;
     // a nudge toward good trim, teaching by whisper not tutorial

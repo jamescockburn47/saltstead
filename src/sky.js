@@ -6,7 +6,7 @@
 
 import * as THREE from 'three';
 import {
-  solarState, lunarState, starWheelAngle, moonPhase,
+  solarState, lunarState, moonPhase, celestialAngles,
   STAR_CATALOGUE, raDecToEq, starField,
 } from './skymath.js';
 
@@ -135,9 +135,12 @@ export class Sky {
     this.moonDisc.material.opacity = 0.35 + 0.65 * sol.nightness;
 
     // the star wheel: spin about the celestial pole, then tilt the pole to
-    // the observer's latitude — the whole navigation trick in two rotations
-    this._q1.setFromAxisAngle(this._axisY, starWheelAngle(t));
-    this._q2.setFromAxisAngle(this._axisX, (90 - latDeg) * (Math.PI / 180));
+    // the observer's latitude — the whole navigation trick in two rotations.
+    // celestialAngles is SHARED with navigation.js: the planisphere and the
+    // heavens can never disagree (and the pole leans NORTH, wheel runs west)
+    const cel = celestialAngles(t, latDeg);
+    this._q1.setFromAxisAngle(this._axisY, cel.wheel);
+    this._q2.setFromAxisAngle(this._axisX, cel.tilt);
     this.stars.quaternion.copy(this._q2).multiply(this._q1);
     this.stars.position.copy(center);
     this.starMat.opacity = Math.max(0, sol.nightness - 0.25) * 1.33 * (1 - gloom);

@@ -48,6 +48,37 @@ export function starWheelAngle(t) {
   return ((t / DAY_LENGTH) % 1) * 2 * Math.PI;
 }
 
+// The two rotations that hang the equatorial frame over the deck, shared by
+// the 3D sky (sky.js quaternions) and the star chart (navigation.js) so the
+// planisphere can never disagree with the heavens it charts.
+// World horizon frame: +x east, +y up, -z NORTH (earth.js: north = -z).
+//   wheel: about +Y, negative so stars march east -> west like the sun
+//   tilt:  about +X, negative so the pole leans to the NORTH horizon
+export function celestialAngles(t, latDeg) {
+  return {
+    wheel: -starWheelAngle(t),
+    tilt: -(90 - latDeg) * (Math.PI / 180),
+  };
+}
+
+// equatorial unit vector -> world horizon frame (wheel about Y, then tilt
+// about X — exactly what sky.js does with quaternions)
+export function eqToWorld(v, t, latDeg) {
+  const { wheel, tilt } = celestialAngles(t, latDeg);
+  const cw = Math.cos(wheel), sw = Math.sin(wheel);
+  const x1 = v[0] * cw + v[2] * sw;
+  const z1 = -v[0] * sw + v[2] * cw;
+  const ca = Math.cos(tilt), sa = Math.sin(tilt);
+  return [x1, v[1] * ca - z1 * sa, v[1] * sa + z1 * ca];
+}
+
+// where a star stands from the deck: altitude above the horizon and azimuth
+// (0 = north, PI/2 = east, PI = south — the compass rose convention)
+export function starHorizon(raH, decDeg, t, latDeg) {
+  const [x, y, z] = eqToWorld(raDecToEq(raH, decDeg), t, latDeg);
+  return { alt: Math.asin(Math.max(-1, Math.min(1, y))), az: Math.atan2(x, -z) };
+}
+
 // ---- the pocket catalogue: enough real sky to navigate by ----
 // [name, RA hours, Dec degrees, magnitude, warmth 0=blue 1=amber]
 // Northern kit: Polaris + the Plough + Cassiopeia + Orion + Sirius.

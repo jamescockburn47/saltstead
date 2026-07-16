@@ -185,6 +185,36 @@ and the wind BUILDS offshore (1x inshore -> 1.9x blue water) regardless of
 the forecast, so crossings fly. Any fetch failure leaves the procedural wind
 machine in charge — live weather is a layer, never a dependency.
 
+## The navigator's craft (learn real things while you sail)
+
+Passage time is the game's biggest empty room; the furniture is REAL seamanship,
+taught by doing. Two instruments land first, both built on systems that already
+exist (nothing is faked):
+
+- **The ship's log (L)** — a running journal the game writes for you, in period
+  voice: departures, landfalls, weather turns, boardings, prizes, digs, groundings,
+  star sights. Every entry is stamped with the ship's-bell watch (Middle, Morning,
+  Forenoon, Afternoon, the dog watches, First) and the position in degrees and
+  minutes — reading your own log teaches the watch system and how positions are
+  written. Capped, persisted in the save, and one day the multiplayer brag sheet.
+- **The star chart (N)** — a planisphere drawn from the SAME celestial frame the
+  3D sky renders: the catalogue stars wheel westward through the night and tilt
+  with your latitude. On a clear night the navigator takes a sight: **the pole
+  star's altitude IS your latitude** (Southern Cross service south of the line).
+  The sight is computed through the real transform, logged, and phrased as the
+  lesson it is. By day or under cloud there is no sight — the weather system
+  gates the instrument, which is itself the lesson.
+
+Rules: instruments must read the live simulation (sky, weather, position) — never
+a lookup table of answers; each should teach one true thing a sailor knew; all
+optional — the M chart already navigates for you, these are for the joy of it.
+
+Later, same pillar: dead reckoning (log line + compass + sand glass, then compare
+against the real chart), flag signals, the lead line for depth. On **larger ships**
+the crew becomes real management: genuine jobs (helm watches, lookouts, sail
+handling, the galley) held by named NPCs — the yorkshire_bot brain pattern ports
+for below-decks chatter, and the log starts writing entries about THEM.
+
 ## The sea must not be boring (first-class pillar)
 
 1. **Active sailing** — wind direction/strength matter; trim and point of sail are a

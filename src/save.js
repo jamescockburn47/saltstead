@@ -5,10 +5,12 @@
 export const SAVE_VERSION = 1;
 const DB = 'saltstead', STORE = 'meta', KEY = 'game';
 
+import { acceptLog } from './shiplog.js';
+
 // ---- pure ----
-// loot: { gold, map, lootSeed, crew, fleet } — additive fields, version
+// loot: { gold, map, lootSeed, crew, fleet, log } — additive fields, version
 // stays 1 (older saves simply read as a poor pirate with no map, 8 hands,
-// no prizes)
+// no prizes, a blank log)
 export function snapshotSave(ship, skyT, loot = {}) {
   return {
     version: SAVE_VERSION,
@@ -19,6 +21,7 @@ export function snapshotSave(ship, skyT, loot = {}) {
     lootSeed: loot.lootSeed || 1,
     crew: loot.crew ?? 8,
     fleet: loot.fleet || 0,
+    log: Array.isArray(loot.log) ? loot.log : [],
     savedAt: Date.now(),
   };
 }
@@ -40,6 +43,7 @@ export function acceptSave(meta) {
     lootSeed: Number.isFinite(meta.lootSeed) && meta.lootSeed >= 1 ? meta.lootSeed : 1,
     crew: Number.isFinite(meta.crew) && meta.crew >= 1 ? Math.round(meta.crew) : 8,
     fleet: Number.isFinite(meta.fleet) && meta.fleet >= 0 ? Math.min(3, Math.round(meta.fleet)) : 0,
+    log: acceptLog(meta.log),
     savedAt: meta.savedAt || 0,
   };
 }

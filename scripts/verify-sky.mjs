@@ -3,7 +3,7 @@
 // is real enough to navigate by, and the heavens are deterministic.
 import {
   DAY_LENGTH, solarState, lunarState, moonPhase, starWheelAngle,
-  STAR_CATALOGUE, raDecToEq, starField, MOON_MONTH_DAYS,
+  STAR_CATALOGUE, raDecToEq, starField, MOON_MONTH_DAYS, starHorizon,
 } from '../src/skymath.js';
 
 let failed = 0;
@@ -51,6 +51,17 @@ ok(Math.abs(sep(belt[0], belt[1]) - sep(belt[1], belt[2])) < 0.01,
 const acrux = raDecToEq(12.4433, -63.099);
 ok(acrux[1] < -0.85, 'the Southern Cross lives in the deep south');
 ok(STAR_CATALOGUE.length >= 25, 'catalogue has the navigation kit');
+
+// the horizon frame (shared by sky.js and the navigator): the pole stands
+// at the observer's latitude, due NORTH — sail south and watch it sink
+for (const lat of [65, 40, 12]) {
+  const { alt, az } = starHorizon(2.5303, 89.264, DAY_LENGTH * 0.6, lat);
+  ok(Math.abs(alt * (180 / Math.PI) - lat) < 0.8,
+    `Polaris stands ~${lat}\u00b0 up at ${lat}N (got ${(alt * 180 / Math.PI).toFixed(1)})`);
+  ok(Math.abs(az) < 0.05, `and due north at ${lat}N`);
+}
+ok(starHorizon(2.5303, 89.264, 0, -20).alt < 0, 'Polaris is below the horizon at 20S');
+ok(starHorizon(12.4433, -63.099, 0, -50).alt > 0, 'Acrux rides high for the southern sailor');
 
 // star wheel turns once per day; the field is deterministic (invariant 6)
 ok(Math.abs(starWheelAngle(DAY_LENGTH) - starWheelAngle(0)) < 1e-9, 'wheel wraps daily');
