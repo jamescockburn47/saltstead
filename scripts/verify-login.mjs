@@ -79,10 +79,12 @@ const fakeStorage = () => {
   const crewed = acceptSave(snapshotSave(ship, 0, { crew: 11, fleet: 2 }));
   ok(crewed.crew === 11 && crewed.fleet === 2, 'crew and fleet survive the round-trip');
   const greedy = acceptSave({ ...snapshotSave(ship, 0), fleet: 9, crew: -2 });
-  ok(greedy.fleet === 3 && greedy.crew === 8, 'fleet clamped to the cap, bad crew resets');
+  ok(greedy.fleet === 3 && greedy.crew === 0, 'fleet clamped to the cap, bad crew resets to none');
   const bare = acceptSave(snapshotSave(ship, 0));
-  ok(bare.gold === 0 && bare.map === null && bare.lootSeed === 1,
-    'a lootless save reads as a poor pirate (additive fields, invariant 1)');
+  ok(bare.gold === 0 && bare.map === null && bare.lootSeed === 1 && bare.crew === 0,
+    'a lootless save reads as a poor pirate sailing alone (additive fields, invariant 1)');
+  const veteran = acceptSave({ ...snapshotSave(ship, 0), crew: 8 });
+  ok(veteran.crew === 8, 'an old 8-hand save keeps its hands');
   ok(Array.isArray(bare.log) && bare.log.length === 0, 'and its log reads as a blank book');
   const badMap = acceptSave({ ...meta, map: { lat: 'x' } });
   ok(badMap && badMap.map === null && badMap.gold === 340, 'a mangled map is dropped, not fatal');

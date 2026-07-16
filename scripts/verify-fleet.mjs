@@ -9,20 +9,18 @@ import {
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
 
-// capture rules
-ok(canTakePrize(START_CREW, 0), 'a fresh crew can man the first prize');
-ok(!canTakePrize(MIN_CREW + PRIZE_CREW - 1, 0), 'never strip your own ship below minimum');
-ok(canTakePrize(MIN_CREW + PRIZE_CREW, 0), 'exactly enough hands works');
+// capture rules — the soft start: the captain begins ALONE and the sloop
+// sails single-handed; hands exist only to crew prizes
+ok(START_CREW === 0, 'the voyage starts with no hands — the sloop sails solo');
+ok(!canTakePrize(START_CREW, 0), 'a lone captain cannot man a prize');
+ok(!canTakePrize(PRIZE_CREW - 1, 0), 'short of a prize crew is short');
+ok(canTakePrize(PRIZE_CREW, 0), 'exactly a prize crew mans the first prize');
 ok(!canTakePrize(99, FLEET_MAX), 'the leadership cap holds however many hands');
 {
-  // the arc of a greedy career: 8 hands, no recruits — exactly one prize
-  let crew = START_CREW, prizes = 0;
+  // the arc of a career: every 3 hands recruited mans another hull
+  let crew = 3 * FLEET_MAX, prizes = 0;
   while (canTakePrize(crew, prizes)) { crew -= PRIZE_CREW; prizes++; }
-  ok(prizes === 1, `8 hands and no recruits mans exactly 1 prize (${prizes})`);
-  // a well-recruited crew (13 hands, pressed from many boardings) mans the cap
-  crew = 13; prizes = 0;
-  while (canTakePrize(crew, prizes) && prizes < 9) { crew -= PRIZE_CREW; prizes++; }
-  ok(prizes === FLEET_MAX, `13 hands mans the full fleet (${prizes})`);
+  ok(prizes === FLEET_MAX, `${3 * FLEET_MAX} hands mans the full fleet (${prizes})`);
   ok(crew === MIN_CREW, `and is left at exactly the minimum (${crew})`);
 }
 

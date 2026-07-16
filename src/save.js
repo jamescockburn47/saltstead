@@ -9,8 +9,8 @@ import { acceptLog } from './shiplog.js';
 
 // ---- pure ----
 // loot: { gold, map, lootSeed, crew, fleet, log } — additive fields, version
-// stays 1 (older saves simply read as a poor pirate with no map, 8 hands,
-// no prizes, a blank log)
+// stays 1 (older saves simply read as a poor pirate with no map, no hands —
+// the sloop sails solo — no prizes, a blank log)
 export function snapshotSave(ship, skyT, loot = {}) {
   return {
     version: SAVE_VERSION,
@@ -19,7 +19,7 @@ export function snapshotSave(ship, skyT, loot = {}) {
     gold: loot.gold || 0,
     map: loot.map || null,
     lootSeed: loot.lootSeed || 1,
-    crew: loot.crew ?? 8,
+    crew: loot.crew ?? 0,
     fleet: loot.fleet || 0,
     log: Array.isArray(loot.log) ? loot.log : [],
     savedAt: Date.now(),
@@ -41,7 +41,7 @@ export function acceptSave(meta) {
     gold: Number.isFinite(meta.gold) && meta.gold >= 0 ? Math.round(meta.gold) : 0,
     map: mapOK ? { seed: m.seed, lat: m.lat, lon: m.lon } : null,
     lootSeed: Number.isFinite(meta.lootSeed) && meta.lootSeed >= 1 ? meta.lootSeed : 1,
-    crew: Number.isFinite(meta.crew) && meta.crew >= 1 ? Math.round(meta.crew) : 8,
+    crew: Number.isFinite(meta.crew) && meta.crew >= 0 ? Math.round(meta.crew) : 0,
     fleet: Number.isFinite(meta.fleet) && meta.fleet >= 0 ? Math.min(3, Math.round(meta.fleet)) : 0,
     log: acceptLog(meta.log),
     savedAt: meta.savedAt || 0,

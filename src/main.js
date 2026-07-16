@@ -80,7 +80,7 @@ class Game {
     this.treasureMap = null;   // { seed, lat, lon } — the X on the charts
     this.digTimer = 0;
     this.lootSeed = 1;         // rolls forward with every prize taken
-    this.crew = START_CREW;    // hands aboard — the currency of capture
+    this.crew = START_CREW;    // hands aboard (0 at first — the sloop sails solo)
     this.savedFleet = 0;       // prizes to restore once the scene exists
     this.log = [];             // the ship's log — the voyage writes itself
     if (save) {
@@ -333,11 +333,12 @@ class Game {
       this.say('The longboat pulls for the shore\u2026');
       return;
     }
-    // a haven's anchorage outranks the beach — but the helm is left first
+    // the helm wins when you're standing at it — otherwise a spawn inside an
+    // anchorage (Port Royal!) traps E on the port panel and the tiller is
+    // unreachable; the anchorage outranks only the beach
+    if (this.mode === 'walk' && nearHelm(this.cap.x, this.cap.z)) { this.toggleHelm(); return; }
     if (this.mode !== 'helm' && this.port
       && inAnchorage(this.port.dist, this.ship.speed)) { this.putIn(); return; }
-    // the helm wins when you're standing at it; the shore wins elsewhere
-    if (this.mode === 'walk' && nearHelm(this.cap.x, this.cap.z)) { this.toggleHelm(); return; }
     if (this.canStepAshore()) { this.goAshore(); return; }
     this.toggleHelm();
   }
@@ -375,8 +376,12 @@ class Game {
     this.shore = { x: land.x, z: land.z, facing: 0 };
     this.scene.add(this.captain.group); // reparent out of the ship
     this.cam.targetDist = 8;
-    this.say('The longboat puts you ashore. The crew holds the ship.', 5);
-    this.logEvent('The captain went ashore by longboat; the crew holds the ship');
+    this.say(this.crew > 0
+      ? 'The longboat puts you ashore. The crew holds the ship.'
+      : 'You row yourself ashore. The sloop lies to her anchor.', 5);
+    this.logEvent(this.crew > 0
+      ? 'The captain went ashore by longboat; the crew holds the ship'
+      : 'The captain rowed ashore; the sloop lies to her anchor');
   }
 
   boardShip() {
@@ -517,6 +522,7 @@ class Game {
 
     // the capture window: a freshly stripped hull still alongside + spare hands
     this.captureable = false;
+    this.prizeShorthanded = false; // hull alongside but not enough hands to man her
     if (this.lastPrizeId) {
       const pose = this.merchants.poseOf(this.lastPrizeId);
       if (!pose) {
@@ -524,7 +530,8 @@ class Game {
       } else {
         const d = Math.hypot(pose.x - this.ship.x, pose.z - this.ship.z);
         if (d > 60) this.lastPrizeId = null; // you sailed off — the window closes
-        else this.captureable = canTakePrize(this.crew, this.fleet.size());
+        else if (canTakePrize(this.crew, this.fleet.size())) this.captureable = true;
+        else this.prizeShorthanded = this.fleet.size() < FLEET_MAX;
       }
     }
 
@@ -544,7 +551,7 @@ class Game {
           const pay = chestRoll(this.treasureMap.seed);
           this.gold += pay;
           this.treasureMap = null;
-          this.say(this.mode === 'ashore'
+          this.say(this.mode === 'ashore' || this.crew === 0
             ? `The spade strikes wood \u2014 a chest of ${pay} doubloons!`
             : `The crew strikes wood \u2014 a chest of ${pay} doubloons!`, 8);
           this.logEvent(`Dug at the X \u2014 a chest of ${pay} doubloons raised`);
@@ -742,10 +749,13 @@ class Game {
         ? 'E \u2014 BOARD HER!'
         : this.captureable
           ? `E \u2014 put a prize crew aboard (${PRIZE_CREW} hands) \u00b7 she joins your fleet`
+          : this.prizeShorthanded
+          ? `Her hull is yours for the taking \u2014 but a prize crew is ${PRIZE_CREW} hands `
+            + `(${this.crew} aboard). Sign hands on at a haven.`
           : this.digTimer > 0
-          ? 'The crew is digging\u2026'
+          ? (this.crew > 0 ? 'The crew is digging\u2026' : 'Digging\u2026')
           : this.digReady
-            ? 'E \u2014 send the longboat to dig'
+            ? (this.crew > 0 ? 'E \u2014 send the longboat to dig' : 'E \u2014 row in and dig')
             : this.mode === 'helm'
               ? (anchored
                 ? `ANCHORAGE \u2014 E to leave the helm, then put in at ${this.port.haven.name}`

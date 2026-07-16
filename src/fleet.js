@@ -2,13 +2,14 @@
 // Capture rules (crew is the currency) and the line-astern station keeping
 // that makes a column of prizes sail like a column, not a mob.
 
-export const START_CREW = 8;    // hands you sign on at the start
+export const START_CREW = 0;   // the soft start: the first sloop is sailed alone
 export const PRIZE_CREW = 3;    // hands a prize needs to sail her
-export const MIN_CREW = 4;      // never strip your own ship below this
+export const MIN_CREW = 0;      // the sloop needs none — the captain IS her crew
 export const FLEET_MAX = 3;     // sloop-era leadership cap
 export const JOIN_CHANCE = 0.34; // some captured sailors sign articles
 
-// can this many hands man another prize?
+// can this many hands man another prize? The captain sails the sloop himself,
+// so hands exist ONLY to crew prizes — recruit from boardings or the tavern.
 export function canTakePrize(crew, fleetSize) {
   return fleetSize < FLEET_MAX && crew - PRIZE_CREW >= MIN_CREW;
 }
