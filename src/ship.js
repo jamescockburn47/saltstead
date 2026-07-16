@@ -5,11 +5,34 @@
 import * as THREE from 'three';
 import { DECK, HELM } from './shipframe.js';
 import { tackSign } from './sailing.js';
+import { woodPixels } from './woodgrain.js';
 
-const WOOD = 0x6e4a2f, WOOD_DK = 0x53361f, DECKC = 0x9a7a52,
-      SAILC = 0xe8e0cc, ROPE = 0x3a2c1c;
+// wood tones now live as RGB bases in the woodMat calls below
+const SAILC = 0xe8e0cc, ROPE = 0x3a2c1c;
 
 function mat(color) { return new THREE.MeshPhongMaterial({ color, flatShading: true, shininess: 8 }); }
+
+// plank texture from the pure pixel generator (woodgrain.js) — NearestFilter
+// keeps the seams crisp at low-poly scale, sRGB because the palette is authored
+// by eye. rotate=true turns the planks 90° (deck planks run fore-and-aft).
+function woodTex(opts, { rotate = false, repeat = [1, 1] } = {}) {
+  const { w, h, data } = woodPixels(opts);
+  const tex = new THREE.DataTexture(data, w, h, THREE.RGBAFormat);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeat[0], repeat[1]);
+  if (rotate) { tex.center.set(0.5, 0.5); tex.rotation = Math.PI / 2; }
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function woodMat(opts, texOpts) {
+  return new THREE.MeshPhongMaterial({
+    map: woodTex(opts, texOpts), flatShading: true, shininess: 8,
+  });
+}
 
 // hull: a box tapered toward the bow and pinched at the keel — five minutes
 // of vertex pushing beats any asset file
@@ -29,7 +52,8 @@ function buildHull() {
     if (t > 0.55 && y > 0) pos.setY(i, y + 0.25 * (t - 0.55) / 0.45); // sheer line rises at the bow
   }
   geo.computeVertexNormals();
-  return new THREE.Mesh(geo, mat(WOOD));
+  // strakes: 8 plank courses up the topsides, grain running bow to stern
+  return new THREE.Mesh(geo, woodMat({ base: [110, 74, 47], nPlanks: 8, seed: 7 }));
 }
 
 export function buildSloop() {
@@ -43,25 +67,29 @@ export function buildSloop() {
   deck.position.y = 0;
   group.add(deck);
 
+  // deck planks laid fore-and-aft (rotate turns the bands 90°)
   const deckPlank = new THREE.Mesh(
     new THREE.BoxGeometry((DECK.maxX + 0.15) * 2, 0.12, DECK.maxZ - DECK.minZ),
-    mat(DECKC));
+    woodMat({ base: [154, 122, 82], nPlanks: 10, seed: 11, vary: 0.10 }, { rotate: true }));
   deckPlank.position.set(0, DECK.y - 0.06, (DECK.maxZ + DECK.minZ) / 2);
   group.add(deckPlank);
 
   // gunwale rails
+  const railMat = woodMat({ base: [83, 54, 31], nPlanks: 2, seed: 3, vary: 0.12 });
   for (const side of [-1, 1]) {
     const rail = new THREE.Mesh(
-      new THREE.BoxGeometry(0.14, 0.5, DECK.maxZ - DECK.minZ), mat(WOOD_DK));
+      new THREE.BoxGeometry(0.14, 0.5, DECK.maxZ - DECK.minZ), railMat);
     rail.position.set(side * (DECK.maxX + 0.08), DECK.y + 0.2, (DECK.maxZ + DECK.minZ) / 2);
     group.add(rail);
   }
 
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, 7.4, 6), mat(WOOD_DK));
+  // spars: staved grain running up the stick, not hooped around it
+  const sparMat = woodMat({ base: [83, 54, 31], nPlanks: 3, seed: 5, vary: 0.10 }, { rotate: true });
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, 7.4, 6), sparMat);
   mast.position.set(0, DECK.y + 3.7, 1.2);
   group.add(mast);
 
-  const bowsprit = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.08, 2.6, 5), mat(WOOD_DK));
+  const bowsprit = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.08, 2.6, 5), sparMat);
   bowsprit.rotation.x = -Math.PI / 2 + 0.25;
   bowsprit.position.set(0, DECK.y + 0.45, DECK.maxZ + 1.0);
   group.add(bowsprit);
@@ -71,7 +99,7 @@ export function buildSloop() {
   rig.position.set(0, 0, 1.2); // at the mast
   group.add(rig);
 
-  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 4.6, 5), mat(WOOD_DK));
+  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 4.6, 5), sparMat);
   boom.rotation.x = Math.PI / 2;
   boom.position.set(0, DECK.y + 1.55, -2.3);
   rig.add(boom);
