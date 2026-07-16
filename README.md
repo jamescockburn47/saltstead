@@ -115,9 +115,18 @@ node scripts/build-earthdata.mjs
 Same contract as Moorstead: pure game logic lives in modules that import no THREE or
 DOM (waves, sailing, ship physics, the earth model, combat, merchants, plunder,
 treasure, ports, the shipyard ladder, monsters, legends…), and each is defended by a
-headless script in `scripts/verify-*.mjs`. `npm run verify` runs all of them (28
+headless script in `scripts/verify-*.mjs`. `npm run verify` runs all of them (29
 checks at the time of writing) and **must be green before any deploy**. Every feature
 lands with a verify script; the gate is the contract.
+
+## Footage
+
+The title screen is a live diorama — a sloop running before the wind at golden hour,
+rendered by the same engine that runs the game. For marketing clips,
+`saltstead.showreel()` in the dev console tours the legends (the Triangle, the
+Corryvreckan, the Kraken, the dragon, the Dutchman) and records the bare canvas to a
+clean 1080p `.webm`; `node scripts/capture-showreel.mjs` does the same headlessly
+into `media/` (dev server running, puppeteer devDependency).
 
 ## Deploy
 

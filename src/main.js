@@ -65,6 +65,8 @@ import { LegendLayer } from './legendlayer.js';
 import { unit2 } from './noise.js';
 import { installKiosk } from './kiosk.js';
 import { gatherContext, submitFeedback } from './feedback.js';
+import { TitleScene } from './titlescene.js';
+import { runShowreel, stopShowreel } from './showreel.js';
 
 // swallow the browser's own chrome gestures + auto-fullscreen on first touch
 installKiosk();
@@ -196,6 +198,13 @@ class Game {
     this.gloom = 0;
     this.swell = 1;
     this.cam = { yaw: Math.PI * 0.85, pitch: 0.32, dist: 8, targetDist: 8 };
+
+    // the marketing lens (showreel.js): photoCam pins the camera, weatherLock
+    // stops live weather overwriting a beat's forced sky
+    this.photoCam = null;
+    this.weatherLock = false;
+    this.showreel = (opts) => runShowreel(this, opts);
+    this.showreelStop = () => stopShowreel(this);
 
     this.keys = new Set();
     addEventListener('keydown', (e) => {
@@ -897,7 +906,7 @@ class Game {
       // real weather at the ship's real coordinates — the Azores get Azores
       // wind. Eased in over ~20 s so a fresh sample never snaps the sails.
       const live = this.weather.poll(ll.lat, ll.lon);
-      if (live) {
+      if (live && !this.weatherLock) {
         this.weatherState = live.state;
         this.gloom = live.gloom;
         // floor at 5 m/s: a genuinely becalmed day is true to the Atlantic
@@ -1277,6 +1286,14 @@ class Game {
     if (this.camera.position.y < wy + 0.6) this.camera.position.y = wy + 0.6;
     this.camera.lookAt(target);
 
+    // the showreel's pinned lens (showreel.js): while a reel runs, the photo
+    // camera owns the frame — orbit maths and drag input both yield
+    if (this.photoCam) {
+      const pc = this.photoCam;
+      this.camera.position.set(pc.x, Math.max(pc.y, wy + 0.6), pc.z);
+      this.camera.lookAt(pc.lookAt.x, pc.lookAt.y, pc.lookAt.z);
+    }
+
     // light dynamics: sun/moon glitter corridor, adaptive exposure, lit foam
     const lun = lunarState(skyT);
     const glit = glitterSource(sol, lun, moonBrightness(moonPhase(skyT)));
@@ -1543,9 +1560,21 @@ addEventListener('keydown', (e) => {
   }
 });
 
-// title first, Moorstead-style: the game only boots when the title hands off
+// title first, Moorstead-style: the game only boots when the title hands off.
+// Behind the login box a live diorama sails (titlescene.js); if WebGL won't
+// start, the vignette goes solid and the title carries on flat.
+let titleScene = null;
+document.body.classList.add('titleup'); // the HUD stays below decks till we sail
+try {
+  titleScene = new TitleScene(document.getElementById('app'));
+} catch (e) {
+  console.warn('[title] diorama unavailable:', e);
+  document.getElementById('titlescreen').classList.add('solid');
+}
 bootTitle({
   onStart: async (mode, auth) => {
+    if (titleScene) { titleScene.stop(); titleScene = null; }
+    document.body.classList.remove('titleup');
     const save = mode === 'continue' ? await loadGame() : null;
     window.saltstead = new Game(save, auth); // the live handle, moorstead-style
   },

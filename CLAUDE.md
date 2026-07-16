@@ -12,18 +12,21 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 - `src/` modules are small and single-purpose; pure logic modules (waves, sailing,
  shipphysics, shipframe, foam, earth, terraingen, skymath, lightrig, woodgrain,
  legends, legendfx, combat, monsters, merchants, plunder, treasure, fleet, port,
- ports, shipyard, noise) have **no THREE/DOM imports** and each is guarded by a
- `scripts/verify-*.mjs` check.
+ ports, shipyard, noise; showreel's pose maths) have **no THREE/DOM imports** and
+ each is guarded by a `scripts/verify-*.mjs` check.
 - `src/earthdata.js` is **generated** by `scripts/build-earthdata.mjs` from Natural
   Earth (coastlines, rivers, mountain ranges) — never edit by hand.
 
 ## Build & verify
 
-- `npm run verify` — the headless gate (28 checks). **Must be green before deploy.**
+- `npm run verify` — the headless gate (29 checks). **Must be green before deploy.**
   Add a verify script with every feature; prefer testing pure modules headlessly over
   eyeballing.
 - Dev: `npm run dev` (port 5173). `window.saltstead` is the live Game handle
   (`.ship`, `.cam`, `.aground`, `.coastDist`, `.dayStart`, `.ocean.uniforms`).
+- Marketing footage: `saltstead.showreel()` in the live console records the
+  legend tour to a clean 1080p `.webm` (src/showreel.js, Moorstead's rig);
+  `scripts/capture-showreel.mjs` runs the same reel headless into `media/`.
 
 ## Deploy
 
