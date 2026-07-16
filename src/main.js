@@ -770,6 +770,19 @@ class Game {
   }
 }
 
+// the how-to book — reachable from the title screen and the deck alike
+const helpWrap = document.getElementById('help');
+const helpOpen = () => helpWrap.style.display === 'flex';
+const showHelp = (v) => { helpWrap.style.display = v ? 'flex' : 'none'; };
+document.getElementById('btnhow').addEventListener('click', () => showHelp(true));
+document.getElementById('helpbtn').addEventListener('click', () => showHelp(true));
+document.getElementById('helpclose').addEventListener('click', () => showHelp(false));
+addEventListener('keydown', (e) => {
+  if (e.repeat || document.activeElement?.tagName === 'INPUT') return;
+  if (e.code === 'KeyH') showHelp(!helpOpen());
+  if (e.code === 'Escape' && helpOpen()) showHelp(false);
+});
+
 // title first, Moorstead-style: the game only boots when the title hands off
 bootTitle({
   onStart: async (mode, auth) => {

@@ -42,7 +42,10 @@
       align-items: center; justify-content: center; gap: 6px; color: #eef6fb;
       background: radial-gradient(ellipse at 50% 120%, #1d4258 0%, #0a1622 70%); }
     #titlescreen h1 { margin: 0 0 2px; font-size: 44px; letter-spacing: 10px; font-weight: normal; }
-    #titlescreen .sub { opacity: .6; letter-spacing: 2px; font-size: 13px; margin-bottom: 26px; }
+    #titlescreen .sub { opacity: .6; letter-spacing: 2px; font-size: 13px; margin-bottom: 14px; }
+    #titlescreen .blurb { max-width: 470px; text-align: center; font-size: 13px;
+      line-height: 1.75; opacity: .78; margin: 0 24px 22px; }
+    #titlescreen .how { margin-top: 14px; width: 280px; }
     #titlescreen .box { display: flex; flex-direction: column; gap: 10px; width: 280px; }
     #titlescreen input { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.25);
       color: #eef6fb; padding: 9px 12px; font: inherit; font-size: 14px; border-radius: 3px; }
@@ -90,6 +93,35 @@
     #port button:hover:not(:disabled) { background: rgba(58,44,28,.16); }
     #port button:disabled { opacity: .4; cursor: default; }
     #port #portleave { text-align: center; background: none; opacity: .75; }
+    #helpbtn { position: fixed; bottom: 18px; right: 18px; z-index: 5; width: 34px;
+      height: 34px; border-radius: 50%; border: 1.5px solid rgba(238,246,251,.4);
+      background: rgba(8,14,20,.5); color: #eef6fb; font: inherit; font-size: 17px;
+      cursor: pointer; opacity: .75; }
+    #helpbtn:hover { opacity: 1; }
+    #help { position: fixed; inset: 0; display: none; align-items: center;
+      justify-content: center; background: rgba(8,14,20,.78); z-index: 30; }
+    #help .book { width: min(720px, 94vw); max-height: 84vh; display: flex;
+      flex-direction: column; background: #efe6cf; color: #3a2c1c;
+      border: 2px solid rgba(58,44,28,.9); border-radius: 4px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.6); }
+    #help h2 { margin: 0; padding: 14px 26px 8px; font-weight: normal;
+      letter-spacing: 3px; font-size: 18px; border-bottom: 1px solid rgba(58,44,28,.35); }
+    #help .pages { overflow-y: auto; padding: 4px 26px 18px; font-size: 13.5px;
+      line-height: 1.75; }
+    #help h3 { margin: 18px 0 4px; font-size: 14px; letter-spacing: 2px;
+      font-weight: normal; border-bottom: 1px solid rgba(58,44,28,.25); padding-bottom: 3px; }
+    #help p { margin: 6px 0; }
+    #help .keys { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    #help .keys td { padding: 3px 10px 3px 0; vertical-align: top; }
+    #help .keys td:first-child { white-space: nowrap; width: 110px; opacity: .85; }
+    #help kbd { background: rgba(58,44,28,.1); border: 1px solid rgba(58,44,28,.4);
+      border-radius: 3px; padding: 0 5px; font: inherit; font-size: 12px; }
+    #help .cap { padding: 8px 26px 12px; font-size: 12px; opacity: .6;
+      letter-spacing: 1px; border-top: 1px solid rgba(58,44,28,.35);
+      display: flex; justify-content: space-between; align-items: center; }
+    #help .cap button { background: none; border: 1px solid rgba(58,44,28,.5);
+      color: #3a2c1c; padding: 5px 14px; font: inherit; font-size: 12px;
+      border-radius: 3px; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -119,6 +151,11 @@
   <div id="titlescreen">
     <h1>SALTSTEAD</h1>
     <div class="sub">the sea never signed the treaty</div>
+    <div class="blurb">A pirate sandbox on the <b>real Earth</b>, drawn entirely by code —
+      no assets, nothing to download. Sail a scaled planet under real weather and real
+      stars: board merchantmen, capture prizes for your fleet, dig up buried treasure,
+      and sell the lot in the old pirate havens. Money is made at sea; the land just
+      keeps the secrets. Single-ship prototype — multiplayer is coming.</div>
     <div class="box" id="loginbox">
       <input id="invitecode" placeholder="invite code" autocomplete="off" spellcheck="false">
       <input id="invitename" placeholder="your name" autocomplete="off" maxlength="24">
@@ -132,6 +169,7 @@
       <button id="btnnew">New Voyage</button>
       <button id="btnlogout" class="quiet">Sign out</button>
     </div>
+    <button id="btnhow" class="quiet how">How to play</button>
   </div>
   <canvas id="minimap" width="296" height="296"></canvas>
   <div id="worldmap"><canvas width="1440" height="720"></canvas>
@@ -142,6 +180,91 @@
     <h2>SHIP&rsquo;S LOG</h2>
     <div class="pages"></div>
     <div class="cap">L or Esc — close the book</div>
+  </div></div>
+  <button id="helpbtn" title="How to play">?</button>
+  <div id="help"><div class="book">
+    <h2>HOW TO PLAY</h2>
+    <div class="pages">
+      <h3>THE IDEA</h3>
+      <p>Piracy never died. You have a sloop, eight hands, and the actual planet —
+        every coastline is the real one, scaled down, drawn by code. <b>Money is made
+        at sea</b>: board merchantmen, take their ships whole, dig up what other
+        pirates buried. The land holds treasure but earns nothing.</p>
+
+      <h3>HANDLING HER</h3>
+      <p>Walk the deck with <kbd>WASD</kbd>; stand at the wheel and press
+        <kbd>E</kbd> to take the helm. At the helm <kbd>A</kbd>/<kbd>D</kbd> steer and
+        <kbd>W</kbd>/<kbd>S</kbd> sheet the mainsail in and out. This is real sailing:
+        you cannot sail into the wind (&ldquo;in irons&rdquo; — the sail flaps, you stop), a
+        <b>beam reach</b> (wind on your side) is fastest, and trim matters — the
+        MAINSHEET bar glows <b>green</b> when your trim suits your course. A good
+        sailor genuinely outruns a bad one. Leave the helm and the crew holds your
+        course; they will bear away on their own rather than let her stall.</p>
+
+      <h3>GETTING AROUND THE PLANET</h3>
+      <p><kbd>M</kbd> opens the world chart, and the minimap is always up. In blue
+        water a <b>fair current</b> carries you up to &times;20 — so an Atlantic crossing
+        takes minutes, not hours. The wind also builds as you leave the coast.
+        Sighting another sail kills the current (&ldquo;SAIL HO&rdquo;) so ships can actually
+        meet. The weather is <b>real</b>: the game fetches the live forecast at your
+        ship&rsquo;s true coordinates — a storm off the Azores today is a storm in the
+        game, greying the sky and raising the swell.</p>
+
+      <h3>PLUNDER</h3>
+      <p>Merchantmen work the coasts — square sails, no flag. Run one down, pull
+        <b>alongside</b> (within a couple of boat-lengths, speeds matched) and press
+        <kbd>E</kbd> to board. Her purse is yours; about a third carry a <b>treasure
+        map</b>, and sometimes a sailor signs on with you.</p>
+
+      <h3>PRIZES AND YOUR FLEET</h3>
+      <p>After boarding, stay alongside and press <kbd>E</kbd> again to put a
+        <b>prize crew</b> aboard (3 hands — you must keep 4 on your own ship). She
+        falls in astern and sails with you, up to three prizes in column. Prizes are
+        worth far more than their purses — if you have the hands, take the ship.</p>
+
+      <h3>PORTS</h3>
+      <p>Four havens fly no colours: <b>Port Royal</b>, <b>Nassau</b>, <b>Tortuga</b>,
+        and <b>&Icirc;le Sainte-Marie</b> off Madagascar. Sail into the anchorage — the
+        crew furls the sails for you — and press <kbd>E</kbd> to put in. There you
+        <b>sell your prizes</b> (the prize crews come back aboard) and <b>sign on
+        hands</b> at the tavern. Gold buys crew, crew takes prizes: that is the game.</p>
+
+      <h3>TREASURE</h3>
+      <p>A looted map inks an <b>X on your charts</b>. Anchor within reach of the X
+        and press <kbd>E</kbd> — the crew rows in and digs. Or make landfall yourself:
+        stop near a beach (or run aground) and <kbd>E</kbd> puts you ashore by
+        longboat. Walk to the X on foot and drive the spade in with your own hands.
+        A chest pays several prizes&rsquo; worth.</p>
+
+      <h3>THE NAVIGATOR&rsquo;S CRAFT</h3>
+      <p><kbd>L</kbd> opens the <b>ship&rsquo;s log</b> — the game keeps it for you, every
+        event stamped with the watch (Middle, Morning, Forenoon&hellip;) and your position
+        in degrees and minutes, the way a master wrote it. <kbd>N</kbd> opens the
+        <b>star chart</b>, drawn from the same sky over your deck. On a clear night the
+        navigator takes a sight: <b>the Pole Star&rsquo;s height above the horizon IS your
+        latitude</b> — the fact sailors steered by for a thousand years. Sail south and
+        watch Polaris sink; cross the line and the Southern Cross takes over. The
+        wildlife navigates too: gulls mean land is near, the albatross means true blue
+        water, and a fin in warm shallows means don&rsquo;t swim.</p>
+
+      <h3>THE KEYS</h3>
+      <table class="keys">
+        <tr><td><kbd>W A S D</kbd></td><td>walk the deck / steer and sheet at the helm / walk ashore</td></tr>
+        <tr><td><kbd>E</kbd></td><td>the doing key — helm, board, capture, dig, step ashore, put in at port</td></tr>
+        <tr><td><kbd>M</kbd></td><td>world chart</td></tr>
+        <tr><td><kbd>N</kbd></td><td>star chart (and a sight, on a clear night)</td></tr>
+        <tr><td><kbd>L</kbd></td><td>ship&rsquo;s log</td></tr>
+        <tr><td><kbd>H</kbd></td><td>this book</td></tr>
+        <tr><td>drag / wheel</td><td>look around / zoom</td></tr>
+      </table>
+
+      <h3>WHAT&rsquo;S COMING</h3>
+      <p>Cannons and sea battles, the shipwright (bigger and bigger hulls), the
+        legends — dragons nest in Wales, the Bermuda Triangle bends the compass, the
+        Kraken waits in the Norwegian deeps — and multiplayer: every captain their own
+        ship, meeting on one shared ocean.</p>
+    </div>
+    <div class="cap"><span>H or Esc — back to the sea</span><button id="helpclose">Close</button></div>
   </div></div>
   <div id="port"><div class="house">
     <h2>PORT</h2>
