@@ -24,7 +24,7 @@ export const PORTS = [
     pitch: 'The Mediterranean\u2019s old workhorse harbour, trading since the Greeks.' },
   { id: 'cape-town', kind: 'dockyard', name: 'Cape Town', lat: -33.85, lon: 18.35,
     pitch: 'The Tavern of the Seas, under Table Mountain \u2014 last yard before the roaring forties.' },
-  { id: 'zanzibar', kind: 'dockyard', name: 'Zanzibar', lat: -6.1, lon: 39.3,
+  { id: 'zanzibar', kind: 'dockyard', name: 'Zanzibar', lat: -6.16, lon: 39.17,
     pitch: 'Monsoon crossroads \u2014 dhow-wrights who can scarf a sprung plank by feel.' },
   { id: 'bombay', kind: 'dockyard', name: 'Bombay', lat: 18.9, lon: 72.7,
     pitch: 'The Wadia yards \u2014 teak hulls that outlive their captains.' },

@@ -8,38 +8,72 @@ import { waveHeight } from './waves.js';
 
 const MAX_FLECKS = 900;
 
+// a soft foam sprite, drawn once at runtime (invariant: zero asset files) —
+// a radial falloff with a ragged edge so a patch reads as churned water,
+// not a stamped square
+function foamSprite() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 3, 32, 32, 30);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.88)');
+  grad.addColorStop(0.82, 'rgba(255,255,255,0.38)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  // rough the rim: bite deterministic notches out of the disc edge
+  g.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 14; i++) {
+    const a = i * 2.39996; // golden angle — even but unrepeating
+    const r = 24 + 6 * Math.sin(i * 12.9898);
+    g.beginPath();
+    g.arc(32 + Math.cos(a) * r, 32 + Math.sin(a) * r, 4.5 + 2 * Math.sin(i * 78.233), 0, Math.PI * 2);
+    g.fill();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 export class FoamLayer {
   constructor(scene, wakeCap = 96) {
     this.wake = newWake(wakeCap);
+    const sprite = foamSprite();
 
     // wake: RGBA vertex colours so each patch fades independently in ONE mesh
     const quads = wakeCap;
     this.wakePos = new Float32Array(quads * 4 * 3);
     this.wakeCol = new Float32Array(quads * 4 * 4);
+    const uv = new Float32Array(quads * 4 * 2);
     const idx = [];
     for (let q = 0; q < quads; q++) {
       const v = q * 4;
       idx.push(v, v + 1, v + 2, v, v + 2, v + 3);
+      uv.set([0, 0, 1, 0, 1, 1, 0, 1], q * 8);
     }
     const wg = new THREE.BufferGeometry();
     wg.setAttribute('position', new THREE.BufferAttribute(this.wakePos, 3).setUsage(THREE.DynamicDrawUsage));
     wg.setAttribute('color', new THREE.BufferAttribute(this.wakeCol, 4).setUsage(THREE.DynamicDrawUsage));
+    wg.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     wg.setIndex(idx);
     this.wakeMesh = new THREE.Mesh(wg, new THREE.MeshBasicMaterial({
-      vertexColors: true, transparent: true, depthWrite: false,
+      vertexColors: true, transparent: true, depthWrite: false, map: sprite,
       side: THREE.DoubleSide, // quads are wound facing down; seen from above
     }));
     this.wakeMesh.frustumCulled = false;
     scene.add(this.wakeMesh);
 
-    // flecks: one Points cloud, positions refreshed as the ship moves
+    // flecks: one Points cloud, positions refreshed as the ship moves —
+    // the same soft sprite turns the default square points into foam dots
     this.fleckPos = new Float32Array(MAX_FLECKS * 3);
     const fg = new THREE.BufferGeometry();
     fg.setAttribute('position', new THREE.BufferAttribute(this.fleckPos, 3).setUsage(THREE.DynamicDrawUsage));
     fg.setDrawRange(0, 0);
     this.fleckGeo = fg;
     this.fleckMesh = new THREE.Points(fg, new THREE.PointsMaterial({
-      color: 0xe8f4fc, size: 0.22, transparent: true, opacity: 0.5, depthWrite: false,
+      color: 0xe8f4fc, size: 0.3, transparent: true, opacity: 0.5, depthWrite: false,
+      map: sprite,
     }));
     this.fleckMesh.frustumCulled = false;
     scene.add(this.fleckMesh);
@@ -73,13 +107,18 @@ export class FoamLayer {
       // ride well proud of the surface: the faceted ocean mesh interpolates
       // ABOVE the analytic height between its vertices and would swallow a
       // patch laid flush
-      const y = a > 0 ? waveHeight(s.x, s.z, t) + 0.16 : -10;
+      const y = a > 0 ? waveHeight(s.x, s.z, t) + 0.38 : -10;
+      // the patch lies ALONG the course it was dropped on, elongated by its
+      // emitter's stretch — the trail reads as churned water, not tiles
+      const sw = Math.sin(s.rot), cw = Math.cos(s.rot);
+      const lx = sw * half * s.stretch, lz = cw * half * s.stretch;   // along course
+      const wx = cw * half, wz = -sw * half;                          // abeam
       const p = q * 12, c = q * 16;
       this.wakePos.set([
-        s.x - half, y, s.z - half,
-        s.x + half, y, s.z - half,
-        s.x + half, y, s.z + half,
-        s.x - half, y, s.z + half,
+        s.x - lx - wx, y, s.z - lz - wz,
+        s.x - lx + wx, y, s.z - lz + wz,
+        s.x + lx + wx, y, s.z + lz + wz,
+        s.x + lx - wx, y, s.z + lz - wz,
       ], p);
       for (let k = 0; k < 4; k++) this.wakeCol.set([1, 1, 1, a], c + k * 4);
     }

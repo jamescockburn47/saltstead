@@ -77,6 +77,31 @@ ok(alpsMax > elevation(38.5, -98.4) * 2, 'the Alps tower over Kansas');
   ok(onRiver < offRiver, `the valley is lower than the plain (${onRiver.toFixed(1)} vs ${offRiver.toFixed(1)})`);
 }
 
+// rivers hold HONEST WATER: the channel is cut to an absolute depth below
+// water level, however high the country — a river a sloop grounds in is no
+// river at all. Probe the deepest point across three great waterways.
+{
+  // scan a small patch, not a line — a transect parallel to the stream
+  // (the Mississippi runs north-south) would never cross the centreline
+  const channelDepth = (lat, lon) => {
+    let best = Infinity;
+    for (let da = -0.06; da <= 0.06; da += 0.004) {
+      for (let db = -0.06; db <= 0.06; db += 0.004) {
+        best = Math.min(best, elevation(lat + da, lon + db));
+      }
+    }
+    return best;
+  };
+  for (const [name, lat, lon] of [
+    ['Amazon at Manaus', -3.155, -60.0],
+    ['Panama Canal', 9.104, -79.69],
+    ['Mississippi at Memphis', 35.14, -90.07],
+  ]) {
+    const d = channelDepth(lat, lon);
+    ok(d < -2.5, `${name} carries a navigable channel (${d.toFixed(1)} m)`);
+  }
+}
+
 // gait: 1x at the beach, moving within 300 m, GAIT_MAX by ~2.5 km — the
 // current lives CLOSE to shore now (playtest fix), smooth and monotonic
 ok(GAIT_MAX === 20, 'blue-water gait is 20x');

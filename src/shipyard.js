@@ -24,7 +24,7 @@ export const HULLS = [
     price: 0,          // the hull you start with
     guns: 1,           // balls per broadside
     masts: 1,
-    berths: 12,
+    berths: 1,         // the ladder starts SOLO-plus-one: a helmsman, no more
     pitch: 'Single-masted, weatherly, draws nowt. The smallest thing afloat '
       + 'and the hardest to catch.',
     briefing: [
@@ -43,6 +43,10 @@ export const HULLS = [
       'Your bolt-hole is the SHALLOWS. The sloop draws almost nothing \u2014 run '
         + 'her over the shoals, right up the beach if you must; deep hulls '
         + 'cannot follow and will break off the chase.',
+      'She berths ONE hand besides you: a HELMSMAN. Sign him at any port, '
+        + 'set a course on the chart, and he sails her while you work the '
+        + 'deck and the guns. Boarding parties and prize crews come with '
+        + 'bigger hulls \u2014 that is what the ladder is FOR.',
       'Nobody dies in Saltstead, but the sea keeps accounts. Holed through '
         + 'once, the crew heaves a THIRD of your gold overboard and she limps '
         + 'on, CRIPPLED. Holed through again before a yard mends her, she '
@@ -59,7 +63,7 @@ export const HULLS = [
     price: 900,
     guns: 1,
     masts: 1,
-    berths: 14,
+    berths: 4,
     pitch: 'A revenue-dodger\u2019s hull: one tall mast, a cloud of canvas, and '
       + 'legs the sloop can only dream of. Still beaches.',
     briefing: [
@@ -71,9 +75,9 @@ export const HULLS = [
         + 'gun a side slows a fleeing prize, it does not win artillery duels. '
         + 'The corvettes are still faster-armed than you are armoured: RUN, '
         + 'and laugh while you do it.',
-      'Two extra berths matter more than they look: hands speed the reload, '
-        + 'weigh the boarding fight, and crew the prizes you sail home in '
-        + 'column. Fill them at any port.',
+      'Three more berths matter more than they look: hands speed the reload, '
+        + 'weigh the boarding fight, and — for the first time — crew a PRIZE '
+        + 'you sail home in column. Fill them at any port.',
       'Repair the moment she\u2019s hurt \u2014 a crippled hull that takes one more '
         + 'holing SINKS, and the sea keeps most of what she takes. Bank at '
         + 'the Locker what you can\u2019t bear to lose.',
@@ -86,7 +90,7 @@ export const HULLS = [
     price: 1800,
     guns: 2,
     masts: 2,
-    berths: 16,
+    berths: 8,
     pitch: 'Two raked masts, fore-and-aft canvas, a privateer\u2019s hull. The '
       + 'last rung of the ladder that will still touch the sand.',
     briefing: [
@@ -99,7 +103,7 @@ export const HULLS = [
         + 'choice, not a habit. Two guns bark; they do not yet roar.',
       'The Indiamen are your proper prey now: run them down, put one ball '
         + 'across the bow, board and be rich. Prize crews come out of your '
-        + 'sixteen berths \u2014 keep them filled.',
+        + 'eight berths \u2014 keep them filled.',
       'Mind the draft creeping up on you: she beaches GRUDGINGLY, on the '
         + 'gentlest sand only. The wild shoal-running of the sloop years is '
         + 'nearly over \u2014 spend it while you have it.',
@@ -117,11 +121,11 @@ export const HULLS = [
     square: true,
     below: true,
     wheel: true,
-    berths: 20,
-    pitch: 'Two masts, two guns a side, twenty berths. Fast on a reach, slow '
+    berths: 12,
+    pitch: 'Two masts, two guns a side, twelve berths. Fast on a reach, slow '
       + 'in the turn, and she draws too much to beach.',
     briefing: [
-      'You command a BRIG now \u2014 twice the broadside, twenty berths, and more '
+      'You command a BRIG now \u2014 twice the broadside, twelve berths, and more '
         + 'speed in a straight line than anything on the lanes. The hunted '
         + 'days are over: with a full crew at the guns, a navy corvette is '
         + 'PREY, not predator.',
@@ -130,7 +134,7 @@ export const HULLS = [
         + 'that once hid you will put her on the shoal, and the longboat does '
         + 'your shore work at anchor.',
       'Fill the berths. Every hand quickens the reload and weighs in the '
-        + 'boarding fight \u2014 twenty hands take an armed deck that six would '
+        + 'boarding fight \u2014 twelve hands take an armed deck that six would '
         + 'die on. Prize crews come out of the same pool, so a full brig runs '
         + 'a full fleet.',
       'The same doctrine still holds: fight what you can beat, fence prizes '
@@ -153,13 +157,13 @@ export const HULLS = [
     square: true,
     below: true,
     wheel: true,
-    berths: 26,
+    berths: 18,
     pitch: 'A warship\u2019s hull in a pirate\u2019s hands: three guns a side, '
       + 'navy speed, and the King\u2019s own hunters suddenly look catchable.',
     briefing: [
       'You command a CORVETTE \u2014 the same class the navy hunts you WITH, '
         + 'which means the hunt is now a fair fight you tend to win. Three '
-        + 'guns a side, twenty-six berths, and the legs to run down anything '
+        + 'guns a side, eighteen berths, and the legs to run down anything '
         + 'that refuses one.',
       'Fight like the navy taught her: hold the weather gauge, chain the '
         + 'rig at range, close for round shot when she\u2019s slow. A lone '
@@ -185,12 +189,12 @@ export const HULLS = [
     square: true,
     below: true,
     wheel: true,
-    berths: 34,
-    pitch: 'Three masts, four guns a side, thirty-four berths. The sea\u2019s '
+    berths: 26,
+    pitch: 'Three masts, four guns a side, twenty-six berths. The sea\u2019s '
       + 'answer to most questions, asked politely at four hundred yards.',
     briefing: [
       'You command a FRIGATE \u2014 the working nobility of the gun deck. Four '
-        + 'guns a side end most conversations in one broadside; thirty-four '
+        + 'guns a side end most conversations in one broadside; twenty-six '
         + 'berths crew the guns, the boarders and a whole column of prizes '
         + 'at once. Very little on the lanes argues with you now.',
       'Your dance floor is BLUE WATER. She wants sea room: the turn is '
@@ -216,13 +220,13 @@ export const HULLS = [
     castle: true,
     below: true,
     wheel: true,
-    berths: 45,
+    berths: 36,
     pitch: 'The crown of the ladder: a towering sterncastle, six guns a '
-      + 'side, forty-five berths. Slower than the frigate \u2014 and it '
+      + 'side, thirty-six berths. Slower than the frigate \u2014 and it '
       + 'does not matter.',
     briefing: [
       'You command a GALLEON \u2014 the treasure fleet\u2019s own crown, flying '
-        + 'black. Six guns a side is a rolling thunderstorm; forty-five '
+        + 'black. Six guns a side is a rolling thunderstorm; thirty-six '
         + 'berths make her a floating port. Nothing afloat outguns you. '
         + 'Nothing needs to know you traded the frigate\u2019s legs for it.',
       'She is SLOWER than the rung below \u2014 the only step down the ladder '
@@ -233,7 +237,7 @@ export const HULLS = [
         + 'every headland a mile, and treat charted shoals as walls. Three '
         + 'fathoms of keel put the beach-running years two rungs behind you.',
       'The sterncastle is not vanity \u2014 it is the payroll: boarding FROM '
-        + 'her height carries the odds, and forty-five hands take any deck '
+        + 'her height carries the odds, and thirty-six hands take any deck '
         + 'on the sea. Keep the muster full at every port.',
       'Thirteen thousand doubloons ride under you now. Bank at the Locker '
         + 'like it is a religion \u2014 a wrecked galleon is the most expensive '

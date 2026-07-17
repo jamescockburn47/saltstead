@@ -55,6 +55,13 @@ export function maskLand(lat, lon) {
 const CELL = 0.25;
 const GRID_W = Math.ceil(360 / CELL), GRID_H = Math.ceil(180 / CELL);
 
+// coarse occupancy net: 1-degree cells (4x4 fine cells) marking where ANY
+// edge lives, so a far-from-everything query can bail out in a few byte
+// reads instead of walking thousands of empty fine cells (the Amazon
+// interior and the blue-water gait check both hit that miss path hard).
+const COARSE = 4;
+const COARSE_W = GRID_W / COARSE, COARSE_H = GRID_H / COARSE;
+
 function buildIndex(offB64, coordB64, closed) {
   const offsets = toTyped(offB64, Int32Array);
   const coords = toTyped(coordB64, Int16Array);
@@ -65,6 +72,7 @@ function buildIndex(offB64, coordB64, closed) {
     for (let p = offsets[r]; p < offsets[r + 1]; p++) owner[p] = r;
   }
   const grid = new Map();
+  const coarse = new Uint8Array(COARSE_W * COARSE_H);
   const cellOf = (lon, lat) => {
     const cx = Math.min(GRID_W - 1, Math.max(0, Math.floor((lon + 180) / CELL)));
     const cy = Math.min(GRID_H - 1, Math.max(0, Math.floor((90 - lat) / CELL)));
@@ -89,10 +97,11 @@ function buildIndex(offB64, coordB64, closed) {
         let arr = grid.get(key);
         if (!arr) grid.set(key, arr = []);
         arr.push(i);
+        coarse[Math.floor(cy / COARSE) * COARSE_W + Math.floor(cx / COARSE)] = 1;
       }
     }
   }
-  return { offsets, coords, owner, grid, edgeEnd, ringCount, pointCount };
+  return { offsets, coords, owner, grid, coarse, edgeEnd, ringCount, pointCount };
 }
 
 const LAND = buildIndex(RING_OFFSETS_B64, COORDS_B64, true);
@@ -108,6 +117,17 @@ export const MTN_COUNT = MTNS.ringCount;
 function nearestDeg(idx, lat, lon, maxCells) {
   const cLat = Math.cos((lat * Math.PI) / 180) || 1e-6;
   const cx0 = Math.floor((lon + 180) / CELL), cy0 = Math.floor((90 - lat) / CELL);
+  // coarse pre-check: any edge at all within reach? (over-covers by one
+  // coarse cell so it can never rule out an edge the fine walk would find)
+  const cr = Math.ceil(maxCells / COARSE) + 1;
+  const gx0 = Math.floor(cx0 / COARSE), gy0 = Math.floor(cy0 / COARSE);
+  let any = false;
+  for (let gy = Math.max(0, gy0 - cr); gy <= Math.min(COARSE_H - 1, gy0 + cr) && !any; gy++) {
+    for (let gx = gx0 - cr; gx <= gx0 + cr; gx++) {
+      if (idx.coarse[gy * COARSE_W + ((gx % COARSE_W) + COARSE_W) % COARSE_W]) { any = true; break; }
+    }
+  }
+  if (!any) return null;
   let bestD = Infinity, foundAt = -1;
   for (let r = 0; r <= maxCells; r++) {
     if (foundAt >= 0 && r > foundAt + 1) break;
@@ -191,6 +211,18 @@ export function signedCoastGame(lat, lon) {
 }
 
 // ---------- rivers ----------
+// walk every baked river segment as (lon1, lat1, lon2, lat2) in degrees —
+// the charts ink the river roads from this
+export function eachRiverSegment(cb) {
+  const { coords, offsets } = RIVERS;
+  for (let r = 0; r < RIVERS.ringCount; r++) {
+    for (let p = offsets[r]; p < offsets[r + 1] - 1; p++) {
+      cb(coords[p * 2] / COORD_SCALE, coords[p * 2 + 1] / COORD_SCALE,
+        coords[(p + 1) * 2] / COORD_SCALE, coords[(p + 1) * 2 + 1] / COORD_SCALE);
+    }
+  }
+}
+
 export const RIVER_CAP = 2 * M_PER_DEG;
 export function riverDistGame(lat, lon) {
   const d = nearestDeg(RIVERS, lat, lon, 8);
@@ -219,8 +251,14 @@ function ridged(x, z) {
   return 1 - Math.abs(2 * valueNoise2(x, z) - 1);
 }
 
-export const RIVER_HALF = 26;    // game metres: half-width of a river channel
-const RIVER_VALLEY = 110;        // valley shoulder width
+export const RIVER_HALF = 40;    // game metres: half-width of a river channel
+const RIVER_VALLEY = 130;        // valley shoulder width
+// channel depth at the centreline, in game metres BELOW WATER — an absolute
+// cut, not ground-relative, so the Mississippi is as wet in high country as
+// the Amazon at its mouth. Deep enough for every beaching hull with ease, a
+// tight centreline for the frigate, and the galleon anchors and sends the
+// longboat — the El Dorado thesis in one number (galleon groundLine -3.0).
+export const RIVER_DEPTH = -3.2;
 
 export function elevation(lat, lon) {
   const d = signedCoastGame(lat, lon);
@@ -243,8 +281,9 @@ export function elevation(lat, lon) {
     const vt = 1 - rv / RIVER_VALLEY;             // valley shoulders
     h *= 1 - 0.55 * vt * vt;
     if (rv < RIVER_HALF) {
-      const ct = 1 - rv / RIVER_HALF;             // the channel itself
-      h = h * (1 - 0.8 * ct) - 3.5 * ct;          // cut below local ground
+      const ct = 1 - rv / RIVER_HALF;             // 1 at the centreline
+      const s = ct * ct * (3 - 2 * ct);           // smooth shelving banks
+      h = h * (1 - s) + RIVER_DEPTH * s;          // cut to honest water
     }
   }
   return h;

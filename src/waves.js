@@ -21,10 +21,14 @@ export const MAX_WAVE_HEIGHT = WAVES.reduce((s, w) => s + w.amp, 0);
 // the uSwell uniform (ocean.js) — inshore chop is gentle, blue water heaves,
 // a storm heaves harder, and CPU/GPU parity survives because both sides
 // scale the SAME sum by the same factor.
+// SEA_STATE_MIN is the WIND's floor (weather.js seaStateFor) — the open sea
+// never reads glassy. RIVER_STATE sits below it: inland water is sheltered
+// by the land itself, so a river runs near-flat whatever the wind does.
 export const SEA_STATE_MIN = 0.6, SEA_STATE_MAX = 2.0;
+export const RIVER_STATE = 0.05;
 let seaState = 1;
 export function setSeaState(k) {
-  seaState = Math.max(SEA_STATE_MIN, Math.min(SEA_STATE_MAX, k));
+  seaState = Math.max(0, Math.min(SEA_STATE_MAX, k));
 }
 export function getSeaState() { return seaState; }
 

@@ -83,14 +83,14 @@ export const LEGENDS = [
   },
   {
     id: 'tortuga', kind: 'haven', phase: 1,
-    name: 'Tortuga', lat: 20.06, lon: -72.79, radius: 20,
+    name: 'Tortuga', lat: 20.02, lon: -72.79, radius: 20,
     pitch: 'The buccaneers\u2019 first stronghold, a turtle-backed rock off '
       + 'Hispaniola. Taverns full of hands willing to sign articles, and a '
       + 'fort that never asks where the cargo came from.',
   },
   {
     id: 'sainte-marie', kind: 'haven', phase: 1,
-    name: '\u00cele Sainte-Marie', lat: -16.89, lon: 49.9, radius: 25,
+    name: '\u00cele Sainte-Marie', lat: -16.89, lon: 49.82, radius: 25,
     pitch: 'The Indian Ocean pirate haven off Madagascar, astride the richest '
       + 'trade lane on earth. Every Red Sea raider wintered here; the far '
       + 'door, for captains who cross real oceans.',

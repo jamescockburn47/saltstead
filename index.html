@@ -146,6 +146,30 @@
     #shiplog .entry.quiet { opacity: .55; font-style: italic; }
     #shiplog .cap { padding: 8px 22px 12px; font-size: 12px; opacity: .6;
       letter-spacing: 1px; border-top: 1px solid rgba(58,44,28,.35); }
+    #crewchat { position: fixed; inset: 0; display: none; align-items: center;
+      justify-content: center; background: rgba(8,14,20,.6); z-index: 10; }
+    #crewchat .book { width: min(560px, 92vw); max-height: 72vh; display: flex;
+      flex-direction: column; background: #efe6cf; color: #3a2c1c;
+      border: 2px solid rgba(58,44,28,.9); border-radius: 4px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.6); }
+    #crewchat h2 { margin: 0; padding: 12px 20px 6px; font-weight: normal;
+      letter-spacing: 2px; font-size: 16px; border-bottom: 1px solid rgba(58,44,28,.35); }
+    #crewchat h2 small { display: block; letter-spacing: 1px; font-size: 12px;
+      opacity: .65; text-transform: none; }
+    #crewchatlog { overflow-y: auto; padding: 10px 20px; font-size: 14px;
+      line-height: 1.7; min-height: 90px; flex: 1; }
+    #crewchatlog .you { color: #6b2f22; margin: 6px 0 2px; }
+    #crewchatlog .them { margin: 2px 0 6px; }
+    #crewchatlog .sys { opacity: .55; font-style: italic; margin: 4px 0; }
+    #crewchat .ask { display: flex; gap: 8px; padding: 10px 20px 14px;
+      border-top: 1px solid rgba(58,44,28,.35); }
+    #crewchat input { flex: 1; background: #f7f0dd; color: #3a2c1c;
+      border: 1px solid rgba(58,44,28,.5); border-radius: 3px; padding: 8px 10px;
+      font: inherit; font-size: 14px; }
+    #crewchat button { background: rgba(58,44,28,.12); color: #3a2c1c;
+      border: 1px solid rgba(58,44,28,.5); border-radius: 3px; padding: 8px 14px;
+      font: inherit; font-size: 13px; letter-spacing: 1px; cursor: pointer; }
+    #crewchat button:active { background: rgba(58,44,28,.25); }
     #port { position: fixed; inset: 0; display: none; align-items: center;
       justify-content: center; background: rgba(8,14,20,.72); z-index: 10; }
     #port .house { width: min(460px, 92vw); display: flex; flex-direction: column;
@@ -320,6 +344,15 @@
     <div class="cap">click the chart to set a course · M, Esc, ✕ or tap outside — close</div></div>
   <div id="starchart"><canvas width="900" height="900"></canvas>
     <div class="cap">—</div></div>
+  <div id="crewchat"><div class="book">
+    <h2 id="crewchatwho">THE CREW<small></small></h2>
+    <div id="crewchatlog"></div>
+    <div class="ask">
+      <input id="crewchatinput" placeholder="ask your shipmate anything…" autocomplete="off" maxlength="240">
+      <button id="crewchatsend">Ask</button>
+      <button id="crewchatclose">Close</button>
+    </div>
+  </div></div>
   <div id="shiplog"><div class="book">
     <h2>SHIP&rsquo;S LOG</h2>
     <div class="pages"></div>
@@ -497,6 +530,8 @@
         <tr><td><kbd>Q</kbd></td><td>the anchor — let go in soundings / weigh and sail on</td></tr>
         <tr><td><kbd>G</kbd></td><td>the signal rocket (King&rsquo;s colours only) — the squadron converges on the pirate in sight</td></tr>
         <tr><td><kbd>M</kbd></td><td>world chart — <b>click it to set a course</b>: with a hand aboard, the helmsman sails there (tacking upwind as needed) while you walk the deck</td></tr>
+        <tr><td><kbd>B</kbd></td><td>speak to the crew — walk up to any hand and ask for sailing advice, local knowledge, or the way to a legend; they answer from what the ship truly knows</td></tr>
+        <tr><td><kbd>O</kbd></td><td>out sweeps / sweeps in — row her at a slow crawl in any direction, wind be damned: the way out of irons, off a bank, or up a walled river. More hands row faster; a great hull creeps behind her longboat</td></tr>
         <tr><td><kbd>C</kbd></td><td>belay the set course — the helm is lashed where she lies</td></tr>
         <tr><td><kbd>N</kbd></td><td>star chart (and a sight, on a clear night)</td></tr>
         <tr><td><kbd>L</kbd></td><td>ship&rsquo;s log</td></tr>

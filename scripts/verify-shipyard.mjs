@@ -11,6 +11,9 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
 // the ladder's shape: seven rungs, sloop to galleon
 ok(HULLS.length >= 7, `a full ladder (${HULLS.length} rungs)`);
 ok(HULLS[0].id === 'sloop' && HULLS[0].price === 0, 'the sloop is the free first rung');
+// the muster climbs the ladder too: the sloop berths ONE hand (a helmsman,
+// no boarding parties) and every rung sleeps more
+ok(HULLS[0].berths === 1, 'the sloop berths exactly the helmsman');
 ok(HULLS[HULLS.length - 1].id === 'galleon', 'the galleon crowns the ladder');
 for (let i = 1; i < HULLS.length; i++) {
   const a = HULLS[i - 1], b = HULLS[i];

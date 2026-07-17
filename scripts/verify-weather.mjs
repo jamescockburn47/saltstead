@@ -2,7 +2,10 @@
 // states, and the sea state tracks the wind inside its clamps. Pure half
 // only — the live fetch is a layer, never a dependency (the Moorstead rule).
 import { windProfile, mapMarine, seaStateFor, skyDressing, WIND_FLOOR } from '../src/weather.js';
-import { SEA_STATE_MIN, SEA_STATE_MAX, setSeaState, getSeaState, waveHeight } from '../src/waves.js';
+import {
+  SEA_STATE_MIN, SEA_STATE_MAX, RIVER_STATE, MAX_WAVE_HEIGHT,
+  setSeaState, getSeaState, waveHeight,
+} from '../src/waves.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -62,6 +65,13 @@ ok(seaStateFor(0) === SEA_STATE_MIN, 'calm pins the floor');
   ok(getSeaState() === 2, 'getter reads back');
   setSeaState(99);
   ok(getSeaState() === SEA_STATE_MAX, 'setter clamps');
+  // a river is calmer than any sea the wind can make: the setter admits the
+  // near-flat inland state, and the waves really do lie down
+  ok(RIVER_STATE < SEA_STATE_MIN, 'river calm undercuts the wind floor');
+  setSeaState(RIVER_STATE);
+  ok(getSeaState() === RIVER_STATE, 'inland water may lie near-flat');
+  ok(Math.abs(waveHeight(123.4, -56.7, 42)) < MAX_WAVE_HEIGHT * RIVER_STATE + 1e-12,
+    'river waves are ripples');
   setSeaState(1); // leave the world as we found it for later scripts
 }
 

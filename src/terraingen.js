@@ -2,17 +2,19 @@
 // guards it. A chunk is a low-poly heightfield sampled from the Earth module,
 // coloured by height: seabed shallows, wet sand, dune grass, moor, crag.
 
-import { elevation, worldToLatLon, coastDistGame, riverDistGame, RIVER_HALF } from './earth.js';
+import { elevation, worldToLatLon, coastDistGame, riverDistGame, isLand, RIVER_HALF } from './earth.js';
 import { fbm2 } from './noise.js';
 
 export const CHUNK = 96;   // metres square
 export const RES = 16;     // quads per side (17x17 verts)
 
-// deep-water chunks are skipped entirely — 99% of the planet costs nothing
+// deep-WATER chunks are skipped entirely — 99% of the planet costs nothing.
+// Land always builds, however far inland: a ship up a river must see ground,
+// not the ocean plane showing through an unbuilt chunk.
 export function chunkWorthBuilding(cx, cz) {
   const half = CHUNK / 2;
   const { lat, lon } = worldToLatLon(cx * CHUNK + half, cz * CHUNK + half);
-  return coastDistGame(lat, lon) < CHUNK * 2.2;
+  return coastDistGame(lat, lon) < CHUNK * 2.2 || isLand(lat, lon);
 }
 
 // height + latitude -> flat-shaded biome palette (RGB 0..1). Deterministic.

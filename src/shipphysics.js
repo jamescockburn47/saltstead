@@ -72,19 +72,34 @@ export function newShipState(x = 0, z = 0) {
   return { x, y: 0, z, yaw: 0, speed: 0, rudder: 0, trim: 0.5 };
 }
 
+// SWEEPS (and, for the great hulls, the longboat tow): the wind-proof
+// crawl. Rowing pace grows with the hands pulling and shrinks with the
+// hull — a sloop rows out of irons briskly, a galleon barely creeps behind
+// her boat. Always slower than honest sailing: oars escape, sails travel.
+export function oarSpeed(spec = SLOOP, crew = 0) {
+  const rowers = Math.min(crew + 1, 12);          // the captain pulls too
+  const raw = 0.55 + 0.16 * rowers;
+  const size = (9 / spec.length) ** 0.6;          // the unit sloop rows best
+  return Math.min(1.5, raw * size);
+}
+
 // wind: { from, speed }. gait: open-sea distance multiplier (earth.js
 // gaitFactor) — it scales the world slipping past, not the hull's dynamics,
 // so trim/turn feel is identical inshore and out. furl: the crew hands the
 // sails (anchorage / under a beach) — no drive, she glides to rest on drag.
-// Mutates and returns s.
-export function stepShip(s, wind, dt, spec = SLOOP, gait = 1, furl = false) {
+// oarDrive: sweeps out (oarSpeed above) — a floor under the speed target
+// that ignores the wind entirely, so she can crawl dead to windward or up a
+// walled river. Mutates and returns s.
+export function stepShip(s, wind, dt, spec = SLOOP, gait = 1, furl = false, oarDrive = 0) {
   const power = furl ? 0 : sailPower(s.yaw, wind.from, s.trim);
-  const target = speedTarget(power, wind.speed, spec.maxSpeed);
+  const target = Math.max(speedTarget(power, wind.speed, spec.maxSpeed), oarDrive);
   const rate = target > s.speed ? spec.accel : spec.drag;
   s.speed += (target - s.speed) * (1 - Math.exp(-rate * dt));
 
-  // rudder bites with waterflow: barely steer when becalmed
-  const bite = 0.15 + 0.85 * Math.min(1, s.speed / spec.maxSpeed);
+  // rudder bites with waterflow: barely steer when becalmed — but sweeps
+  // lever her round regardless (one bank pulls, the other holds)
+  let bite = 0.15 + 0.85 * Math.min(1, s.speed / spec.maxSpeed);
+  if (oarDrive > 0) bite = Math.max(bite, 0.5);
   s.yaw += s.rudder * spec.turnRate * bite * dt;
 
   s.x += Math.sin(s.yaw) * s.speed * gait * dt;

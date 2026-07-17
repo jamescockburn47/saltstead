@@ -2,7 +2,8 @@
 // sailing model's target, the rudder answers, and buoyancy attitude stays
 // inside believable bounds (no capsizing the prototype from a maths slip).
 import {
-  newShipState, stepShip, shipAttitude, beaches, SLOOP, BRIG, SPECS,
+  newShipState, stepShip, shipAttitude, beaches, oarSpeed, SLOOP, GALLEON, SPECS,
+  BRIG,
 } from '../src/shipphysics.js';
 import { sailPower, speedTarget, optimalTrim, wrapAngle } from '../src/sailing.js';
 import { MAX_WAVE_HEIGHT } from '../src/waves.js';
@@ -32,6 +33,23 @@ const DT = 1 / 30;
   s.trim = optimalTrim(wrapAngle(s.yaw - wind.from));
   for (let i = 0; i < 60 * 30; i++) stepShip(s, wind, DT, SLOOP, 1, true);
   ok(s.speed < 0.3, `furled, she comes to rest even in a gale (${s.speed.toFixed(2)} m/s)`);
+}
+
+// SWEEPS: the wind-proof crawl — she rows dead to windward, pace grows
+// with the hands, a galleon creeps, and oars never outpace honest sailing
+{
+  const s = newShipState(0, 0);
+  const wind = { from: s.yaw, speed: 12 };          // bow dead into a gale
+  const drive = oarSpeed(SLOOP, 1);
+  for (let i = 0; i < 60 * 30; i++) stepShip(s, wind, DT, SLOOP, 1, true, drive);
+  ok(Math.abs(s.speed - drive) < 0.1, `under sweeps she holds rowing pace (${s.speed.toFixed(2)} m/s)`);
+  ok(s.z > 30, `and makes way DEAD TO WINDWARD (${s.z.toFixed(0)} m)`);
+  ok(oarSpeed(SLOOP, 8) > oarSpeed(SLOOP, 1), 'more hands row faster');
+  ok(oarSpeed(GALLEON, 36) < oarSpeed(SLOOP, 8), 'the galleon creeps behind her boat');
+  for (const [name, spec] of Object.entries(SPECS)) {
+    ok(oarSpeed(spec, 0) > 0.2, `${name}: a lone captain can always crawl (${oarSpeed(spec, 0).toFixed(2)})`);
+    ok(oarSpeed(spec, 45) < spec.maxSpeed * 0.5, `${name}: oars never rival sail`);
+  }
 }
 
 // dead into the wind: you slow to a stop

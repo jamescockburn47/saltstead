@@ -47,12 +47,17 @@ export function wakeInterval(speed) {
 
 export function newWake(cap = 96) {
   const slots = [];
-  for (let i = 0; i < cap; i++) slots.push({ x: 0, z: 0, age: Infinity, size0: 0, size1: 0 });
+  for (let i = 0; i < cap; i++) {
+    slots.push({ x: 0, z: 0, age: Infinity, size0: 0, size1: 0, rot: 0, stretch: 1 });
+  }
   return { cap, slots, next: 0, cool: 0 };
 }
 
-// emitters: [{ x, z, size }]. Spawns one patch per emitter on the cadence set
-// by `speed`; recycles the oldest slot when full. Mutates and returns w.
+// emitters: [{ x, z, size, yaw?, stretch? }]. Spawns one patch per emitter on
+// the cadence set by `speed`; recycles the oldest slot when full. Each patch
+// remembers the course it was dropped on (rot, with a deterministic jitter so
+// the trail reads as churned water, not stamped tiles) and how elongated it
+// lies along that course. Mutates and returns w.
 export function stepWake(w, dt, speed, emitters) {
   w.cool -= dt;
   for (const s of w.slots) s.age += dt;
@@ -61,6 +66,8 @@ export function stepWake(w, dt, speed, emitters) {
       const s = w.slots[w.next];
       s.x = e.x; s.z = e.z; s.age = 0;
       s.size0 = e.size; s.size1 = e.size * 3.2;
+      s.rot = (e.yaw || 0) + (hash2i(Math.round(e.x * 8), Math.round(e.z * 8)) - 0.5) * 0.8;
+      s.stretch = e.stretch || 1;
       w.next = (w.next + 1) % w.cap;
     }
     w.cool = wakeInterval(speed);

@@ -15,7 +15,7 @@ export const PORT_RADIUS = 900;   // metres of anchorage around a haven
 export const PORT_SPEED = 1.5;    // bare steerageway to put in
 export const PRIZE_VALUE = 400;   // a hull is worth more than the richest purse
 export const HAND_COST = 60;      // the tavern's signing bounty
-export const CREW_MAX = 12;       // the sloop berths this many (shipyard.js per hull)
+export const CREW_MAX = 12;       // fallback berth cap; the real cap is per hull (shipyard.js)
 export const DOCKYARD_FENCE = 0.5; // an honest port's rate for a dishonest prize
 
 const HAVENS = LEGENDS.filter((l) => l.kind === 'haven');

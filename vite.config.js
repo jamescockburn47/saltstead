@@ -9,6 +9,10 @@ export default defineConfig({
         target: 'https://saltstead.sovren.xyz',
         changeOrigin: true,
       },
+      '/brain': {
+        target: 'https://saltstead.sovren.xyz',
+        changeOrigin: true,
+      },
     },
   },
 });

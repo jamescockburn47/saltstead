@@ -5,6 +5,10 @@
     {
       "source": "/dash/:path*",
       "destination": "https://saltstead.sovren.xyz/dash/:path*"
+    },
+    {
+      "source": "/brain/:path*",
+      "destination": "https://saltstead.sovren.xyz/brain/:path*"
     }
   ],
   "redirects": [

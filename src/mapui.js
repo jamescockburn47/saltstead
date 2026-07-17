@@ -36,13 +36,26 @@ function drawShip(ctx, x, y, yaw, scale = 1, color = BLOOD) {
   ctx.beginPath();
   ctx.moveTo(0, -6 * scale); ctx.lineTo(4 * scale, 5 * scale);
   ctx.lineTo(0, 2.5 * scale); ctx.lineTo(-4 * scale, 5 * scale);
-  ctx.closePath(); ctx.fill();
+  ctx.closePath();
+  ctx.fill();
+  // parchment halo so every sail pops off land wash and sea alike
+  ctx.strokeStyle = 'rgba(240, 230, 205, 0.9)';
+  ctx.lineWidth = Math.max(0.8, scale);
+  ctx.stroke();
   ctx.restore();
 }
 
-// other sails ink by trade: honest canvas in ink, the King's navy in blue,
-// the dead in weathered grey
-const SAIL_TINT = { navy: '#2c4a7a', derelict: '#6a6f72' };
+// every sail wears her allegiance on the chart: the King's navy in blue,
+// pirates in black, honest trade in ink, the dead in weathered grey
+const SAIL_TINT = {
+  navy: '#2c4a7a', raider: '#17171c', derelict: '#6a6f72',
+  trader: INK, indiaman: INK,
+};
+// the chart's key, drawn on the world map — the player's own mark first
+const KEY_ROWS = [
+  [BLOOD, 'your ship'], ['#2c4a7a', 'the King’s navy'], ['#17171c', 'pirates'],
+  [INK, 'honest trade'], ['#6a6f72', 'derelicts'],
+];
 
 function drawLegend(ctx, x, y, kind) {
   ctx.strokeStyle = INK; ctx.fillStyle = INK; ctx.lineWidth = 1.5;
@@ -168,11 +181,11 @@ export class MapUI {
       if (p.x >= 0 && p.x < LOCAL_N && p.y >= 0 && p.y < LOCAL_N)
         this.drawX(ctx, p.x * k, p.y * k, 6);
     }
-    // the lookout's sightings, small and coloured by trade
+    // the lookout's sightings, coloured by allegiance
     for (const o of this.sails || []) {
       const p = chartXY(o.lat, o.lon, this.localView);
       if (p.x >= 0 && p.x < LOCAL_N && p.y >= 0 && p.y < LOCAL_N)
-        drawShip(ctx, p.x * k, p.y * k, o.yaw, 0.65, SAIL_TINT[o.type] || INK);
+        drawShip(ctx, p.x * k, p.y * k, o.yaw, 0.9, SAIL_TINT[o.type] || INK);
     }
     const s = chartXY(lat, lon, this.localView);
     this.drawCourse(ctx, s, this.localView, LOCAL_N);
@@ -201,6 +214,19 @@ export class MapUI {
       ctx.fillStyle = BLOOD;
       ctx.fillText('the dig', p.x + 8, p.y + 3);
     }
+    // the chart's key: which colour flies which flag
+    const kx = 10, ky = H - 14 - KEY_ROWS.length * 13;
+    ctx.fillStyle = 'rgba(216, 201, 168, 0.85)';
+    ctx.fillRect(kx - 6, ky - 12, 108, KEY_ROWS.length * 13 + 18);
+    ctx.strokeStyle = INK; ctx.lineWidth = 1;
+    ctx.strokeRect(kx - 6, ky - 12, 108, KEY_ROWS.length * 13 + 18);
+    ctx.font = '9px Georgia';
+    KEY_ROWS.forEach(([tint, label], i) => {
+      drawShip(ctx, kx + 4, ky + i * 13, Math.PI, 0.8, tint);
+      ctx.fillStyle = INK;
+      ctx.fillText(label, kx + 13, ky + i * 13 + 3);
+    });
+
     const s = chartXY(lat, lon, view);
     this.drawCourse(ctx, s, view);
     drawShip(ctx, s.x, s.y, yaw, 1.4);

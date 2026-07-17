@@ -6,13 +6,14 @@
 
 import * as THREE from 'three';
 import { Ocean } from './ocean.js';
-import { buildShip } from './ship.js';
+import { buildShip, buildHand } from './ship.js';
 import { buildCaptain } from './captain.js';
 import { isWarden, loadAuth, displayName } from './identity.js';
 import { FoamLayer } from './foamlayer.js';
 import { SkyFx } from './skyfx.js';
-import { newShipState, stepShip, shipAttitude, beaches } from './shipphysics.js';
-import { frameFor, clampToDeck, localToWorld, gunPosts, holdFor } from './shipframe.js';
+import { newShipState, stepShip, shipAttitude, beaches, oarSpeed } from './shipphysics.js';
+import { oarMode, oarPosts, oarLength, oarStroke, towOffset } from './oars.js';
+import { frameFor, clampToDeck, localToWorld, gunPosts, holdFor, crewPosts } from './shipframe.js';
 import { CABLE_DEPTH, canLetGo, snubSpeed, swingToWind } from './anchor.js';
 import { helmOrder } from './helmsman.js';
 import { RESCUE_R, GRATITUDE } from './survivors.js';
@@ -20,6 +21,7 @@ import { HULLS, hullById, nextHull, prevHull, buyHull } from './shipyard.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
 import { waveHeight } from './waves.js';
 import { TerrainLayer } from './terrain.js';
+import { HarbourLayer } from './harbourlayer.js';
 import { Sky } from './sky.js';
 import { DAY_LENGTH, solarState, lunarState, moonPhase } from './skymath.js';
 import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness, bioGlow } from './lightrig.js';
@@ -36,11 +38,13 @@ import { canBoard, lootRoll, chestRoll } from './plunder.js';
 import { findDigSite, digDist, DIG_RADIUS, DIG_TIME } from './treasure.js';
 import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
-  encounterGait, ENCOUNTER_FAR,
+  encounterGait, ENCOUNTER_FAR, isLand,
 } from './earth.js';
 import { windProfile, seaStateFor, LiveWeather } from './weather.js';
-import { setSeaState } from './waves.js';
-import { makeEntry, pushEntry, acceptLog } from './shiplog.js';
+import { setSeaState, RIVER_STATE } from './waves.js';
+import { makeEntry, pushEntry, acceptLog, fmtPos } from './shiplog.js';
+import { crewPersona, crewContext } from './crewchat.js';
+import { talkCrew } from './brainclient.js';
 import {
   nearestHaven, inAnchorage, sellFleet, canHire, HAND_COST, fenceRate,
 } from './port.js';
@@ -119,9 +123,10 @@ class Game {
     this.dayStart = DAY_LENGTH * 0.35; // spawn mid-morning
 
     this.ocean = new Ocean(this.scene);
-    this.foam = new FoamLayer(this.scene);
+    this.foam = new FoamLayer(this.scene, 220); // four emitters need the slots
     this.skyfx = new SkyFx(this.scene); // the VISIBLE weather: clouds + rain
     this.terrain = new TerrainLayer(this.scene);
+    this.harbours = new HarbourLayer(this.scene);
 
     // each side weighs anchor in its own home waters (faction.js): the
     // black flag off Port Royal, the King's commission out of Bristol
@@ -157,6 +162,8 @@ class Game {
       if (document.visibilityState === 'hidden') this.persist();
     });
     this.coastDist = COAST_CAP;
+    this.overLand = false;
+    this.oars = false; // sweeps out: the wind-proof crawl (O)
     this.shoalWater = false;
     this.geoClock = 0;
     this.aground = false;
@@ -201,6 +208,9 @@ class Game {
     this.hullId = this.hullDef.id;
     this.spec = this.hullDef.spec;
     this.shipFrame = frameFor(this.spec);
+    // saves from before the berth ladder tightened may carry more hands
+    // than the hull now sleeps — the surplus went ashore
+    this.crew = Math.min(this.crew, this.hullDef.berths);
     // the player's hull wears her SIDE's colours (livery.js) — black and
     // blood-red under the skull, or blue-black and buff under the ensign
     const built = buildShip({ ...this.hullDef, livery: LIVERIES[this.faction] });
@@ -254,6 +264,8 @@ class Game {
       if (e.code === 'KeyG' && !e.repeat) this.signalSquadron();
       if (e.code === 'KeyV' && !e.repeat) this.toggleQuality();
       if (e.code === 'KeyC' && !e.repeat) this.belayCourse();
+      if (e.code === 'KeyB' && !e.repeat) this.hailCrew();
+      if (e.code === 'KeyO' && !e.repeat) this.toggleOars();
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     this.dragging = false;
@@ -320,6 +332,22 @@ class Game {
     this.port = null; // { haven, dist } refreshed with the geography
     this.portui = new PortUI(() => this.sellPrizes(), () => this.hireHand(),
       () => this.repairShip(), () => this.buyShip());
+    // the crew's voices (crewchat.js + the brain on the EVO): B hails the
+    // nearest hand; each berth keeps her own chat log for the session
+    this.crewChat = { open: false, hand: 0, waiting: false, logs: new Map() };
+    this.crewChatEl = {
+      wrap: document.getElementById('crewchat'),
+      who: document.getElementById('crewchatwho'),
+      log: document.getElementById('crewchatlog'),
+      input: document.getElementById('crewchatinput'),
+    };
+    document.getElementById('crewchatsend').addEventListener('click', () => this.sendCrewChat());
+    document.getElementById('crewchatclose').addEventListener('click', () => this.closeCrewChat());
+    this.crewChatEl.input.addEventListener('keydown', (e) => {
+      if (e.code === 'Enter') this.sendCrewChat();
+      if (e.code === 'Escape') this.closeCrewChat();
+      e.stopPropagation();
+    });
     // the weather-turn and landfall log entries fire on TRANSITIONS
     this.loggedWeather = this.weatherState;
     this.atSea = null; // null until first geography sample settles it
@@ -332,6 +360,7 @@ class Game {
         if (this.starchart.open) this.starchart.toggle();
         if (this.logui.open) this.logui.toggle(this.log);
         if (this.portui.open) this.portui.hide();
+        if (this.crewChat.open) this.closeCrewChat();
       }
     });
 
@@ -560,6 +589,292 @@ class Game {
     this.hud.shipname.textContent =
       `${def.name} \u00b7 ${def.guns} gun${def.guns > 1 ? 's' : ''} a side \u00b7 ${this.fac.tag}`;
     this.applyQuality(this.gfxQuality); // shadows onto the new meshes
+  }
+
+  // the muster made VISIBLE: every hired hand stands a station on deck.
+  // The first is the HELMSMAN \u2014 he keeps the helm, which is exactly what
+  // he does for a living (helmOrder steers only while crew >= 1). The rest
+  // take the waist at crewPosts stations. Rebuilt whenever the muster or
+  // the hull changes; capped so a galleon's deck reads crewed, not crowded.
+  refreshHands() {
+    const shown = Math.min(this.crew, 13);
+    if (this._handsShown === shown && this._handsHull === this.hullId) return;
+    this._handsShown = shown;
+    this._handsHull = this.hullId;
+    if (this.handGroup) {
+      this.shipGroup.remove(this.handGroup);
+      this.handGroup.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    }
+    this.handGroup = new THREE.Group();
+    const F = this.shipFrame;
+    const scale = F.scale > 1.6 ? 1.15 : 1;
+    if (shown >= 1) {
+      const helmsman = buildHand(7);
+      helmsman.scale.setScalar(scale);
+      helmsman.position.set(F.helm.x, F.deck.y, F.helm.z - 0.55 * F.scale);
+      this.handGroup.add(helmsman); // faces the bow, hands to the helm
+    }
+    for (const [i, p] of crewPosts(F.deck, shown - 1, 3).entries()) {
+      const hand = buildHand(11 + i);
+      hand.scale.setScalar(scale);
+      hand.position.set(p.x, F.deck.y, p.z);
+      hand.rotation.y = ((11 + i * 37) % 7) - 3;
+      this.handGroup.add(hand);
+    }
+    this.shipGroup.add(this.handGroup);
+  }
+
+  // the VISIBLE sweeps: oars on the rails for the beaching hulls, the
+  // longboat ahead on her tow line for the deep ones. Rebuilt when the
+  // sweeps ship or stow, the muster changes, or the hull is swapped.
+  refreshOarFx() {
+    const want = this.oars ? `${this.hullId}:${Math.min(this.crew, 13)}` : '';
+    if (this._oarKey === want) return;
+    this._oarKey = want;
+    if (this.oarFx) {
+      this.shipGroup.remove(this.oarFx.group);
+      this.oarFx.group.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+      for (const key of ['towBoat', 'towRope']) {
+        if (this[key]) {
+          this.scene.remove(this[key]);
+          this[key].traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+          this[key] = null;
+        }
+      }
+      this.oarFx = null;
+    }
+    if (!this.oars) return;
+    if (!this.oarMat) {
+      this.oarMat = new THREE.MeshPhongMaterial({ color: 0x6b4a2f, flatShading: true });
+    }
+    const group = new THREE.Group();
+    const pivots = [];
+    const mode = oarMode(this.spec);
+    if (mode === 'sweeps') {
+      const len = oarLength(this.spec);
+      for (const p of oarPosts(this.spec, this.crew)) {
+        const pivot = new THREE.Group();
+        pivot.position.set(p.x, p.y, p.z);
+        const shaft = new THREE.Mesh(new THREE.BoxGeometry(len, 0.13, 0.19), this.oarMat);
+        shaft.position.x = p.side * len * 0.42;
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.06, 0.36), this.oarMat);
+        blade.position.x = p.side * len * 0.92;
+        pivot.add(shaft, blade);
+        pivot.rotation.z = -p.side * 0.3; // blades reach down toward the water
+        group.add(pivot);
+        pivots.push({ g: pivot, side: p.side, k: p.k });
+      }
+    } else {
+      // the longboat: a REAL open boat — flat bottom, flared sides meeting
+      // at a stem, transom aft, thwarts, two rowers. She is a child of the
+      // SCENE, not the ship group (which rides sunk by its own draft): the
+      // animation block below floats her on the live wave field every frame.
+      if (!this.oarMatDark) {
+        this.oarMatDark = new THREE.MeshPhongMaterial({ color: 0x4a3520, flatShading: true });
+      }
+      const boat = new THREE.Group();
+      const bottom = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.14, 4.0), this.oarMatDark);
+      bottom.position.y = 0.07;
+      boat.add(bottom);
+      for (const side of [-1, 1]) {
+        // flared side strake, canted outward
+        const strake = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.62, 3.9), this.oarMat);
+        strake.position.set(side * 0.72, 0.38, -0.25);
+        strake.rotation.z = -side * 0.18;
+        boat.add(strake);
+        // bow plank angling in to the stem
+        const bowPlank = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.58, 1.5), this.oarMat);
+        bowPlank.position.set(side * 0.36, 0.44, 2.28);
+        bowPlank.rotation.z = -side * 0.14;
+        bowPlank.rotation.y = -side * 0.46;
+        boat.add(bowPlank);
+      }
+      const stem = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.78, 0.16), this.oarMatDark);
+      stem.position.set(0, 0.5, 2.92);
+      boat.add(stem);
+      const transom = new THREE.Mesh(new THREE.BoxGeometry(1.34, 0.6, 0.12), this.oarMat);
+      transom.position.set(0, 0.4, -2.2);
+      boat.add(transom);
+      for (const tz of [-0.8, 0.7]) {
+        const thwart = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.07, 0.3), this.oarMat);
+        thwart.position.set(0, 0.52, tz);
+        boat.add(thwart);
+        const rower = buildHand(tz > 0 ? 3 : 5);
+        rower.scale.setScalar(0.85);
+        rower.position.set(0, 0.42, tz - 0.28);
+        rower.rotation.y = Math.PI; // rowers face AFT and pull
+        boat.add(rower);
+        for (const side of [-1, 1]) {
+          const pivot = new THREE.Group();
+          pivot.position.set(side * 0.74, 0.58, tz);
+          const oar = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.07, 0.13), this.oarMat);
+          oar.position.x = side * 1.0;
+          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.05, 0.22), this.oarMat);
+          blade.position.x = side * 2.05;
+          pivot.add(oar, blade);
+          pivot.rotation.z = -side * 0.3;
+          boat.add(pivot);
+          pivots.push({ g: pivot, side, k: (tz > 0 ? 0 : 1) + (side + 1) / 2 });
+        }
+      }
+      this.scene.add(boat);
+      // the tow line, world-space, endpoints refreshed with the boat
+      const ropeGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(), new THREE.Vector3(),
+      ]);
+      const rope = new THREE.Line(ropeGeo, new THREE.LineBasicMaterial({ color: 0x3a2c1c }));
+      rope.frustumCulled = false;
+      this.scene.add(rope);
+      this.towBoat = boat;
+      this.towRope = rope;
+    }
+    this.shipGroup.add(group);
+    this.oarFx = { group, pivots, mode };
+  }
+
+  // sweeps out / sweeps in: the wind-proof crawl. Works from any state but
+  // the anchor — she cannot row against her own cable.
+  toggleOars() {
+    if (this.mode === 'ashore' || this.mode === 'below') return;
+    if (!this.oars && this.anchorDown) { this.say('Weigh anchor first — she cannot row against her own cable', 5); return; }
+    this.oars = !this.oars;
+    this.say(this.oars
+      ? `OUT SWEEPS — ${this.crew > 0 ? 'the hands bend to the oars' : 'you bend to the oars alone'}. Slow, but the wind has no vote`
+      : 'Sweeps inboard — she is the wind’s again', 5);
+  }
+
+  // ---- the crew's voices ----
+  // B hails the nearest hand to wherever the captain stands (at the helm
+  // that is the helmsman). Their brains live on the EVO; the context pack
+  // (crewchat.js) grounds every answer in the ship's real ledgers.
+  hailCrew() {
+    if (this.crewChat.open) { this.closeCrewChat(); return; }
+    if (this.mode === 'ashore' || this.mode === 'below') return;
+    if (this.crew < 1) { this.say('No hands aboard — sign a helmsman at any port', 5); return; }
+    let hand = 0;
+    if (this.mode !== 'helm' && this.crew > 1) {
+      // nearest visible station to the captain's ship-local position
+      const F = this.shipFrame;
+      const helm = { x: F.helm.x, z: F.helm.z - 0.55 * F.scale };
+      const posts = [helm, ...crewPosts(F.deck, Math.min(this.crew, 13) - 1, 3)];
+      let best = Infinity;
+      posts.forEach((p, i) => {
+        const d = Math.hypot(this.cap.x - p.x, this.cap.z - p.z);
+        if (d < best) { best = d; hand = i; }
+      });
+    }
+    this.openCrewChat(hand);
+  }
+
+  openCrewChat(i) {
+    const p = crewPersona(i);
+    this.crewChat.open = true;
+    this.crewChat.hand = i;
+    this.crewChatEl.who.innerHTML = '';
+    this.crewChatEl.who.append(p.name.toUpperCase());
+    const sub = document.createElement('small');
+    sub.textContent = `${p.role} · a ${p.home} ${p.mood === 'a little homesick' ? 'soul' : 'hand'} · ${p.mood}`;
+    this.crewChatEl.who.append(sub);
+    this.renderCrewChat();
+    this.crewChatEl.wrap.style.display = 'flex';
+    this.crewChatEl.input.value = '';
+    this.crewChatEl.input.focus();
+  }
+
+  closeCrewChat() {
+    this.crewChat.open = false;
+    this.crewChatEl.wrap.style.display = 'none';
+    this.crewChatEl.input.blur();
+  }
+
+  renderCrewChat() {
+    const log = this.crewChat.logs.get(this.crewChat.hand) || [];
+    const el = this.crewChatEl.log;
+    el.innerHTML = '';
+    for (const m of log) {
+      const d = document.createElement('div');
+      d.className = m.cls;
+      d.textContent = m.text;
+      el.append(d);
+    }
+    if (this.crewChat.waiting) {
+      const d = document.createElement('div');
+      d.className = 'sys';
+      d.textContent = '…thinking on it…';
+      el.append(d);
+    }
+    el.scrollTop = el.scrollHeight;
+  }
+
+  // everything the brain is TOLD is computed from the game's own ledgers
+  // right here — the LLM narrates, the ledgers decide
+  buildBrainState() {
+    const ll = worldToLatLon(this.ship.x, this.ship.z);
+    let nearestPort = null;
+    if (this.port) {
+      const w = latLonToWorld(this.port.haven.lat, this.port.haven.lon);
+      nearestPort = {
+        name: this.port.haven.name,
+        kind: this.port.haven.kind,
+        dist: this.port.dist,
+        bearing: compassPoint(this.ship.x, this.ship.z, w.x, w.z),
+      };
+    }
+    return {
+      faction: this.faction,
+      hullName: this.hullDef.name,
+      guns: this.hullDef.guns,
+      berths: this.hullDef.berths,
+      crew: this.crew,
+      gold: this.gold,
+      banked: this.banked,
+      fleetSize: this.fleet.size(),
+      posText: fmtPos(ll.lat, ll.lon),
+      speedKn: this.ship.speed * 1.944,
+      pointOfSail: this.hud.pos.textContent,
+      windMs: this.wind.speed,
+      weatherState: this.weatherState,
+      gait: this.lastGait || 1,
+      overLand: this.overLand,
+      coastDist: this.coastDist,
+      aground: this.aground,
+      anchorDown: this.anchorDown,
+      crippled: this.crippled,
+      rigPct: this.hull.rig * 100,
+      hullPct: this.hull.hull * 100,
+      nearestPort,
+      zoneName: this.zone ? this.zone.legend.name : null,
+      hasTreasureMap: !!this.treasureMap,
+      night: !!this.lastNight,
+    };
+  }
+
+  async sendCrewChat() {
+    if (this.crewChat.waiting) return; // single-flight, moorstead-style
+    const q = this.crewChatEl.input.value.trim();
+    if (!q) return;
+    const i = this.crewChat.hand;
+    const p = crewPersona(i);
+    let log = this.crewChat.logs.get(i);
+    if (!log) this.crewChat.logs.set(i, log = []);
+    log.push({ cls: 'you', text: q });
+    this.crewChatEl.input.value = '';
+    this.crewChat.waiting = true;
+    this.renderCrewChat();
+    try {
+      const res = await talkCrew({
+        ...p,
+        message: q,
+        playerName: this.auth?.name || null,
+        context: crewContext(this.buildBrainState(), p, q),
+      });
+      log.push({ cls: 'them', text: res.reply || '…' });
+    } catch {
+      log.push({ cls: 'sys',
+        text: `${p.name} scratches his head — the brain ashore didn’t answer. Try again in a moment.` });
+    }
+    this.crewChat.waiting = false;
+    if (this.crewChat.open && this.crewChat.hand === i) this.renderCrewChat();
   }
 
   // the flagship's masthead throws real light on her own deck and sails —
@@ -1304,6 +1619,7 @@ class Game {
     const t = this.t, k = this.keys;
     const skyT = t + this.dayStart;
     const sol = solarState(skyT); // the sky rules the Dutchman and the sights
+    this.lastNight = sol.nightness > 0.5; // the crew's brains know the hour
 
     // dusk to dawn, every living ship hangs a lantern at the masthead —
     // yours throws real light on the sails, the rest burn as far-off points
@@ -1320,14 +1636,20 @@ class Game {
     // in blue water — stacked with the gait, a crossing genuinely flies.
     this.wind.from = this.windBase.from + 0.3 * Math.sin(t * 0.011) + 0.12 * Math.sin(t * 0.037);
     const gusts = 0.3 * Math.sin(t * 0.07) + 0.15 * Math.sin(t * 0.21);
-    this.wind.speed = windProfile(this.coastDist, this.windBase.speed * (1 + gusts));
+    // over land the ship is on a river: sheltered inshore wind, not the
+    // blue-water build the raw sea-coast distance would claim
+    this.wind.speed = windProfile(this.overLand ? 0 : this.coastDist, this.windBase.speed * (1 + gusts));
     // the Horn: the williwaws never stop — whatever the forecast says
     if (this.zone && STORM_ZONES.includes(this.zone.legend.id)) {
       this.wind.speed *= STORM_WIND_MULT;
     }
 
-    // the sea takes the wind's shape, eased so the swell never pops
-    this.swell += (seaStateFor(this.wind.speed) - this.swell) * Math.min(1, dt * 0.05);
+    // the sea takes the wind's shape, eased so the swell never pops. Over
+    // land the water is a RIVER: sheltered to near-flat whatever the wind,
+    // and it settles quickly — a mouth crossed at gait should calm in a few
+    // boat-lengths, not half the estuary
+    const swellWant = this.overLand ? RIVER_STATE : seaStateFor(this.wind.speed);
+    this.swell += (swellWant - this.swell) * Math.min(1, dt * (this.overLand ? 0.35 : 0.05));
     setSeaState(this.swell);
 
     if (this.mode === 'helm') {
@@ -1376,6 +1698,10 @@ class Game {
       this.geoClock = 0.25;
       const ll = worldToLatLon(this.ship.x, this.ship.z);
       this.coastDist = coastDistGame(ll.lat, ll.lon);
+      // inside the coastline polygons the ship is river-sailing, however far
+      // the SEA coast is: no blue-water gait up the Amazon, and the ground
+      // is always live under her keel
+      this.overLand = isLand(ll.lat, ll.lon);
       this.port = nearestHaven(ll.lat, ll.lon);
       // the sloop's bolt-hole: water too thin for a warship's keel — a
       // hunting corvette breaks off rather than follow you over the shoal
@@ -1579,8 +1905,11 @@ class Game {
     for (const c of allContacts) {
       contactDist = Math.min(contactDist, Math.hypot(c.x - this.ship.x, c.z - this.ship.z));
     }
-    let gait = encounterGait(gaitFactor(this.coastDist), contactDist);
+    // river-sailing is inshore sailing wherever the sea coast is: over land
+    // the fair current dies and she moves at human scale
+    let gait = encounterGait(gaitFactor(this.overLand ? 0 : this.coastDist), contactDist);
     this.shipSighted = contactDist < ENCOUNTER_FAR;
+    this.lastGait = gait; // the crew's brains tell the truth about the current
 
     // ---- the monsters wake (monsters.js) ----
     const zoneId = this.zone && this.zone.legend.id;
@@ -1791,7 +2120,8 @@ class Game {
     const specEff = hullFactor === 1
       ? this.spec
       : { ...this.spec, maxSpeed: this.spec.maxSpeed * hullFactor };
-    stepShip(this.ship, windEff, dt, specEff, gait, furled);
+    stepShip(this.ship, windEff, dt, specEff, gait, furled,
+      this.oars && !this.anchorDown ? oarSpeed(this.spec, this.crew) : 0);
 
     // riding to her anchor (anchor.js): the cable holds her over the
     // ground, snubs her way dead, and weathercocks the bow into the wind
@@ -1822,7 +2152,7 @@ class Game {
     // RIGHT UP onto the sand; a deep hull fetches up on the shoal offshore
     // and the boats go in. shipAttitude rides the ground either way.
     const groundAt = (x, z) => { const g = worldToLatLon(x, z); return elevation(g.lat, g.lon); };
-    if (this.coastDist < 400) {
+    if (this.coastDist < 400 || this.overLand) {
       const gl = this.spec.groundLine;
       const bowX = this.ship.x + Math.sin(this.ship.yaw) * this.spec.length * 0.5;
       const bowZ = this.ship.z + Math.cos(this.ship.yaw) * this.spec.length * 0.5;
@@ -1844,8 +2174,12 @@ class Game {
     this.wasAgroundSay = this.aground;
 
     this.terrain.update(this.ship.x, this.ship.z);
+    this.harbours.update(this.ship.x, this.ship.z);
+    this.refreshHands(); // the muster stands its stations (cheap when unchanged)
+    this.refreshOarFx(); // sweeps ship and stow with the O key
     // inshore the hull rides the sea floor where it shoals past the keel
-    const att = shipAttitude(this.ship, t, this.spec, this.coastDist < 400 ? groundAt : null);
+    const att = shipAttitude(this.ship, t, this.spec,
+      (this.coastDist < 400 || this.overLand) ? groundAt : null);
     const rel = wrapAngle(this.ship.yaw - this.wind.from);
     const power = sailPower(this.ship.yaw, this.wind.from, this.ship.trim);
     // wind heel: lean away from the wind in proportion to drive — visual only
@@ -1855,11 +2189,54 @@ class Game {
     this.setSail(this.ship.yaw, this.ship.trim, this.wind.from, power);
     this.setHelm(this.ship.rudder); // the wheel spins / the tiller sweeps
 
-    // wake astern + bow-wave foam, world-anchored so the ship leaves them behind
+    // the sweeps pull: stroke the banks while she rows, rest them at the
+    // catch when she is held (anchored, or hard aground)
+    if (this.oarFx) {
+      const rowing = this.oars && !this.anchorDown && this.ship.speed > 0.05;
+      for (const p of this.oarFx.pivots) {
+        const a = oarStroke(rowing ? t : 0, p.k);
+        p.g.rotation.y = a.sweep * p.side;
+        p.g.rotation.z = -p.side * (0.3 + a.dip);
+      }
+      // the longboat floats on HER OWN water: world position ahead of the
+      // stem, height and trim sampled from the live wave field each frame
+      if (this.towBoat) {
+        const sy = Math.sin(this.ship.yaw), cy = Math.cos(this.ship.yaw);
+        const bx = this.ship.x + sy * towOffset(this.spec);
+        const bz = this.ship.z + cy * towOffset(this.spec);
+        const hBow = waveHeight(bx + sy * 2.0, bz + cy * 2.0, t);
+        const hStern = waveHeight(bx - sy * 2.0, bz - cy * 2.0, t);
+        const hPort = waveHeight(bx - cy * 0.7, bz + sy * 0.7, t);
+        const hStar = waveHeight(bx + cy * 0.7, bz - sy * 0.7, t);
+        this.towBoat.position.set(bx, (hBow + hStern) / 2 - 0.08, bz);
+        this.towBoat.rotation.set(
+          Math.atan2(hStern - hBow, 4.0), this.ship.yaw,
+          Math.atan2(hPort - hStar, 1.4), 'YXZ');
+        // the tow line follows both ends
+        const bowW = localToWorld(this.ship, 0, 0, this.shipFrame.deck.maxZ + 0.3);
+        const rp = this.towRope.geometry.attributes.position;
+        rp.setXYZ(0, bowW.x, this.shipGroup.position.y + this.shipFrame.deck.y * 0.75, bowW.z);
+        rp.setXYZ(1, bx - sy * 2.1, this.towBoat.position.y + 0.45, bz - cy * 2.1);
+        rp.needsUpdate = true;
+      }
+    }
+
+    // wake astern + bow foam + the Kelvin arms, world-anchored so the ship
+    // leaves them behind. Everything scales with SPEED: a drifting hull
+    // barely stirs the water, a hull at full press drags a broad churned
+    // road. The two shoulder emitters lay angled feather-streaks that read
+    // as the V-wave the bow really throws.
+    const sp = this.ship.speed;
     const stern = localToWorld(this.ship, 0, 0, this.shipFrame.deck.minZ - 0.5);
     const bow = localToWorld(this.ship, 0, 0, this.shipFrame.deck.maxZ + 0.9);
-    this.foam.update(t, dt, this.ship.x, this.ship.z, this.ship.speed,
-      [{ x: stern.x, z: stern.z, size: 1.7 }, { x: bow.x, z: bow.z, size: 0.8 }]);
+    const shoulderL = localToWorld(this.ship, -this.spec.beam * 0.45, 0, this.shipFrame.deck.maxZ * 0.7);
+    const shoulderR = localToWorld(this.ship, this.spec.beam * 0.45, 0, this.shipFrame.deck.maxZ * 0.7);
+    this.foam.update(t, dt, this.ship.x, this.ship.z,
+      sp * Math.min(this.lastGait || 1, 3), // gait tightens the drop cadence
+      [{ x: stern.x, z: stern.z, size: 1.0 + 0.3 * sp, yaw: this.ship.yaw, stretch: 2.0 + 0.14 * sp },
+        { x: bow.x, z: bow.z, size: 0.45 + 0.12 * sp, yaw: this.ship.yaw, stretch: 1.2 },
+        { x: shoulderL.x, z: shoulderL.z, size: 0.4 + 0.11 * sp, yaw: this.ship.yaw - 1.15, stretch: 3.2 },
+        { x: shoulderR.x, z: shoulderR.z, size: 0.4 + 0.11 * sp, yaw: this.ship.yaw + 1.15, stretch: 3.2 }]);
 
     // the fighting layers breathe
     this.gunCool = Math.max(0, this.gunCool - dt);
@@ -2022,7 +2399,8 @@ class Game {
 
     // HUD
     this.hud.speed.textContent = (this.ship.speed * 1.944).toFixed(1) + ' kn';
-    this.hud.pos.textContent = POS_NAMES.find(([a]) => Math.abs(rel) <= a)[1];
+    this.hud.pos.textContent = (this.oars && !this.anchorDown)
+      ? 'Under sweeps' : POS_NAMES.find(([a]) => Math.abs(rel) <= a)[1];
     this.hud.trim.style.width = (this.ship.trim * 100).toFixed(0) + '%';
     const camYaw = Math.atan2(
       this.camera.position.x - target.x, this.camera.position.z - target.z);
@@ -2155,7 +2533,7 @@ class Game {
                       ? 'E \u2014 go below \u00b7 T \u2014 take the tiller \u00b7 WASD \u2014 walk the deck'
                     : this.anchorDown
                       ? 'AT ANCHOR \u2014 Q \u2014 weigh anchor \u00b7 T \u2014 the tiller \u00b7 WASD \u2014 walk the deck'
-                    : 'T — take the tiller · WASD — walk the deck · F — fire · Q — anchor · M — chart · N — stars · L — log';
+                    : 'T — take the tiller · WASD — walk the deck · F — fire · Q — anchor · M — chart · B — the crew · N — stars · L — log';
     this.hud.hint.textContent = this.hullDef.wheel
       ? hintText.replace(/tiller/g, 'wheel') : hintText;
     // below decks the hold is windowless: the sea and its foam would only

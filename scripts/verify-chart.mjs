@@ -1,7 +1,7 @@
 // verify-chart: the captain's charts tell the truth — the world map shows
 // the continents where they are, the local chart matches the real coastline,
 // and positions project to the right pixels.
-import { globalChartPixels, localChartPixels, chartXY, SEA_RGB, LAND_RGB } from '../src/chart.js';
+import { globalChartPixels, localChartPixels, chartXY, SEA_RGB, LAND_RGB, RIVER_RGB } from '../src/chart.js';
 import { isLand } from '../src/earth.js';
 
 let failed = 0;
@@ -56,6 +56,29 @@ ok(local.data.length === 96 * 96 * 4, 'local chart RGBA sizing');
     }
   }
   ok(agree === total, `local chart matches isLand everywhere (${agree}/${total})`);
+}
+
+// ---- rivers ink the river roads ----
+const isRiver = (img, x, y) => at(img, x, y) === RIVER_RGB[0];
+// somewhere within 2 px of the point, a river pixel (rasterized lines land
+// on whole pixels, so allow a whisker of slack)
+const riverNear = (img, p, r = 2) => {
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (isRiver(img, p.x + dx, p.y + dy)) return true;
+  }
+  return false;
+};
+{
+  // the Amazon on the world chart: El Dorado's river road is visible
+  ok(riverNear(world, chartXY(-3.1, -60.0, wview)), 'world chart: Amazon inked at Manaus');
+  ok(riverNear(world, chartXY(-2.2, -54.7, wview)), 'world chart: Amazon inked at Santarém');
+  // and on the local chart centred where the hunt begins
+  const amaView = { w: 96, h: 96, latC: -3.1, lonC: -60.0, spanDeg: 9 };
+  const ama = localChartPixels(amaView.latC, amaView.lonC, amaView.spanDeg, 96);
+  ok(riverNear(ama, chartXY(-3.155, -60.0, amaView)), 'local chart: Amazon inked at Manaus');
+  // rivers never overdraw the open sea
+  ok(isSea(world, chartXY(0, -150, wview).x, chartXY(0, -150, wview).y),
+    'mid-Pacific stays sea after river ink');
 }
 
 // projection: centre maps to centre, north is up

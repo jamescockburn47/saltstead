@@ -28,6 +28,19 @@ const atl = latLonToWorld(30, -45);
 ok(!chunkWorthBuilding(Math.floor(atl.x / CHUNK), Math.floor(atl.z / CHUNK)),
   'deep-ocean chunk skipped');
 
+// inland is LAND, not sea: a ship up a river must see ground, not ocean
+// plane, however far from the coast (the deep-water skip is for water only)
+for (const [name, lat, lon] of [
+  ['Amazon at Manaus', -3.1, -60.0],
+  ['Amazon at Obidos', -1.9, -55.5],
+  ['Kansas interior', 38.5, -98.4],
+]) {
+  const w = latLonToWorld(lat, lon);
+  const icx = Math.floor(w.x / CHUNK), icz = Math.floor(w.z / CHUNK);
+  ok(chunkWorthBuilding(icx, icz), `${name}: inland land chunk worth building`);
+  ok(buildChunkData(icx, icz).hasDry, `${name}: inland chunk has dry land`);
+}
+
 // palette: monotone bands, sane RGB
 let prev = null;
 for (const h of [-20, -3, 1, 5, 15, 40]) {
