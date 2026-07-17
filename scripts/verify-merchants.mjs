@@ -141,6 +141,15 @@ ok(compassPoint(0, 0, -100, -100) === 'nor\u2019west', 'quarters split true');
   ok(m.speed < 0.1, 'stripped, she heaves to');
 }
 
+// lane-following (opt-in laneYaw): idle traffic gathers onto the corridor and
+// travels it. Existing behaviour is unchanged because no caller above passes it.
+{
+  const m = { id: 'lt', type: 'trader', role: 'traffic', x: 0, z: 0, yaw: 0, speed: CRUISE, looted: false, routed: false };
+  for (let i = 0; i < 60 * 30; i++) stepMerchant(m, 99999, 99999, 1 / 30, 1, false, null, Math.PI / 2);
+  ok(Math.abs(m.yaw - Math.PI / 2) < 0.2, `idle traffic steers onto the lane heading (yaw ${m.yaw.toFixed(2)})`);
+  ok(m.x > 10, 'and travels it');
+}
+
 // the corvette HUNTS: she turns toward the pirate and closes
 {
   const n = { id: 'n', type: 'navy', x: 0, z: 0, yaw: Math.PI, speed: TYPES.navy.cruise, looted: false, routed: false };

@@ -44,6 +44,11 @@ export const TYPES = {
 export const CRUISE = TYPES.trader.cruise; // the old names still mean the old ship
 export const PANIC = TYPES.trader.panic;
 
+// what a hull does about the trade lanes (lanes.js): honest sail TRAVELS the
+// corridor, the navy PATROLS it, a raider LURKS its chokepoints. traffic/patrol
+// steer along the lane when idle; lurk keeps the raider's reactive hunt.
+export const ROLE = { trader: 'traffic', indiaman: 'traffic', navy: 'patrol', raider: 'lurk', derelict: 'traffic' };
+
 // deterministic spawn specs for one cell: [] or 1–6 ships, roughly 3.4 a
 // cell (playtest three times now: 1.5 read as dead ocean, 2.5 still left
 // dull legs — the lanes should feel WORKED, a horizon should usually carry
@@ -80,6 +85,7 @@ export function cellMerchants(cx, cz) {
     out.push({
       id: `m-${cx}-${cz}-${i}`,
       type,
+      role: ROLE[type] || 'traffic',
       x, z,
       yaw: unit2(cx + i * 13, cz + i * 29) * Math.PI * 2,
       speed: TYPES[type].cruise,
@@ -126,6 +132,15 @@ export function zoneDerelicts(zid = 'bermuda-triangle') {
 
 const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
+// steer gently onto the nearest lane, in whichever direction she already heads,
+// so idle traffic gathers onto the corridors (lanes.js nearestLanePoint tangent)
+function laneSteer(m, laneYaw, dt) {
+  if (laneYaw == null) return;
+  let target = laneYaw;
+  if (Math.abs(wrapPi(target - m.yaw)) > Math.PI / 2) target = wrapPi(target + Math.PI);
+  m.yaw += Math.max(-TURN * dt, Math.min(TURN * dt, wrapPi(target - m.yaw)));
+}
+
 // The lookout's range: from the tops you see sail LONG before the deck fog
 // swallows hulls — this is how the player finds the trade the spawn table
 // lays out. main.js hails each ship once as she comes into view.
@@ -158,14 +173,15 @@ export const NAVY_STANDOFF = 130;
 // the quarry ('hunt' | 'flee' | 'neutral', faction.js attitude); absent,
 // the legacy doctrine holds: armed hulls hunt, honest hulls flee.
 // Deterministic given inputs.
-export function stepMerchant(m, px, pz, dt, speedMult = 1, shoal = false, att = null) {
+export function stepMerchant(m, px, pz, dt, speedMult = 1, shoal = false, att = null, laneYaw = null) {
   const spec = TYPES[m.type] || TYPES.trader;
   const wants = att || (spec.armed ? 'hunt' : 'flee');
   if (m.looted || m.type === 'derelict') {
     m.speed += (0 - m.speed) * Math.min(1, dt * 0.8); // strike sail, heave to
   } else if (wants === 'neutral' && !m.routed) {
-    // she keeps her own counsel: cruise on, whoever you are
+    // she keeps her own counsel: cruise the lane, whoever you are
     m.speed += (spec.cruise * speedMult - m.speed) * Math.min(1, dt * 0.3);
+    laneSteer(m, laneYaw, dt);
   } else {
     const d = Math.hypot(px - m.x, pz - m.z);
     const hunts = wants === 'hunt' && spec.armed && !m.routed && !shoal;
@@ -199,7 +215,9 @@ export function stepMerchant(m, px, pz, dt, speedMult = 1, shoal = false, att = 
       m.yaw += Math.max(-TURN * dt, Math.min(TURN * dt, err));
       m.speed += (spec.panic * speedMult - m.speed) * Math.min(1, dt * 0.5);
     } else {
+      // nobody to mind: cruise, and gather onto the nearest trade lane
       m.speed += (spec.cruise * speedMult - m.speed) * Math.min(1, dt * 0.3);
+      laneSteer(m, laneYaw, dt);
     }
   }
   m.x += Math.sin(m.yaw) * m.speed * dt;

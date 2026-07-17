@@ -13,6 +13,7 @@ import {
 } from './merchants.js';
 import { newHullState, applyShot, speedFactor, isSinking, salvageValue, SINK_TIME } from './combat.js';
 import { zoneOf, DERELICT_ZONES } from './legendfx.js';
+import { nearestLanePoint } from './lanes.js';
 import { attitude } from './faction.js';
 import { LIVERIES } from './livery.js';
 import { spawnSurvivors, stepSurvivor, survivorFate } from './survivors.js';
@@ -161,7 +162,13 @@ export class MerchantLayer {
       // player, with the attitude their type owes the player's flag
       const q = quarryOf ? quarryOf(e.m.id) : null;
       if (q) stepMerchant(e.m, q.x, q.z, dt, speedFactor(e.dmg), false, 'hunt');
-      else stepMerchant(e.m, px, pz, dt, speedFactor(e.dmg), shoal, attitude(e.m.type, factionId));
+      else {
+        // idle traffic travels the nearest lane it is IN (lanes.js): honest sail
+        // and patrols stream the corridors, so the player on a lane meets them
+        const lp = (e.m.role === 'traffic' || e.m.role === 'patrol') ? nearestLanePoint(e.m.x, e.m.z) : null;
+        const laneYaw = lp && lp.dist < lp.width ? lp.tangent : null;
+        stepMerchant(e.m, px, pz, dt, speedFactor(e.dmg), shoal, attitude(e.m.type, factionId), laneYaw);
+      }
       const y = waveHeight(e.m.x, e.m.z, t) - e.draft;
       e.group.position.set(e.m.x, y, e.m.z);
       e.group.rotation.set(0, e.m.yaw, (1 - e.dmg.hull) * 0.12); // holed, she lists

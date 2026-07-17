@@ -125,6 +125,42 @@ for (const lane of LANES) {
 export function laneNodes() { return NODES.map((n) => ({ ...n })); }
 export function laneEdges(id) { return (ADJ.get(id) || []).map((e) => ({ ...e })); }
 
+// the original lane polylines (world), for on-corridor queries by the traffic
+const LANE_POLYS = LANES.map((lane) => ({ id: lane.id, pts: lane.marks.map(resolveMark) }));
+
+// nearest point on ANY lane corridor to a world point, with the local tangent
+// (a yaw), corridor half-width, and chokepoint flag. Wrap-aware. For traffic:
+// an idle merchant steers along `tangent`; pirates lurk at chokepoints.
+export function nearestLanePoint(x, z) {
+  let best = null;
+  for (const lane of LANE_POLYS) {
+    for (let i = 0; i < lane.pts.length - 1; i++) {
+      const a = lane.pts[i], b = lane.pts[i + 1];
+      const dx = a.x + dxWrap(a.x, b.x) - a.x; // b unwrapped into a's frame
+      const dz = b.z - a.z;
+      const pxu = a.x + dxWrap(a.x, x);
+      const len2 = dx * dx + dz * dz;
+      const t = len2 > 0 ? clamp(((pxu - a.x) * dx + (z - a.z) * dz) / len2, 0, 1) : 0;
+      const nx = wrapX(a.x + dx * t), nz = a.z + dz * t;
+      const d = Math.hypot(dxWrap(x, nx), z - nz);
+      if (!best || d < best.dist) {
+        best = {
+          x: nx, z: nz, tangent: Math.atan2(dx, dz),
+          width: a.width + (b.width - a.width) * t,
+          choke: !!(a.choke || b.choke), laneId: lane.id, dist: d,
+        };
+      }
+    }
+  }
+  return best;
+}
+
+export function chokepoints() {
+  const out = [];
+  for (const lane of LANE_POLYS) for (const p of lane.pts) if (p.choke) out.push({ x: p.x, z: p.z, laneId: lane.id });
+  return out;
+}
+
 // nearest graph node to a world point (the on/off ramp)
 export function nearestNode(x, z) {
   let best = -1, bestD = Infinity;

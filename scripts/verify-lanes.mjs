@@ -2,7 +2,7 @@
 // the eastward Caribbean passage rides a lane north-about through the westerlies
 // (the acceptance scenario), short/off-lane hops sail direct (no regression),
 // and route() is deterministic.
-import { LANES, resolveMark, segmentCost, nearestNode, route, laneNodes } from '../src/lanes.js';
+import { LANES, resolveMark, segmentCost, nearestNode, nearestLanePoint, route, laneNodes } from '../src/lanes.js';
 import { isLand, coastDistGame, latLonToWorld, worldToLatLon, dxWrap, WORLD_W } from '../src/earth.js';
 
 let failed = 0;
@@ -72,6 +72,13 @@ for (const lane of LANES) {
 }
 
 ok(laneNodes().length >= 4, 'the graph has nodes');
+
+// nearestLanePoint finds the corridor + its heading (for lane-anchored traffic)
+{
+  const p = latLonToWorld(31, -60); // near the treasure-fleet mid-Atlantic leg
+  const lp = nearestLanePoint(p.x, p.z);
+  ok(lp && Number.isFinite(lp.tangent) && lp.width > 0, 'nearestLanePoint returns a corridor with a heading');
+}
 ok(nearestNode(latLonToWorld(23.5, -82).x, latLonToWorld(23.5, -82).z) !== null, 'nearestNode resolves');
 
 if (failed) { console.error(`verify-lanes: ${failed} FAILED`); process.exit(1); }
