@@ -19,6 +19,7 @@ import { helmOrder, helmRoute } from './helmsman.js';
 import { route as laneRoute } from './lanes.js';
 import { windAt } from './wind.js';
 import { currentAt } from './currents.js';
+import { stormWindAt, stormFieldAt } from './storms.js';
 import { decide as helmWatch } from './helmwatch.js';
 import { RESCUE_R, GRATITUDE } from './survivors.js';
 import { HULLS, hullById, nextHull, prevHull, buyHull } from './shipyard.js';
@@ -242,6 +243,7 @@ class Game {
     // sampled at the ship each frame; the live Open-Meteo layer was retired for
     // determinism. weatherState stays 'clear' until the storms plan drives it.
     this.weatherState = 'clear';
+    this.stormField = { weatherState: 'clear', gloom: 0, seaScale: 1, danger: 0 };
     this.gloom = 0;
     this.swell = 1;
     this.cam = { yaw: Math.PI * 0.85, pitch: 0.32, dist: 8, targetDist: 8 };
@@ -1644,14 +1646,18 @@ class Game {
     // The base itself is REAL weather when open-meteo answers (geo block
     // below), and the wind BUILDS offshore: sheltered inshore, near double
     // in blue water — stacked with the gait, a crossing genuinely flies.
-    // the wind field (wind.js): trades, westerlies, doldrums by latitude,
-    // breathing a little around the bearing so it never sits dead on the bow
-    const wf = windAt(this.ship.x, this.ship.z);
+    // the wind field (wind.js): trades, westerlies, doldrums by latitude — but a
+    // storm's vortex (storms.js) overrides it wherever a cyclone has the ship
+    const storm = stormWindAt(this.ship.x, this.ship.z, t);
+    const wf = storm || windAt(this.ship.x, this.ship.z);
     this.wind.from = wf.from + 0.3 * Math.sin(t * 0.011) + 0.12 * Math.sin(t * 0.037);
     const gusts = 0.3 * Math.sin(t * 0.07) + 0.15 * Math.sin(t * 0.21);
     // over land the ship is on a river: sheltered inshore wind, not the
-    // blue-water build the raw sea-coast distance would claim
-    this.wind.speed = windProfile(this.overLand ? 0 : this.coastDist, wf.speed * (1 + gusts));
+    // blue-water build the raw sea-coast distance would claim. In a storm the
+    // gale IS the vortex speed (calm eye floored so she is never dead in irons).
+    this.wind.speed = storm
+      ? Math.max(10, wf.speed)
+      : windProfile(this.overLand ? 0 : this.coastDist, wf.speed * (1 + gusts));
     // the Horn: the williwaws never stop — whatever the forecast says
     if (this.zone && STORM_ZONES.includes(this.zone.legend.id)) {
       this.wind.speed *= STORM_WIND_MULT;
@@ -1729,6 +1735,13 @@ class Game {
       this.zone = legendAt(ll.lat, ll.lon);
       if (this.zone && this.zone.legend.id !== wasZone) this.enterZone(this.zone.legend);
       if (!this.zone && this.diveN > 0) this.diveN = 0; // a fresh visit, fresh wrecks
+      // the storm sky (storms.js): a cyclone greys the heavens and lifts the
+      // sea; fair otherwise. weatherLock lets the showreel force its own beat.
+      this.stormField = stormFieldAt(this.ship.x, this.ship.z, t);
+      if (!this.weatherLock) {
+        this.weatherState = this.stormField.weatherState;
+        this.gloom = this.stormField.gloom;
+      }
     }
     // the trade lanes live: merchants stream, sail, flee, and count as
     // contacts — each sail reading the player's FLAG (faction.js), and any
@@ -1933,6 +1946,7 @@ class Game {
         coastDist: this.coastDist,
         nearPort: !!(this.port && this.port.dist < 3000),
         shoal: this.shoalWater,
+        stormAhead: !!(this.stormField && this.stormField.danger > 0.3),
         contactDist,
       });
       if (hb.mode !== this.handbackMode || hb.reason !== this.handbackReason) {
