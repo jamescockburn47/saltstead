@@ -12,6 +12,7 @@
 
 import { latLonToWorld } from './earth.js';
 import { DAY_LENGTH } from './skymath.js';
+import { hullById } from './shipyard.js';
 
 export const clamp01 = (t) => Math.max(0, Math.min(0.999, t));
 
@@ -23,59 +24,70 @@ export const clamp01 = (t) => Math.max(0, Math.min(0.999, t));
 //   day 6 puts a FULL MOON in the sky, so a night beat is moonlit, not black.
 // weather: forced { state, gloom } for the beat (null = leave the live sky).
 // dist/height frame the orbit; az0->az1 (radians) is the slow sweep.
+// hull: which rung of the ladder sails the beat — the reel must show the
+// SHIPS, not seven angles on the starting sloop. Restored after the reel.
 export const DEFAULT_BEATS = [
-  { name: 'Golden hour off Port Royal', lat: 17.55, lon: -76.6, frac: 0.745,
+  { name: 'Golden hour off Port Royal', lat: 17.55, lon: -76.6, frac: 0.745, hull: 'sloop',
     weather: { state: 'clear', gloom: 0 }, dist: 16, height: 5, az0: 2.2, az1: 3.1 },
-  // THE BATTLE: a King's corvette stands off the beam and the guns talk
-  // both ways for the whole sweep — stage() summons her, during() runs the
-  // exchange on the beat clock, strike() clears the sea for the next cut
+  // THE BATTLE: the black galleon and a King's corvette, guns talking both
+  // ways — the foe holds station OPPOSITE the camera so both hulls stay in
+  // frame down the whole sweep. stage() summons her, during() runs the
+  // exchange on the beat clock, strike() clears the sea for the next cut.
   { name: 'Broadsides in the Windward Passage', lat: 19.6, lon: -73.6, frac: 0.71, sec: 10,
-    weather: { state: 'overcast', gloom: 0.3 }, dist: 34, height: 9, az0: 1.7, az1: 2.5,
+    hull: 'galleon',
+    weather: { state: 'overcast', gloom: 0.3 }, dist: 42, height: 11, az0: 1.55, az1: 2.35,
     stage: (g) => {
-      const id = g.merchants.spawnEscort(g.ship.x + 60, g.ship.z + 18, g.ship.yaw);
-      const e = g.merchants.live.get(id);
-      if (e) { e.m.speed = 2.5; }
+      // PERPENDICULAR to the mid-sweep sightline, so the two hulls read
+      // side by side down the whole pass — never one behind the other
+      const id = g.merchants.spawnEscort(g.ship.x + 16, g.ship.z + 40, g.ship.yaw);
       g._reelFoe = id;
       g._reelGunN = -1;
     },
     during: (g, u) => {
       const e = g.merchants.live.get(g._reelFoe);
       if (!e) return;
-      // hold formation: she keeps station off the beam for the camera
-      e.m.x = g.ship.x + 60; e.m.z = g.ship.z + 18; e.m.yaw = g.ship.yaw;
+      // she keeps station broad on the bow, alive at the helm
+      e.m.x = g.ship.x + 16; e.m.z = g.ship.z + 40;
+      e.m.yaw = g.ship.yaw + Math.sin(u * 6.3) * 0.08;
+      e.m.speed = 2.5;
       const n = Math.floor(u * 9);
       if (n !== g._reelGunN) {
         g._reelGunN = n;
         const mine = n % 2 === 0, miss = n % 3 === 2;
         const from = mine
-          ? { x: g.ship.x + 2, y: g.shipGroup.position.y + 2.2, z: g.ship.z }
-          : { x: e.m.x - 2, y: g.shipGroup.position.y + 2.2, z: e.m.z };
+          ? { x: g.ship.x - 4, y: g.shipGroup.position.y + 3.2, z: g.ship.z }
+          : { x: e.m.x + 4, y: g.shipGroup.position.y + 2.2, z: e.m.z };
         const at = mine
-          ? { x: e.m.x + (miss ? -10 : 0), z: e.m.z + (miss ? 7 : 0) }
+          ? { x: e.m.x + (miss ? -8 : 0), z: e.m.z + (miss ? 7 : 0) }
           : { x: g.ship.x + (miss ? 9 : 0), z: g.ship.z + (miss ? -7 : 0) };
         g.combatFx.fire(from, at, miss);
       }
     },
     strike: (g) => { g.merchants.take(g._reelFoe); g._reelFoe = null; },
   },
-  { name: 'The Bermuda Triangle', lat: 25.5, lon: -70.0, frac: 0.5,
-    weather: { state: 'fog', gloom: 0.75 }, dist: 22, height: 8, az0: -0.6, az1: 0.2 },
+  { name: 'The Bermuda Triangle', lat: 25.5, lon: -70.0, frac: 0.5, hull: 'brig',
+    weather: { state: 'fog', gloom: 0.75 }, dist: 26, height: 9, az0: -0.6, az1: 0.2 },
   // shot from high overhead so the whole spinning scar is in frame — the
   // core takes the ship, which is exactly the footage
-  { name: 'The Corryvreckan whirlpool', lat: 56.155, lon: -5.75, frac: 0.6,
+  { name: 'The Corryvreckan whirlpool', lat: 56.155, lon: -5.75, frac: 0.6, hull: 'schooner',
     weather: { state: 'overcast', gloom: 0.45 }, dist: 55, height: 120, az0: 1.2, az1: 2.0 },
   // the zone's south-west rim: the only water in it both inside the legend's
-  // reach AND deep enough (coastDist > 600) for main.js to wake the beast
-  { name: 'The Kraken rises', lat: 61.2, lon: -9.6, frac: 0.7, sec: 12,
-    weather: { state: 'overcast', gloom: 0.5 }, dist: 26, height: 9, az0: 0.4, az1: 1.3 },
+  // reach AND deep enough (coastDist > 600) for main.js to wake the beast —
+  // and the ARMS ring the hull, so the biggest hull is the biggest fight
+  { name: 'The Kraken takes the galleon', lat: 61.2, lon: -9.6, frac: 0.7, sec: 12,
+    hull: 'galleon',
+    weather: { state: 'overcast', gloom: 0.5 }, dist: 34, height: 11, az0: 0.4, az1: 1.3 },
   { name: 'Y Ddraig Goch over the Irish Sea', lat: 53.3, lon: -4.9, frac: 0.72, sec: 9,
-    weather: { state: 'clear', gloom: 0 }, dist: 28, height: 10, az0: 2.9, az1: 3.6, lookUp: 8 },
+    hull: 'frigate',
+    weather: { state: 'clear', gloom: 0 }, dist: 34, height: 11, az0: 2.9, az1: 3.6, lookUp: 10 },
   // storm alone gates her in (legendfx dutchmanSails) — keep the last light of
   // dusk so her glowing hull reads against the sea instead of pitch black
   { name: 'The Flying Dutchman rounds the Cape', lat: -34.35, lon: 18.42, frac: 0.75,
-    weather: { state: 'storm', gloom: 0.7 }, dist: 24, height: 8, az0: -1.0, az1: -0.2 },
+    hull: 'corvette',
+    weather: { state: 'storm', gloom: 0.7 }, dist: 28, height: 9, az0: -1.0, az1: -0.2 },
   { name: 'Under a full moon, mid-Atlantic', lat: 24.0, lon: -45.0, frac: 0.97, day: 6,
-    weather: { state: 'clear', gloom: 0 }, dist: 18, height: 6, az0: 0.9, az1: 1.7 },
+    hull: 'galleon',
+    weather: { state: 'clear', gloom: 0 }, dist: 26, height: 8, az0: 0.9, az1: 1.7 },
 ];
 
 // PURE: the camera pose for a beat at sweep fraction u (0..1), orbiting the
@@ -144,6 +156,7 @@ export async function runShowreel(g, opts = {}) {
     gold: g.gold, kraken: g.kraken, krakenDone: g.krakenDone,
     dragon: g.dragon, dragonDone: g.dragonDone, saveClock: g.saveClock,
     weatherState: g.weatherState, gloom: g.gloom, mode: g.mode,
+    hullId: g.hullId, // the beats sail the whole ladder; the voyage gets hers back
   };
   g.saveClock = 1e9;              // no autosave writes a warped voyage
   g.weatherLock = true;           // the beats own the sky, not Open-Meteo
@@ -195,6 +208,9 @@ export async function runShowreel(g, opts = {}) {
       // warp the sloop: gentle way on, sail drawing, tiller lashed. The
       // monsters need no cue — the Kraken and the dragon wake by geography
       // (main.js zone triggers), which is the whole point of warping there.
+      // the beat's own hull: the reel shows the LADDER, not seven angles on
+      // the starting sloop
+      if (b.hull && g.hullId !== b.hull) g.setHull(hullById(b.hull));
       const p = latLonToWorld(b.lat, b.lon);
       g.ship.x = p.x; g.ship.z = p.z;
       g.ship.yaw = g.windBase.from + 2.1; // a quarter reach: the sail sets full
@@ -224,6 +240,7 @@ export async function runShowreel(g, opts = {}) {
     document.body.classList.remove('reel');
     g.photoCam = null;
     g.weatherLock = false;
+    if (g.hullId !== saved.hullId) g.setHull(hullById(saved.hullId));
     Object.assign(g.ship, saved.ship);
     g.dayStart = saved.dayStart;
     Object.assign(g.hull, saved.hull);

@@ -5,6 +5,7 @@
 // at sane framing numbers, with a real sweep and a legal time of day.
 import { cameraPose, DEFAULT_BEATS, clamp01 } from '../src/showreel.js';
 import { elevation } from '../src/earth.js';
+import { HULLS } from '../src/shipyard.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -38,6 +39,13 @@ ok(clamp01(-1) === 0 && clamp01(2) === 0.999 && clamp01(0.5) === 0.5,
 
 // ---- the default reel ----
 ok(DEFAULT_BEATS.length >= 5, `the reel shows the range (${DEFAULT_BEATS.length} beats)`);
+// the reel sails the LADDER: every named hull is a real rung, and the
+// beats span several classes — not seven angles on the starting sloop
+for (const b of DEFAULT_BEATS) {
+  if (b.hull) ok(HULLS.some((h) => h.id === b.hull), `${b.name}: '${b.hull}' is a real rung`);
+}
+ok(new Set(DEFAULT_BEATS.map((b) => b.hull).filter(Boolean)).size >= 5,
+  'the reel sails the ladder');
 const names = new Set();
 for (const b of DEFAULT_BEATS) {
   const tag = b.name || '(unnamed)';
