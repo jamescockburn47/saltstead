@@ -479,7 +479,12 @@ skin:
 ### Underground — the second frame, and where the horror lives (`marsunder.js`)
 
 Mars really is riddled with **lava tubes** — stable roofed voids with real
-collapse-pit skylights on the Tharsis volcanoes. This is a gift: the underground
+collapse-pit skylights on the Tharsis volcanoes — and, better, they are
+**catalogued**: the USGS Mars Global Cave Candidate Catalog (MGC³) lists over a
+thousand real candidate entrances with coordinates, types and confidence
+ratings (see docs/DATA.md). So the underground's doors are not invented:
+**every enterable skylight in Marsstead is a real catalogued candidate cave on
+Mars**, the way every Saltstead cove is real coastline. The underground itself
 is a **second local frame**, exactly the way Saltstead's below-decks hold is a
 ship-local frame entered through the hatch. You rappel or drive a skylight, the
 surface terrain/sky/dust layers douse, and a light-tight tube opens — lit only by
@@ -652,10 +657,21 @@ the sky.
 The landing page's shader promoted to a module: butterscotch day, blue-haloed
 dusk, Phobos hurrying the wrong way, the film-grain that keeps the gradient from
 banding — plus the night sky (two moons, hard stars, Earth as an evening star)
-and the dust-storm reddening. Climate reads deterministically from a Mars model
-(areocentric season Lₛ, latitude, elevation) — no fetch, no dependency; the truth
-is baked, unlike Saltstead's optional live layer. This is the canvas the whole
-"beautiful" half of the pillar paints on.
+and the dust-storm reddening. Time itself is real: `src/marstime.js` implements
+the published Mars24 algorithm (Allison & McEwen 2000 — sol clock, Lₛ seasons,
+the subsolar point), and its verify script asserts the paper's own worked
+examples, the strongest kind of check the gate has.
+
+And the weather is real in the family's favourite way: Saltstead eases *live*
+Open-Meteo into its sails; Marsstead **replays a recorded Mars year**. The
+Montabone dust climatology (docs/DATA.md) holds sol-by-sol maps of actual
+Martian dust across thirteen Mars years — including MY34, the 2018 global
+storm, as it actually spread. Baked and quantized, mapped onto the in-game
+calendar: same sol, same sky, every client, no fetch, no dependency. **The
+global dust storm in the game is *the* global storm of 2018, arriving where
+and when it really did** — the weather-live rule with liveness swapped for
+history. This is the canvas the whole "beautiful" half of the pillar paints
+on.
 
 ---
 
