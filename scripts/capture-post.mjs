@@ -78,16 +78,23 @@ try {
     window.saltstead.monsterFx.tentacles.filter((a) => a.group.visible).length);
   ok(armsUp >= 5, `the arms are up (${armsUp} of 6 in frame)`);
 
-  // the eye surfaces when it tires — two arms left
+  // the eye surfaces when it tires — two arms left. The head CIRCLES, so
+  // frame it live: camera just past the head, looking through it at the ship
   await page.evaluate(() => {
     const g = window.saltstead;
     g.kraken = { state: 'gripping', t: 40, arms: 2, hackT: 0 };
+  });
+  await sleep(900); // let the head surface and settle
+  await page.evaluate(() => {
+    const g = window.saltstead;
+    const h = g.monsterFx.krakenHead.position;
+    const away = Math.atan2(h.x - g.ship.x, h.z - g.ship.z);
     g.photoCam = {
-      x: g.ship.x - 20, y: 4.5, z: g.ship.z + 16,
-      lookAt: { x: g.ship.x + 6, y: 1.5, z: g.ship.z - 4 },
+      x: h.x + Math.sin(away) * 14, y: 3.2, z: h.z + Math.cos(away) * 14,
+      lookAt: { x: (h.x + g.ship.x) / 2, y: 2, z: (h.z + g.ship.z) / 2 },
     };
   });
-  await sleep(1500);
+  await sleep(500);
   await page.screenshot({ path: join(OUT, '2-kraken-eye.png') });
   const eyeUp = await page.evaluate(() => window.saltstead.monsterFx.krakenHead.visible);
   ok(eyeUp, 'the eye surfaced for the photograph');
@@ -182,18 +189,18 @@ try {
     const { WHALE_PERIOD } = await import('/src/wildlife.js');
     const g = window.saltstead;
     g.dayStart = 0.45 * DAY_LENGTH - g.t;
-    // jump the sim clock to the blow: u ~ 0.66 of the whale's cycle
-    g.t = Math.ceil(g.t / WHALE_PERIOD) * WHALE_PERIOD + WHALE_PERIOD * 0.66;
+    // jump the sim clock to the blow's full height: u ~ 0.635 of the cycle
+    g.t = Math.ceil(g.t / WHALE_PERIOD) * WHALE_PERIOD + WHALE_PERIOD * 0.635;
     g.ship.speed = 0;
     const wAng = Math.floor(g.t / WHALE_PERIOD) * 2.4;
     const wx = g.ship.x + Math.sin(g.ship.yaw + 1.9 + wAng) * 170;
     const wz = g.ship.z + Math.cos(g.ship.yaw + 1.9 + wAng) * 170;
     g.photoCam = {
-      x: wx - 30, y: 4, z: wz - 22,
-      lookAt: { x: wx, y: 0.5, z: wz },
+      x: wx - 22, y: 3.2, z: wz - 16,
+      lookAt: { x: wx, y: 1, z: wz },
     };
   });
-  await sleep(1200);
+  await sleep(600);
   await page.screenshot({ path: join(OUT, '7-the-whale.png') });
   const whaleUp = await page.evaluate(() => window.saltstead.wildlife.whale.group.visible
     && window.saltstead.wildlife.whale.group.position.y > -3);
