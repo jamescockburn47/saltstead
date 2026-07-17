@@ -51,11 +51,26 @@ will too (CSP already whitelists `saltstead.sovren.xyz`). Crew-NPC brains can sh
 `llama-server-moorstead` (Gemma, `--parallel 32`) or afford their own model — the
 UMA headroom allows either.
 
+### The Admiralty Board — ALL admin, both games (:8099)
+
+`http://evo:8099/` (or `http://100.90.66.54:8099/` over Tailscale) is the ONE
+admin page: Moorstead + Saltstead side by side with EVO vitals (UMA-aware RAM/
+VRAM cards), every service state, and collapsible detail panels. Mint/copy/
+revoke invite codes for BOTH games there (Saltstead crew/warden; Moorstead
+per-room incl. bairns), approve Moorstead invite requests, read both feedback
+ledgers, players, and natters. It holds no data: everything proxies to the two
+ledger apps below. Code: `~/admin/app.py` (repo copy `tools/admin-app.py`),
+unit `evo-admin`, LAN/Tailscale only — never routed through the tunnel.
+Moorstead's ledger gained LAN-only `/api/codes-full`, `/api/mint`,
+`/api/revoke` for the board (repo copy `tools/moorstead-dash-app.py`, EVO
+backup `app.py.bak-20260717-admiralty`); the Caddy `/dash/*` allowlist does
+NOT include them, so they stay private.
+
 ### Saltstead's harbourmaster ledger (invite codes + warden)
 
 `~/saltstead/dash/app.py` on the EVO (repo copy: `tools/dash-app.py`), systemd unit
-`saltstead-dash` on **:8097**. Mint/revoke codes and read player feedback on the
-ledger UI at `http://evo:8097/` — **LAN/Tailscale only**. Two endpoints are public:
+`saltstead-dash` on **:8097**. Day-to-day minting now happens on the Admiralty
+Board (:8099, above); the :8097 ledger UI still works — **LAN/Tailscale only**. Two endpoints are public:
 `POST /auth/claim` (invites) and `POST /feedback` (in-game feedback tool +
 `reportQuiet` telemetry, `src/feedback.js`): Vercel rewrites `/dash/*` →
 `saltstead.sovren.xyz` (Cloudflare tunnel) → Caddy `:8091` (allowlist) → :8097.

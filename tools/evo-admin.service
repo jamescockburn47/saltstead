@@ -1,0 +1,15 @@
+[Unit]
+Description=The Admiralty Board (Moorstead + Saltstead admin, LAN/Tailscale only)
+After=network-online.target
+
+[Service]
+Type=simple
+User=james
+WorkingDirectory=/home/james/admin
+Environment=PYTHONUTF8=1
+ExecStart=/home/james/moorstead/venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port 8099 --log-level warning
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
