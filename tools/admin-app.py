@@ -113,6 +113,7 @@ async def board():
         moor_codes = await _get(c, MOOR + "/api/codes-full")
         salt_codes = await _get(c, SALT + "/api/codes")
         salt_fb = await _get(c, SALT + "/api/feedback")
+        salt_visits = await _get(c, SALT + "/api/visits")
     return {
         "now": time.time(),
         "sys": _sys_stats(),
@@ -126,6 +127,8 @@ async def board():
             "up": salt_codes is not None,
             "codes": (salt_codes or {}).get("codes", []),
             "feedback": (salt_fb or {}).get("feedback", []),
+            # saltstead AND the marsstead teaser — the salt ledger keeps both
+            "visits": (salt_visits or {}).get("visits", {}),
         },
     }
 
@@ -256,6 +259,7 @@ th{text-align:left;color:var(--dim);font-weight:600;padding:4px 12px 4px 0;
 td{padding:5px 12px 5px 0;border-top:1px solid #1a2431;vertical-align:top}
 code{color:var(--gold);font-size:14px;font-family:Consolas,monospace}
 .warden{color:var(--gold);font-weight:700}
+.salt-ink{color:var(--sea)}.moor-ink{color:var(--moor)}.mars-ink{color:#d88a5a}
 .unclaimed{color:var(--dim);font-style:italic}
 button{background:#1a2c40;color:var(--ink);border:1px solid #2c4763;border-radius:5px;
   padding:6px 14px;cursor:pointer;font-size:13px}
@@ -486,6 +490,33 @@ function moorCodesTable(now, codes) {
 const ROOMSEL = '<select class="moorroom"><option>moor</option><option>dale</option>' +
   '<option>crag</option><option>tarn</option><option>bairns</option></select>';
 
+// ---- THE MUSTER BOOK: who came to each door, who actually played ----
+// saltstead + marsstead from the salt ledger's /api/visits (unique browsers,
+// deduped per UTC day, server-side); moorstead from its own player ledger.
+function musterBook(D) {
+  const V = (D.salt || {}).visits || {};
+  const st = ((D.moor || {}).overview || {}).stats || {};
+  const s = V.saltstead || {}, m = V.marsstead || {};
+  const n = x => (x == null ? '—' : x);
+  const row = (name, cls, cells) => '<tr><td><b class="' + cls + '">' + name + '</b></td>' +
+    cells.map(c => '<td>' + n(c) + '</td>').join('') + '</tr>';
+  let h = '<div class="desk"><h3>THE MUSTER BOOK</h3>' +
+    '<div class="tag">unique browsers per UTC day — raw hit counts live in the daily table on the Saltstead tab</div>';
+  h += '<table><tr><th></th><th>Visitors today</th><th>7 days</th><th>Ever</th>' +
+    '<th>Played today</th><th>7 days</th><th>Ever</th></tr>';
+  h += row('SALTSTEAD', 'salt-ink', [
+    (s.today || {}).uniques, (s.week || {}).uniques, (s.ever || {}).browsers,
+    (s.today || {}).playUniques, (s.week || {}).playUniques, (s.ever || {}).players]);
+  h += row('MARSSTEAD', 'mars-ink', [
+    (m.today || {}).uniques, (m.week || {}).uniques, (m.ever || {}).browsers,
+    null, null, null]);
+  h += row('MOORSTEAD', 'moor-ink', [
+    st.today, st.week, st.total, st.playedToday, st.playedWeek, st.playedEver]);
+  h += '</table>';
+  if (!D.salt.up) h += '<div class="down">salt ledger down — saltstead/marsstead counts unavailable</div>';
+  return h + '</div>';
+}
+
 // ---- OVERVIEW: the mint desk first, then what needs a decision ----
 function renderOverview(D) {
   const S = D.salt || {}, M = D.moor || {}, O = M.overview || {};
@@ -505,6 +536,8 @@ function renderOverview(D) {
     '<span class="muted">moor/dale/crag/tarn are grown-up rooms; bairns is the kids’ world</span>' +
     (M.up ? handoutShelf(M.codes || [], true) : '<div class="down">ledger down</div>') + '</div>';
   h += '</div></div>';
+
+  h += musterBook(D);
 
   // what needs a decision / a glance
   const pend = (O.inviteRequests || {}).pending || [];
@@ -540,6 +573,21 @@ function renderSalt(D) {
   h += '<div class="mintrow"><button onclick="saltMint(false)">Mint an invite</button>' +
     '<button class="gold" onclick="saltMint(true)">Mint a WARDEN code</button>' +
     '<span class="muted">wardens get the gold hatband and the Y-key shipyard</span></div>';
+  // the muster book's working pages: last 14 days, raw hits alongside uniques
+  const V = S.visits || {};
+  let vh = '';
+  for (const [site, cls] of [['saltstead', 'salt-ink'], ['marsstead', 'mars-ink']]) {
+    const rd = (V[site] || {}).recentDays || [];
+    vh += '<div class="muted" style="margin-top:6px"><b class="' + cls + '">' + site.toUpperCase() + '</b></div>';
+    if (!rd.length) { vh += '<div class="muted">no beacons yet</div>'; continue; }
+    vh += '<table><tr><th>Day (UTC)</th><th>Visitors</th><th>Hits</th><th>Players</th><th>Play-starts</th></tr>';
+    for (const r of [...rd].reverse())
+      vh += '<tr><td class="muted">' + esc(r.date) + '</td><td>' + r.uv + '</td><td class="muted">' + r.v +
+        '</td><td>' + r.up + '</td><td class="muted">' + r.p + '</td></tr>';
+    vh += '</table>';
+  }
+  const vToday = ((V.saltstead || {}).today || {});
+  h += det('salt-visits', 'THE MUSTER BOOK — DAILY', (vToday.uniques || 0) + ' today', vh);
   h += det('salt-codes', 'INVITE CODES', S.codes.length, saltCodesTable(now, S.codes));
   h += det('salt-fb', 'FEEDBACK & BUGS', S.feedback.length, fbTable(now, S.feedback),
     S.feedback.some(f => f.kind === 'bug' && now - f.ts < 86400));

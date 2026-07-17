@@ -26,6 +26,7 @@ import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness, bioGlow }
 import { decideTier, fpsVerdict, median, SETTLE_S, WINDOW_S } from './gfxprobe.js';
 import { MapUI } from './mapui.js';
 import { bootTitle } from './title.js';
+import { logVisit, logPlay } from './telemetry.js';
 import { loadGame, saveGame, snapshotSave } from './save.js';
 import { MerchantLayer } from './merchantlayer.js';
 import { WildlifeLayer } from './wildlifelayer.js';
@@ -2273,8 +2274,10 @@ try {
   console.warn('[title] diorama unavailable:', e);
   document.getElementById('titlescreen').classList.add('solid');
 }
+logVisit(); // the muster book: one visitor beacon per page-load
 bootTitle({
   onStart: async (mode, auth, side = null) => {
+    logPlay(); // …and one play-start per session, whatever door they came through
     if (titleScene) { titleScene.stop(); titleScene = null; }
     document.body.classList.remove('titleup');
     const save = mode === 'continue' ? await loadGame() : null;

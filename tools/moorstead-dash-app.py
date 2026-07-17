@@ -112,7 +112,8 @@ def _player_stats(players, now):
     today = _utc_day(now)
     week_cut = _utc_day(now - 7 * 86400)
     month_cut = _utc_day(now - 30 * 86400)
-    st = {"total": len(players), "today": 0, "week": 0, "month": 0, "returning": 0}
+    st = {"total": len(players), "today": 0, "week": 0, "month": 0, "returning": 0,
+          "playedToday": 0, "playedWeek": 0, "playedEver": 0}
     for p in players.values():
         days = p.get("visitDays") or []
         if today in days:
@@ -123,6 +124,15 @@ def _player_stats(players, now):
             st["month"] += 1
         if len(days) > 1 or p.get("visits", 0) > 1:
             st["returning"] += 1
+        # played = in-world heartbeats, not just the page opened. playDays is
+        # per-day and exact from 2026-07-17 on; minutes>0 backfills "ever".
+        pdays = p.get("playDays") or []
+        if today in pdays:
+            st["playedToday"] += 1
+        if any(d >= week_cut for d in pdays):
+            st["playedWeek"] += 1
+        if pdays or p.get("minutes", 0) > 0:
+            st["playedEver"] += 1
     return st
 
 
@@ -329,6 +339,13 @@ async def ping(req: Request):
     p["last"] = time.time()
     p["minutes"] = p.get("minutes", 0) + 1
     p["lastIp"] = entry["ip"]
+    # playDays: a heartbeat means they actually PLAYED today (visitDays only
+    # says the page was opened) — this is what the Admiralty Board counts
+    pdays = list(p.get("playDays") or [])
+    today = _utc_day()
+    if today not in pdays:
+        pdays.append(today)
+        p["playDays"] = pdays[-120:]
     if name and name not in p["names"]:
         p["names"] = (p["names"] + [name])[-5:]
     if seed:

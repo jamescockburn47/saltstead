@@ -1,8 +1,10 @@
 """Saltstead harbourmaster's ledger — invite codes, accounts, and login tokens.
 
 :8097 on LAN/Tailscale only. The Cloudflare tunnel (saltstead.sovren.xyz ->
-Caddy :8091) routes exactly two public endpoints here: POST /auth/claim and
-POST /feedback. The ledger UI and the mint/revoke endpoints never leave the house.
+Caddy :8091) routes exactly three public endpoints here: POST /auth/claim,
+POST /feedback and POST /visit (the muster book — page visits and play-starts
+for saltstead.app AND the marsstead.app teaser, deduped per browser per day).
+The ledger UI and the mint/revoke endpoints never leave the house.
 
 Deployed at ~/saltstead/dash/app.py on the EVO (repo copy: tools/dash-app.py).
 """
@@ -24,6 +26,11 @@ TOKENS_F = DASH / "tokens.json"
 VISITS_F = DASH / "visits.json"
 FEEDBACK_F = DASH / "feedback.json"
 FEEDBACK_RATE_F = DASH / "feedback_rate.json"
+VISIT_RATE_F = DASH / "visit_rate.json"
+
+VISIT_SITES = ("saltstead", "marsstead")
+SEEN_KEEP_DAYS = 45      # per-day dedupe sets kept this long; day totals kept forever
+EVER_CAP = 20000         # lifetime distinct-browser table cap (oldest last-seen evicted)
 
 PID_RE = re.compile(r"^[a-z0-9-]{4,40}$")
 CODE_RE = re.compile(r"^[a-z]+-[a-z]+-\d{2}$")
@@ -208,7 +215,106 @@ async def feedback(req: Request):
     return {"ok": True, "msg": "Noted on the harbourmaster's ledger — thank you."}
 
 
+# ---------------- the third public door: the muster book ----------------
+# One beacon per page-load ("visit") and one per session when a player takes a
+# ship to sea ("play"). Raw counts AND per-browser-per-day uniques are kept, so
+# a refresh-happy visitor cannot inflate the uniques and a lost beacon only
+# ever undercounts. Day totals live forever; the dedupe sets are pruned.
+def _visit_uid(pid, ip, ua):
+    basis = ("pid:" + pid) if PID_RE.match(pid) else ("ip:" + ip + "|" + ua[:80])
+    return hashlib.sha1(basis.encode()).hexdigest()[:12]
+
+
+def _record_visit(site, kind, uid):
+    day = str(_utc_day())
+    data = _load(VISITS_F, {})
+    s = data.setdefault(site, {"days": {}, "seen": {}, "ever": {}})
+    rec = s["days"].setdefault(day, {"v": 0, "p": 0, "uv": 0, "up": 0})
+    seen = s["seen"].setdefault(day, {})
+    bit = 1 if kind == "visit" else 2
+    prev = int(seen.get(uid, 0))
+    if kind == "visit":
+        rec["v"] += 1
+        if not prev & 1:
+            rec["uv"] += 1
+    else:
+        rec["p"] += 1
+        if not prev & 2:
+            rec["up"] += 1
+    seen[uid] = prev | bit
+    e = s["ever"].get(uid) or [int(day), int(day), 0]
+    e[1] = int(day)
+    if kind == "play":
+        e[2] += 1
+    s["ever"][uid] = e
+    if len(s["ever"]) > EVER_CAP:
+        for old in sorted(s["ever"], key=lambda k: s["ever"][k][1])[:len(s["ever"]) - EVER_CAP]:
+            del s["ever"][old]
+    cutoff = _utc_day() - SEEN_KEEP_DAYS
+    s["seen"] = {d: m for d, m in s["seen"].items() if int(d) >= cutoff}
+    _save(VISITS_F, data)
+
+
+@app.post("/visit")
+async def visit(req: Request):
+    ip = _client_ip(req)
+    # generous: real players fire 2-3 a day; a script hammering the door hits the cap
+    if not _rate_ok(ip, limit=200, rate_file=VISIT_RATE_F):
+        return {"ok": False}
+    try:
+        d = await req.json()
+    except Exception:
+        return {"ok": False}
+    site = str(d.get("site", "")).strip().lower()
+    if site not in VISIT_SITES:
+        return {"ok": False}
+    kind = str(d.get("kind", "visit")).strip().lower()
+    if kind not in ("visit", "play"):
+        kind = "visit"
+    pid = str(d.get("pid", ""))[:40].lower()
+    _record_visit(site, kind, _visit_uid(pid, ip, req.headers.get("user-agent", "")))
+    return {"ok": True}
+
+
 # ---------------- LAN-only: the ledger ----------------
+@app.get("/api/visits")
+def visits_summary():
+    """Aggregates for the Admiralty Board: per site, today / 7 days / ever."""
+    data = _load(VISITS_F, {})
+    today = _utc_day()
+    out = {}
+    for site in VISIT_SITES:
+        s = data.get(site) or {"days": {}, "seen": {}, "ever": {}}
+        days = s.get("days", {})
+        seen = s.get("seen", {})
+        ever = s.get("ever", {})
+        t = days.get(str(today), {})
+
+        week_days = [str(d) for d in range(today - 6, today + 1)]
+        wv = sum(days.get(d, {}).get("v", 0) for d in week_days)
+        wp = sum(days.get(d, {}).get("p", 0) for d in week_days)
+        wuv = len({u for d in week_days for u, b in (seen.get(d) or {}).items() if b & 1})
+        wup = len({u for d in week_days for u, b in (seen.get(d) or {}).items() if b & 2})
+
+        recent = []
+        for d in range(today - 13, today + 1):
+            r = days.get(str(d))
+            if r:
+                recent.append({"date": time.strftime("%Y-%m-%d", time.gmtime(d * 86400)),
+                               **{k: r.get(k, 0) for k in ("v", "uv", "p", "up")}})
+        out[site] = {
+            "today": {"visits": t.get("v", 0), "uniques": t.get("uv", 0),
+                      "plays": t.get("p", 0), "playUniques": t.get("up", 0)},
+            "week": {"visits": wv, "uniques": wuv, "plays": wp, "playUniques": wup},
+            "ever": {"visits": sum(r.get("v", 0) for r in days.values()),
+                     "plays": sum(r.get("p", 0) for r in days.values()),
+                     "browsers": len(ever),
+                     "players": sum(1 for e in ever.values() if len(e) > 2 and e[2] > 0)},
+            "recentDays": recent,
+        }
+    return {"visits": out}
+
+
 @app.post("/api/mint")
 async def mint(req: Request):
     try:

@@ -4,3 +4,4 @@ dist/
 tools/*.geojson
 .vercel
 media/
+__pycache__/
