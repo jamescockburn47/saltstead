@@ -46,6 +46,18 @@ export function moonBrightness(phase) {
 // All zero with the moon down or the sun up; a new-moon night stays black —
 // the moon is a navigation instrument, and its absence must still mean
 // something.
+// Bioluminescence — how hard the night wake burns. Warm water only (fades
+// out by |lat| 32°), needs real dark (a bright moon washes it out), and
+// storm-gloom mutes it like everything else. 0 by day, 1 on a moonless
+// tropical night: the wake becomes green fire, the most beautiful thing
+// on a dark sea.
+export function bioGlow(nightness, latAbs, moonBright, moonAlt, gloom = 0) {
+  const dark = Math.max(0, nightness - 0.15) / 0.85;
+  const warm = Math.max(0, 1 - (latAbs / 32) ** 2); // the tropics plateau, then it dies fast
+  const moonWash = 1 - 0.7 * moonBright * Math.max(0, moonAlt);
+  return Math.max(0, Math.min(1, dark * warm * moonWash * (1 - 0.6 * gloom)));
+}
+
 export function moonlitNight(nightness, moonAlt, moonBright) {
   const up = Math.max(0, Math.min(1, moonAlt * 2.2)); // full effect once well risen
   const k = Math.max(0, Math.min(1, nightness)) * up * moonBright;

@@ -5,7 +5,10 @@
 
 import * as THREE from 'three';
 import { waveHeight } from './waves.js';
-import { ambientSpecies, porpoiseY, porpoisePitch, circlePos, flapAngle, podStation } from './wildlife.js';
+import {
+  ambientSpecies, porpoiseY, porpoisePitch, circlePos, flapAngle, podStation,
+  frenzyPos, FRENZY_FINS, FRENZY_S, whaleState, WHALE_PERIOD,
+} from './wildlife.js';
 
 const GREY = new THREE.MeshPhongMaterial({ color: 0x8fa3ad, flatShading: true });
 const DARK = new THREE.MeshPhongMaterial({ color: 0x4a5860, flatShading: true });
@@ -45,6 +48,27 @@ function buildFin() {
   return fin;
 }
 
+// the whale: a dark rolling back, a fluke for the dive, a spout column.
+// Most of the animal stays a shadow under the surface — like the shark,
+// what breaks the water IS the whale.
+function buildWhale() {
+  const g = new THREE.Group();
+  const back = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), DARK);
+  back.scale.set(2.2, 1.3, 6.5);
+  g.add(back);
+  const fluke = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.3), DARK);
+  fluke.material = DARK.clone(); fluke.material.side = THREE.DoubleSide;
+  fluke.rotation.x = -Math.PI / 2;
+  fluke.position.set(0, 0.4, -7.2);
+  g.add(fluke);
+  const spout = new THREE.Mesh(
+    new THREE.ConeGeometry(0.5, 3.4, 6),
+    new THREE.MeshBasicMaterial({ color: 0xdfeef6, transparent: true, opacity: 0 }));
+  spout.position.set(0, 3.2, 4.2);
+  g.add(spout);
+  return { group: g, spout };
+}
+
 const POD = 4, GULLS = 4;
 
 export class WildlifeLayer {
@@ -68,13 +92,46 @@ export class WildlifeLayer {
     this.fin = buildFin();
     scene.add(this.fin);
     this.finDrift = { x: 0, z: 0 };
+    // the frenzy pack: extra fins that only swim when a ship has gone down
+    this.frenzy = [];
+    for (let i = 0; i < FRENZY_FINS; i++) {
+      const f = buildFin();
+      f.visible = false;
+      scene.add(f);
+      this.frenzy.push(f);
+    }
+    this.whale = buildWhale();
+    this.whale.group.visible = false;
+    scene.add(this.whale.group);
   }
 
   // sx/sz: ship; mastTop: world y of the masthead; speed: hull m/s;
   // yaw/scale: the hull's heading and frame scale (shipframe.js) — the pod
-  // stations in the ship's own frame so the leaps clear any hull on the ladder
-  update(t, dt, sx, sz, mastTop, speed, coastDist, latAbs, yaw = 0, scale = 1) {
+  // stations in the ship's own frame so the leaps clear any hull on the
+  // ladder; wrecks: fresh sinkings ([{x, z, age}], merchantlayer) — the
+  // frenzy gathers at the nearest one in sight
+  update(t, dt, sx, sz, mastTop, speed, coastDist, latAbs, yaw = 0, scale = 1, wrecks = null) {
     const spec = ambientSpecies(coastDist, latAbs);
+
+    // THE FRENZY: sharks converge on a fresh wreck and tighten on it —
+    // a sinking becomes an event the sea attends
+    let feast = null;
+    if (wrecks) {
+      for (const w of wrecks) {
+        if (w.age > FRENZY_S) continue;
+        if (Math.hypot(w.x - sx, w.z - sz) > 900) continue;
+        if (!feast || w.age > feast.age) feast = w; // the freshest close wreck
+      }
+    }
+    for (let i = 0; i < this.frenzy.length; i++) {
+      const f = this.frenzy[i];
+      f.visible = !!feast;
+      if (!feast) continue;
+      const p = frenzyPos(feast.age, i);
+      const fx = feast.x + p.x, fz = feast.z + p.z;
+      f.position.set(fx, waveHeight(fx, fz, t) + 0.2, fz);
+      f.rotation.y = p.heading;
+    }
 
     // gulls wheel about the masthead — land is close
     for (let i = 0; i < GULLS; i++) {
@@ -101,8 +158,9 @@ export class WildlifeLayer {
 
     // dolphins ride the bow wave when you're making way offshore — stationed
     // in the SHIP's frame (podStation, verify-gated) so the leaps stay clear
-    // of the planking on every hull, and they face the way she sails
-    const podOn = spec.dolphins && speed > 2.5;
+    // of the planking on every hull, and they face the way she sails.
+    // They leave the water to the sharks while a frenzy runs.
+    const podOn = spec.dolphins && speed > 2.5 && !feast;
     const cy = Math.cos(yaw), sy = Math.sin(yaw);
     for (let i = 0; i < POD; i++) {
       const d = this.pod[i];
@@ -115,6 +173,23 @@ export class WildlifeLayer {
       const phase = t * 2.4 + i * 1.3;
       d.position.set(px, waveHeight(px, pz, t) + porpoiseY(phase), pz);
       d.rotation.set(porpoisePitch(phase), yaw, 0, 'YXZ');
+    }
+
+    // THE WHALE: the abyss's resident — a long deep cruise, then a minute
+    // at the surface off the beam: the blow, the rolling back, the fluke.
+    // Deterministic in t, parked ~170 m abeam so it reads as ENCOUNTERED,
+    // never as following.
+    this.whale.group.visible = !!spec.whale;
+    if (spec.whale) {
+      const u = (t % WHALE_PERIOD) / WHALE_PERIOD;
+      const ws = whaleState(u);
+      const wAng = Math.floor(t / WHALE_PERIOD) * 2.4; // a new bearing each cycle
+      const wx = sx + Math.sin(yaw + 1.9 + wAng) * 170;
+      const wz = sz + Math.cos(yaw + 1.9 + wAng) * 170;
+      this.whale.group.position.set(wx, waveHeight(wx, wz, t) + ws.y, wz);
+      this.whale.group.rotation.set(ws.pitch, wAng, 0);
+      this.whale.spout.material.opacity = ws.blow * 0.75;
+      this.whale.spout.scale.y = 0.4 + ws.blow;
     }
 
     // the fin circles a slow drift near an idling hull in warm shallows

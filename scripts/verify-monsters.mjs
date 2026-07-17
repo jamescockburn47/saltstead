@@ -5,6 +5,7 @@
 // to the crag.
 import {
   KRAKEN_ARMS, KRAKEN_WARN, KRAKEN_HOLD, KRAKEN_SHALLOW, KRAKEN_LOOT,
+  ARM_SEGS, tentacleSpine,
   newKraken, stepKraken, shootKrakenArm, krakenDrag, krakenOver,
   DRAGON_HP, DRAGON_CIRCLE, DRAGON_STOOP, DRAGON_HIGH, DRAGON_LOW, HOARD_GOLD,
   newDragon, stepDragon, dragonVulnerable, woundDragon, dragonAlt, dragonGone,
@@ -102,6 +103,25 @@ const DT = 1 / 30;
   ok(woundDragon(d).fled && dragonGone(d), 'the third sends her to the crag');
   ok(!stepDragon(d, 1).rake, 'fled, she rakes no more');
   ok(HOARD_GOLD > 1500, 'the hoard pays for the sail to Wales');
+}
+
+// the arm's living curve: full-length spines, every joint bounded (no arm
+// folds through itself), the curl gathers toward the tip under grip, the
+// wave keeps it moving, and no two arms writhe in step
+{
+  ok(ARM_SEGS >= 6, 'enough joints to read as a curve');
+  for (const [t, i, g] of [[0, 0, 1], [3.7, 2, 0.5], [11, 5, 0.3]]) {
+    const spine = tentacleSpine(t, i, g);
+    ok(spine.length === ARM_SEGS, 'a full spine every call');
+    ok(spine.every((a) => Math.abs(a) < 0.8), `every joint bounded (t=${t})`);
+  }
+  const gripped = tentacleSpine(2, 0, 1);
+  ok(Math.abs(gripped[ARM_SEGS - 1]) > Math.abs(gripped[0]),
+    'the curl gathers toward the tip');
+  const a = tentacleSpine(1, 0, 0.7), b = tentacleSpine(2.5, 0, 0.7);
+  ok(a.some((v, s) => Math.abs(v - b[s]) > 0.02), 'the arm moves with time');
+  const arm0 = tentacleSpine(1, 0, 0.7), arm3 = tentacleSpine(1, 3, 0.7);
+  ok(arm0.some((v, s) => Math.abs(v - arm3[s]) > 0.02), 'arms writhe out of step');
 }
 
 if (failed) { console.error(`verify-monsters: ${failed} FAILED`); process.exit(1); }

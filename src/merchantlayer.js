@@ -145,6 +145,11 @@ export class MerchantLayer {
       e.setSail(e.m.yaw, dead ? 0 : 0.5, windFrom, dead ? 0 : 0.6 * e.dmg.rig);
       e.setLantern(night && !dead);
     }
+    // the sea remembers a sinking for a while (the frenzy), then forgets
+    const wrecks = this.wrecks();
+    for (const w of wrecks) w.age += dt;
+    if (wrecks.length && wrecks[0].age > 240) wrecks.shift();
+
     // flotsam bobs where its ship went down
     for (const f of this.flotsam) {
       f.mesh.position.set(f.x, waveHeight(f.x, f.z, t) + 0.1, f.z);
@@ -220,9 +225,15 @@ export class MerchantLayer {
     return id;
   }
 
+  // fresh wrecks — where ships went down this session: [{ x, z, age }].
+  // The wildlife reads this (sharks GATHER at a sinking); ages tick in
+  // update and the sea forgets after FRENZY_S seconds (wildlife.js).
+  wrecks() { return this._wrecks || (this._wrecks = []); }
+
   // she's holed through: the sinking starts, salvage floats off
   startSinking(id, e) {
     e.sinkT = 0;
+    this.wrecks().push({ x: e.m.x, z: e.m.z, age: 0 });
     this.looted.add(id); // her berth in the spawn table stays empty
     if (!e.m.looted) {
       // most of the cargo goes down with her; a fraction floats

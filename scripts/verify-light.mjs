@@ -1,7 +1,7 @@
 // verify-light: the light-dynamics drives. Eye adaptation eases the right
 // way, the glitter blade follows the sun by day and hands to the moon by
 // night, a new moon leaves the sea dark, and every azimuth is unit length.
-import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness, moonlitNight } from '../src/lightrig.js';
+import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness, moonlitNight, bioGlow } from '../src/lightrig.js';
 import { solarState, lunarState, moonPhase, DAY_LENGTH, MOON_MONTH_DAYS } from '../src/skymath.js';
 
 let failed = 0;
@@ -68,6 +68,21 @@ ok(Math.abs(moonBrightness(0.5) - 1) < 1e-9, 'full moon peak');
     'a set moon lights nothing');
   const day = moonlitNight(0, 0.8, 1);
   ok(day.moonInt === 0 && day.hemiLift === 0, 'daylight owns the day');
+}
+
+// bioluminescence: green fire on a moonless tropical night, nothing by day,
+// nothing in cold water, washed out under a full moon overhead
+{
+  ok(bioGlow(1, 10, 0.15, -0.3) > 0.8, 'a moonless tropical night BURNS');
+  ok(bioGlow(0, 10, 0.15, -0.3) === 0, 'daylight owns the day');
+  ok(bioGlow(1, 50, 0.15, -0.3) === 0, 'cold water carries no fire');
+  ok(bioGlow(1, 10, 1, 0.9) < bioGlow(1, 10, 0.15, -0.3) * 0.5,
+    'a full moon overhead washes it out');
+  ok(bioGlow(1, 10, 0.15, -0.3, 1) < bioGlow(1, 10, 0.15, -0.3),
+    'storm gloom mutes it like everything else');
+  for (const g of [bioGlow(1, 0, 0, -1), bioGlow(0.5, 20, 0.5, 0.5, 0.5)]) {
+    ok(g >= 0 && g <= 1, `glow bounded (${g.toFixed(2)})`);
+  }
 }
 
 if (failed) { console.error(`verify-light: ${failed} FAILED`); process.exit(1); }

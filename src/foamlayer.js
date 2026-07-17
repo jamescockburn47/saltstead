@@ -49,11 +49,19 @@ export class FoamLayer {
     this.fleckCellZ = null;
   }
 
-  // foam takes the ambient light: bright noon foam, faint moonlit foam
+  // foam takes the ambient light: bright noon foam, faint moonlit foam.
+  // Under bioluminescence (setGlow — lightrig.js bioGlow) the wake stops
+  // fading with the dark and BURNS instead: green fire on a black sea.
   setLight(l) {
-    this.wakeMesh.material.color.setScalar(0.25 + 0.75 * l);
-    this.fleckMesh.material.opacity = 0.5 * (0.2 + 0.8 * l);
+    const g = this.glow || 0;
+    const base = Math.max(0.25 + 0.75 * l, g * 0.9);
+    this.wakeMesh.material.color.setRGB(
+      base * (1 - 0.65 * g), base, base * (1 - 0.35 * g));
+    this.fleckMesh.material.opacity = Math.max(0.5 * (0.2 + 0.8 * l), 0.75 * g);
+    this.fleckMesh.material.color.setRGB(1 - 0.4 * g, 1, 1 - 0.1 * g);
   }
+
+  setGlow(g) { this.glow = Math.max(0, Math.min(1, g || 0)); }
 
   // emitters: [{ x, z, size }] world-space foam sources (stern, bow)
   update(t, dt, cx, cz, speed, emitters) {

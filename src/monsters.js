@@ -14,6 +14,24 @@
 
 // ---- the Kraken ----
 export const KRAKEN_ARMS = 6;
+
+// THE ARM'S LIVING CURVE — per-segment bend angles (radians) the scene
+// layer skins cylinders onto (monsterlayer). t: seconds; i: which arm;
+// grip [0..1]: how hard she holds (the fight loosens it). Root stands
+// near-straight out of the sea; the curl gathers toward the tip — a rising
+// wave travels DOWN the arm so every arm writhes on its own clock. Bounded:
+// no joint ever folds back through the last (|angle| < 0.8 rad).
+export const ARM_SEGS = 8;
+export function tentacleSpine(t, i, grip = 0.7) {
+  const out = [];
+  for (let s = 0; s < ARM_SEGS; s++) {
+    const u = s / (ARM_SEGS - 1);
+    const wave = Math.sin(t * 1.7 + i * 1.9 - u * 3.6) * 0.16 * (0.35 + u);
+    const curl = -(0.06 + 0.46 * grip * u * u);
+    out.push(curl + wave);
+  }
+  return out;
+}
 export const KRAKEN_WARN = 8;     // s of boiling sea before the arms come up
 export const KRAKEN_HOLD = 60;    // s before it tires and lets go on its own
 export const KRAKEN_SHALLOW = 400; // game m of coast where it cannot follow

@@ -14,7 +14,41 @@ export function ambientSpecies(coastDist, latAbs) {
     dolphins: coastDist > 500,
     albatross: coastDist > 3000 && latAbs > 20,
     shark: coastDist < 900 && latAbs < 42,
+    whale: coastDist > 4000 && latAbs < 65, // the abyss has a resident
   };
+}
+
+// THE FRENZY — sharks gather at a sinking. elapsed: seconds since she went
+// down; i: which fin. They arrive from OUTSIDE the scene (the spiral opens
+// at ~130 m) and tighten on the wreck over half a minute, then circle the
+// flotsam at a fin's length. The sea attends a death.
+export const FRENZY_FINS = 3;
+export const FRENZY_S = 240; // how long the sea remembers a wreck
+export function frenzyPos(elapsed, i) {
+  const r = Math.max(8 + i * 2.5, 130 - elapsed * 4.5);
+  const a = elapsed * (0.28 + i * 0.05) + i * 2.1;
+  return { x: Math.sin(a) * r, z: Math.cos(a) * r, heading: a + Math.PI / 2, r };
+}
+
+// THE WHALE — the abyss's own navigation instrument: a long submerged
+// cruise, then a minute at the surface (blow, a rolling back, the fluke on
+// the dive). u: cycle phase [0..1); one cycle is WHALE_PERIOD seconds.
+//   y      — back height relative to the surface (negative = under)
+//   pitch  — body pitch (the fluke-up dive at the end)
+//   blow   — 0..1: the spout column stands in the first breaths
+export const WHALE_PERIOD = 90;
+export function whaleState(u) {
+  if (u < 0.62) return { y: -9, pitch: 0, blow: 0 };            // the deep cruise
+  if (u < 0.9) {
+    const s = (u - 0.62) / 0.28;                                 // surfaced: back awash
+    return {
+      y: -0.6 + Math.sin(s * Math.PI) * 0.9,
+      pitch: 0,
+      blow: s < 0.3 ? 1 - s / 0.3 : 0,                           // the blow on arrival
+    };
+  }
+  const d = (u - 0.9) / 0.1;                                     // the sounding dive
+  return { y: -0.6 - d * 7, pitch: -0.5 * d, blow: 0 };
 }
 
 // the pod's bow-wave stations, SHIP-LOCAL metres (bow +z, starboard +x,

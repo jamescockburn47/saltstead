@@ -20,7 +20,7 @@ import { waveHeight } from './waves.js';
 import { TerrainLayer } from './terrain.js';
 import { Sky } from './sky.js';
 import { DAY_LENGTH, solarState, lunarState, moonPhase } from './skymath.js';
-import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness } from './lightrig.js';
+import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness, bioGlow } from './lightrig.js';
 import { decideTier, fpsVerdict, median, SETTLE_S, WINDOW_S } from './gfxprobe.js';
 import { MapUI } from './mapui.js';
 import { bootTitle } from './title.js';
@@ -1379,7 +1379,7 @@ class Game {
       const wll = worldToLatLon(this.ship.x, this.ship.z);
       this.wildlife.update(t, dt, this.ship.x, this.ship.z,
         this.shipGroup.position.y + 11, this.ship.speed, this.coastDist, Math.abs(wll.lat),
-        this.ship.yaw, this.shipFrame.scale);
+        this.ship.yaw, this.shipFrame.scale, this.merchants.wrecks());
     }
     const allContacts = this.contacts.concat(this.merchants.contacts())
       .concat(this.legendFx.contacts());
@@ -1625,7 +1625,7 @@ class Game {
     // the fighting layers breathe
     this.gunCool = Math.max(0, this.gunCool - dt);
     this.combatFx.update(t, dt);
-    this.monsterFx.updateKraken(this.kraken, t, this.ship.x, this.ship.z);
+    this.monsterFx.updateKraken(this.kraken, t, this.ship.x, this.ship.z, this.spec.length);
     this.monsterFx.updateDragon(this.dragon, t, dt, this.ship.x, this.ship.z);
 
     // speed widens the lens a touch — subliminal but it sells the pace
@@ -1731,6 +1731,9 @@ class Game {
       this.wind.from, this.weatherState, gloomEff, sol.dayness);
     this.ocean.update(t, this.ship.x, this.ship.z, this.camera.position, glit,
       this.sky.domeUniforms.uHor.value, this.swell);
+    // bioluminescence: on a dark warm-water night the wake burns green
+    this.foam.setGlow(bioGlow(sol.nightness, Math.abs(skyLL.lat),
+      moonBrightness(moonPhase(skyT)), lun.alt, gloomEff));
     this.foam.setLight(Math.min(1, sol.dayness
       + 0.5 * sol.nightness * moonBrightness(moonPhase(skyT)) * Math.max(0, lun.alt)));
     if (this.gfxQuality === 'fine') {

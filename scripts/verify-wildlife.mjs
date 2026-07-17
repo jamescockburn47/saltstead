@@ -1,7 +1,10 @@
 // verify-wildlife: every species is a navigation instrument — gulls mean
 // land, the albatross means blue water, the fin means warm shallows — and
 // the motion maths stays inside its envelopes.
-import { ambientSpecies, porpoiseY, porpoisePitch, circlePos, flapAngle, podStation } from '../src/wildlife.js';
+import {
+  ambientSpecies, porpoiseY, porpoisePitch, circlePos, flapAngle, podStation,
+  frenzyPos, FRENZY_FINS, FRENZY_S, whaleState, WHALE_PERIOD,
+} from '../src/wildlife.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -46,6 +49,39 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
   }
   ok(podStation(0, 1).x * podStation(1, 1).x < 0, 'the pod rides both sides');
   ok(podStation(0, 1).z > podStation(3, 1).z, 'and spreads aft from the bow');
+}
+
+// the frenzy: fins arrive from OUTSIDE the scene, tighten onto the wreck,
+// and never leave it once gathered — the sea attends a sinking
+{
+  ok(FRENZY_FINS >= 2 && FRENZY_S >= 120, 'a frenzy is a crowd that lingers');
+  const far = frenzyPos(0, 0), near = frenzyPos(60, 0);
+  ok(far.r > 100, `they start beyond the frame (${far.r.toFixed(0)} m out)`);
+  ok(near.r < 15, `and tighten onto the wreck (${near.r.toFixed(0)} m)`);
+  ok(frenzyPos(200, 0).r <= near.r + 1e-9, 'once gathered they stay gathered');
+  ok(frenzyPos(30, 0).r > frenzyPos(30, 2).r - 25
+    && Math.abs(frenzyPos(30, 0).x - frenzyPos(30, 1).x) > 1,
+    'the pack is decorrelated, not a conga line');
+}
+
+// the whale: mostly a rumour in the deep, a minute of back and blow at the
+// surface, the fluke pitch on the sounding dive — and the cycle closes
+{
+  ok(ambientSpecies(5000, 30).whale && !ambientSpecies(2000, 30).whale,
+    'the whale belongs to the abyss');
+  let surfaced = 0, blew = false, dove = false;
+  for (let u = 0; u < 1; u += 0.005) {
+    const w = whaleState(u);
+    ok(Number.isFinite(w.y) && Number.isFinite(w.pitch), `whale finite at ${u.toFixed(2)}`);
+    if (w.y > -1.5) surfaced++;
+    if (w.blow > 0.5) blew = true;
+    if (w.pitch < -0.3) dove = true;
+  }
+  ok(surfaced > 20 && surfaced < 120, `a minute at the surface, no more (${surfaced} samples)`);
+  ok(blew, 'the blow stands when she surfaces');
+  ok(dove, 'the fluke pitches on the dive');
+  ok(Math.abs(whaleState(0).y - whaleState(0.999).y) < 1.5, 'the cycle closes in the deep');
+  ok(WHALE_PERIOD > 45, 'an encounter, not a metronome');
 }
 
 // circling: on the circle, heading tangent
