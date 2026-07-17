@@ -206,6 +206,132 @@ best fun the game has.**
 
 ---
 
+## The look: light, dust, and the rusty edge of space
+
+The physics pillar says *what* Mars does; this section is the art direction —
+*how it reads on screen*, module by module. The rule of the whole section: the
+atmosphere is not an effect applied to the world, **the atmosphere is the world's
+renderer**. Every colour on Mars arrives through dust; paint the dust right and
+everything else inherits the look.
+
+### The light rig — `src/marslight.js` (pure envelopes, the `lightrig` heir)
+
+Mars's light runs **backwards from Earth's**, and that inversion is the game's
+visual signature:
+
+- **Noon is warm, dusk is cool.** On Earth the day is white and the sunset
+  reddens; on Mars suspended dust warms the whole day sky to butterscotch and
+  then forward-scatters **blue** around the low sun. The landing page's blue
+  halo is real physics and it is the flagship image: every evening, the game
+  quietly shows you the most alien sunset in the solar system.
+- **Ambient light is the dust itself.** The sky dome is a soft omnidirectional
+  warm fill (scattered sunlight), so shadows are never black outdoors — they are
+  dusty rose. Shadow *sharpness* rides the dust load: crisp on a clear sol,
+  soft-edged as haze builds, gone in a storm.
+- **Night is two nights.** Early night keeps a violet-brown horizon memory;
+  deep night is hard starlight, the Milky Way, and **Phobos-light** — a faint,
+  fast-moving second key light that visibly crosses the sky in hours (a light
+  source that *moves* is free drama on every surface it touches). Interiors
+  spill warm practical light through ports — the only yellow squares on a
+  planet of grey-blue night.
+- **The storm noon.** Under a global storm the sun becomes a pale coin in sepia
+  gloom — the real "brown noon" of 2018's storm. Midday twilight is the game's
+  most oppressive light state, and it is *daylight*: dread without darkness.
+
+All of it is pure envelope maths — sun elevation → colour/intensity/softness
+curves, dust load as a modulator — guarded by `verify-marslight` exactly as
+Saltstead's `lightrig` is.
+
+### Dust in four registers — `src/dust.js` (pure drive) + `dustlayer.js` (THREE)
+
+Dust is one system with four escalating registers, the same pure-drive-plus-
+thin-layer split as Saltstead's foam. The pure module owns the wind field, the
+vortex maths, the storm state machine and the optical-depth envelope; the layer
+just skins instanced quads and feeds uniforms.
+
+1. **Suspension** — always on: the permanent haze. Aerial perspective tints
+   distant terrain toward rosy sepia; the horizon is never a hard line. This is
+   what gives a 100%-terrain planet its sense of *scale*, and it is one fog
+   function keyed to dust optical depth **τ** — the real term Mars scientists
+   use, worn openly (the star-chart rule: instruments and renderers read the
+   live sim, and teach a true thing by existing).
+2. **Drift** — the wind made visible: sparse ground-hugging motes catching low
+   sun, saltation streamers smoking off dune crests, a slow ripple of
+   wind-shadow across the plain. Cheap (instanced points advected by the wind
+   field), ambient, and the reason a still frame of empty ground looks alive.
+3. **Swirl** — dust responds to *things*, and this register is where the world
+   touches you back:
+   - a **vortex wake** curls off the moving player and rover — analytic vortex
+     pair maths, `swirl(vel, offset, t)` in the pure module, so every client
+     computes the same curl;
+   - **dust devils** are the same maths at column scale, wandering the plains
+     (the wildlife-role) and legible from a kilometre off;
+   - a working **drill wears a hanging plume**; an arriving **hopper blasts a
+     radial scour ring** and lands in its own rolling cloud (the thin-air,
+     low-g plume *hangs* — the physics pillar rendered);
+   - walk through your own settled dust and your **bootprints smoke** faintly
+     behind you.
+   Swirl is the register that makes dust a character rather than a weather
+   report, and `verify-dust` holds its envelopes (curl bounded, plumes decay,
+   devil columns conserve their spin).
+4. **Storm** — the ladder up, staged and legible like a Saltstead gale:
+   *rising* (drift thickens, streamers join into sheets, VESPER reads the τ
+   forecast aloud) → *ground blizzard* (horizontal sand rivers at boot height,
+   visibility falling in steps, the sun paling) → **brown-out** (the world is a
+   ten-metre sphere of sepia noise, sound is hiss and grit ticking on the
+   visor, the HUD itself hazes — the Bermuda-Triangle instrument-degradation
+   trick, weathered) → *aftermath*: every surface wears a dust film, drifts
+   bank against the leeward sides of your stead, arrays read low until wiped —
+   and the first clean swipe of a glove across a panel is the storm's
+   punchline. The world remembers the weather; that memory is the beauty.
+
+### The colour law — warm world, cool life
+
+One discipline keeps a one-hue planet from going monotonous: **Mars owns the
+warm colours; everything alive answers in cool ones.** The world is burnt
+umber, ochre, butterscotch, rosy haze — and against it, every counterpoint
+reads at a glance: the **blue** dusk halo and Earth burning blue in the evening
+sky; the **green** of a greenhouse glowing after dark — deliberately the only
+green on the planet, the most precious colour in the game; the **white** of
+frost, the caps, and hab interiors; VESPER's **cool signal-light** in the HUD.
+Passing an airlock is a colour transition — rust world to clean white-blue
+interior — the below-decks douse reborn as *stepping out of the planet*. When
+the mystery goes deep, the vaults break the law on purpose: the deep dark is
+the one place the palette goes wrong, and the player feels it before they can
+say why.
+
+### The rusty edge of space — altitude as the fourth sky
+
+The hopper and orbital tiers earn their own aesthetic, and it is the pillar's
+best trick: **Mars's atmosphere is thin enough to leave in a minute, and it
+reads as a rusty rind on a black world.**
+
+- **The climb:** launch up *through* the registers — out of the surface haze,
+  the sky dries from butterscotch to violet to **black at noon**, stars come
+  out in daytime, and the light snaps from dusty-soft to hard vacuum key light
+  (the light rig's softness channel riding altitude).
+- **The limb:** below you, the planet's curve wears the atmosphere edge-on — a
+  thin **butterscotch band fringed with blue** over the black, the "rusty
+  edge," rendered by the same scattering table the surface sky uses, evaluated
+  along the tangent path. Real Mars-orbit photography shows exactly this band;
+  it is the poster of the game's upper half.
+- **The world from above:** the ballistic arc turns the real MOLA planet into
+  the game's grandest instrument — Valles Marineris as a scar you steer by,
+  the terminator crawling the plains, a global storm as a blinding ochre
+  cataract swallowing the geography. The orbital view **is** the chart page,
+  drawn live (the map and the world are one truth).
+- **The fall home:** re-entering the haze, colour floods back in — black to
+  violet to butterscotch — and the landing scour-ring hands you back to the
+  swirl register. The whole round trip is one continuous colour journey with
+  no cut, and it is the showreel shot.
+
+One truth, two readers, again: the scattering/τ parameter table drives the
+surface sky shader, the limb shader and the fog in lockstep, and
+`verify-marssky` asserts the three agree — Saltstead's wave-lockstep rule
+applied to the colour of the air.
+
+---
+
 ## Why Mars is the hard sibling
 
 Saltstead's planet is **99% flat water** — it skips deep-ocean tiles entirely and
@@ -609,9 +735,12 @@ slots into infrastructure built to hold it.
   here. *(Verify: `verify-mars`, `verify-marsterrain`, `verify-physics`; a
   `live-mars.mjs` puppeteer walk.)*
 - **Phase 1 — the planet.** Global MOLA baked + procedural skin, the USGS
-  gazetteer, `marssky` promoted from the landing page, the deterministic climate
-  model, tier-0→1 traversal (foot + buggy), day/night and dust devils. The
-  *beautiful and dangerous* pillar becomes visible here.
+  gazetteer, `marssky` promoted from the landing page, the `marslight` rig and
+  the first three dust registers (suspension/drift/swirl — `dust.js` +
+  `dustlayer.js`), the deterministic climate model, tier-0→1 traversal (foot +
+  buggy), day/night and dust devils. The *beautiful and dangerous* pillar — and
+  the look section that renders it — becomes visible here. (The storm register
+  lands in Phase 3 with the stakes that make it matter.)
 - **Phase 2 — the homestead.** The parts catalogue, grid/snap building, the
   resource sim (power/air/water/heat/fuel), prospecting instruments, drilling and
   refining — the survival loop closes. Tier-2 pressurised rover (the moving
