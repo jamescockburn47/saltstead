@@ -77,6 +77,16 @@ export class MapUI {
       if (e.code === 'KeyM' && !e.repeat) this.toggleWorld();
       if (e.code === 'Escape' && this.worldOpen) this.toggleWorld();
     });
+    // the phone's ways out: the ✕, or a tap on the backdrop outside the
+    // sheet (M and Esc live on no touchscreen). The backdrop ignores the
+    // first ~0.4 s — the tap that OPENS the chart also ghosts a click onto
+    // the overlay that now covers the button, and would slam it shut.
+    const closeBtn = document.getElementById('worldmapclose');
+    if (closeBtn) closeBtn.addEventListener('click', () => { if (this.worldOpen) this.toggleWorld(); });
+    this.worldWrap.addEventListener('click', (e) => {
+      if (e.target === this.worldWrap && this.worldOpen
+        && performance.now() - (this._openedAt || 0) > 400) this.toggleWorld();
+    });
 
     // click the chart, set a course: the world chart is a plain
     // equirectangular sheet, so the inversion is the projection backwards.
@@ -116,6 +126,7 @@ export class MapUI {
 
   toggleWorld() {
     this.worldOpen = !this.worldOpen;
+    if (this.worldOpen) this._openedAt = performance.now();
     this.worldWrap.style.display = this.worldOpen ? 'flex' : 'none';
   }
 
