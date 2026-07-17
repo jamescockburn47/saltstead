@@ -1,7 +1,7 @@
 {
   "name": "saltstead",
   "private": true,
-  "version": "0.0.26",
+  "version": "0.0.27",
   "type": "module",
   "description": "A procedural sea-rover game on a scaled real-world Earth — sibling to Moorstead",
   "scripts": {
