@@ -1191,7 +1191,8 @@ class Game {
     {
       const wll = worldToLatLon(this.ship.x, this.ship.z);
       this.wildlife.update(t, dt, this.ship.x, this.ship.z,
-        this.shipGroup.position.y + 11, this.ship.speed, this.coastDist, Math.abs(wll.lat));
+        this.shipGroup.position.y + 11, this.ship.speed, this.coastDist, Math.abs(wll.lat),
+        this.ship.yaw, this.shipFrame.scale);
     }
     const allContacts = this.contacts.concat(this.merchants.contacts())
       .concat(this.legendFx.contacts());
@@ -1539,7 +1540,7 @@ class Game {
     this.ocean.update(t, this.ship.x, this.ship.z, this.camera.position, glit,
       this.sky.domeUniforms.uHor.value, this.swell);
     this.foam.setLight(Math.min(1, sol.dayness
-      + 0.3 * sol.nightness * moonBrightness(moonPhase(skyT)) * Math.max(0, lun.alt)));
+      + 0.5 * sol.nightness * moonBrightness(moonPhase(skyT)) * Math.max(0, lun.alt)));
     if (this.gfxQuality === 'fine') {
       this.renderer.toneMappingExposure +=
         (exposureTarget(sol.dayness) - this.renderer.toneMappingExposure) * Math.min(1, dt * 0.4);

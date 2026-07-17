@@ -17,6 +17,20 @@ export function ambientSpecies(coastDist, latAbs) {
   };
 }
 
+// the pod's bow-wave stations, SHIP-LOCAL metres (bow +z, starboard +x,
+// same convention as shipframe.js). scale is the hull's frame scale (the
+// sloop is 1): the offsets ride OUTSIDE the deck's half-beam (1.55 * scale,
+// shipframe.js frameFor) whatever the rung — on the flagship the old fixed
+// 4.5 m offsets put the leaps INSIDE the planking. Alternate sides, spread
+// aft from just off the bow, where a real pod rides the pressure wave.
+export function podStation(i, scale = 1) {
+  const side = i % 2 ? 1 : -1;
+  return {
+    x: side * (1.55 * scale + 1.8 + i * 0.5),
+    z: 4.6 * scale - i * 1.4,
+  };
+}
+
 // the porpoising arc: phase in radians, one leap per 2*PI. Underwater cruise
 // at -1.2, a clean arc breaking the surface for ~a third of the cycle.
 export function porpoiseY(phase) {

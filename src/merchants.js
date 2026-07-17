@@ -37,8 +37,10 @@ export const TYPES = {
 export const CRUISE = TYPES.trader.cruise; // the old names still mean the old ship
 export const PANIC = TYPES.trader.panic;
 
-// deterministic spawn specs for one cell: [] or 1–3 ships, roughly 1.3 a
-// cell (playtest: the old half-empty table made the ocean feel dead).
+// deterministic spawn specs for one cell: [] or 1–4 ships, roughly 2.5 a
+// cell (playtest twice now: the 1.5-a-cell table still left five-minute
+// legs without a sail — the lanes should feel WORKED, an encounter should
+// be the expectation, not the event).
 // Inside the Bermuda Triangle the lanes go QUIET and the derelicts drift.
 //
 // A ship whose rolled berth lands on/near land RE-ROLLS at other
@@ -48,7 +50,7 @@ export const PANIC = TYPES.trader.panic;
 const BERTH_TRIES = 6;
 export function cellMerchants(cx, cz) {
   const roll = unit2(cx * 3.7, cz * 9.1);
-  const count = roll < 0.12 ? 0 : roll < 0.5 ? 1 : roll < 0.85 ? 2 : 3;
+  const count = roll < 0.06 ? 0 : roll < 0.28 ? 1 : roll < 0.62 ? 2 : roll < 0.9 ? 3 : 4;
   const out = [];
   for (let i = 0; i < count; i++) {
     let x = 0, z = 0, afloat = false;

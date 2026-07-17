@@ -9,11 +9,14 @@ import {
   solarState, lunarState, moonPhase, celestialAngles,
   STAR_CATALOGUE, raDecToEq, starField,
 } from './skymath.js';
+import { moonBrightness, moonlitNight } from './lightrig.js';
 
 const DOME_R = 560, STAR_R = 480;
 
 const DAY_ZENITH = new THREE.Color(0x3f7ac2), DAY_HORIZON = new THREE.Color(0x9ecbea);
 const NIGHT_ZENITH = new THREE.Color(0x060a18), NIGHT_HORIZON = new THREE.Color(0x101a2e);
+// what a bright moon lifts the night dome toward: slate, not grey
+const MOONLIT_ZENITH = new THREE.Color(0x14203a), MOONLIT_HORIZON = new THREE.Color(0x283a54);
 const GOLD = new THREE.Color(0xf2a45c);
 // real weather's grey: overcast/rain/storm pull the dome toward these
 const GLOOM_ZENITH = new THREE.Color(0x5a6672), GLOOM_HORIZON = new THREE.Color(0x8a939c);
@@ -99,20 +102,25 @@ export class Sky {
     this.sun.intensity = 1.5 * sol.dayness * (1 - 0.6 * gloom);
     this.moonLight.position.set(lun.dir[0] * 100, Math.abs(lun.dir[1]) * 100, lun.dir[2] * 100).add(center);
     this.moonLight.target.position.copy(center);
-    // full moon lights the sea; new moon leaves it black
-    const moonUp = Math.max(0, lun.alt);
-    this.moonLight.intensity = 0.22 * sol.nightness * moonUp
-      * (0.15 + 0.85 * (1 - Math.abs(moonPhase(t) - 0.5) * 2));
-    this.hemi.intensity = (0.2 + 0.7 * sol.dayness) * (1 - 0.3 * gloom);
+    // full moon lights the sea; new moon leaves it black. moonlitNight
+    // (lightrig.js, verify-gated) sets how far the moon lifts the dark —
+    // gloom mutes it: cloud stands between the deck and the moon too.
+    const ml = moonlitNight(sol.nightness, lun.alt, moonBrightness(moonPhase(t)));
+    this.moonLight.intensity = ml.moonInt * (1 - 0.7 * gloom);
+    this.hemi.intensity = (0.2 + 0.7 * sol.dayness) * (1 - 0.3 * gloom)
+      + ml.hemiLift * (1 - 0.7 * gloom);
 
     // golden hour warms the sun
     this.sun.color.setHex(0xfff2d8).lerp(GOLD, sol.golden * 0.7);
 
     // dome + fog + background; gloom greys the day (scaled by dayness so a
     // stormy NIGHT stays black, not grey)
-    this.domeUniforms.uZen.value.copy(NIGHT_ZENITH).lerp(DAY_ZENITH, sol.dayness)
+    const domeLift = ml.domeLift * (1 - gloom);
+    this.domeUniforms.uZen.value.copy(NIGHT_ZENITH).lerp(MOONLIT_ZENITH, domeLift)
+      .lerp(DAY_ZENITH, sol.dayness)
       .lerp(GLOOM_ZENITH, gloom * sol.dayness);
-    this.domeUniforms.uHor.value.copy(NIGHT_HORIZON).lerp(DAY_HORIZON, sol.dayness)
+    this.domeUniforms.uHor.value.copy(NIGHT_HORIZON).lerp(MOONLIT_HORIZON, domeLift)
+      .lerp(DAY_HORIZON, sol.dayness)
       .lerp(GOLD, sol.golden * 0.5)
       .lerp(GLOOM_HORIZON, gloom * sol.dayness);
     this._bg.copy(this.domeUniforms.uHor.value);

@@ -1,7 +1,7 @@
 // verify-light: the light-dynamics drives. Eye adaptation eases the right
 // way, the glitter blade follows the sun by day and hands to the moon by
 // night, a new moon leaves the sea dark, and every azimuth is unit length.
-import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness } from '../src/lightrig.js';
+import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness, moonlitNight } from '../src/lightrig.js';
 import { solarState, lunarState, moonPhase, DAY_LENGTH, MOON_MONTH_DAYS } from '../src/skymath.js';
 
 let failed = 0;
@@ -50,6 +50,24 @@ ok(Math.abs(moonBrightness(0.5) - 1) < 1e-9, 'full moon peak');
   const dark = glitterSource(solarState(0), lunarState(0), moonBrightness(0));
   // t=0: new moon rides WITH the sun — both are down at midnight
   ok(dark.amp === 0, 'new-moon midnight sea is dark');
+}
+
+// the moonlit night: a full moon overhead LIGHTS the scene, a new moon
+// leaves it black, a set moon contributes nothing, and daylight owns the day
+{
+  const full = moonlitNight(1, 0.8, moonBrightness(0.5));
+  ok(full.moonInt > 0.5, `full moon lights the sea (${full.moonInt.toFixed(2)})`);
+  ok(full.hemiLift > 0.2, `and bounces into the ambient (${full.hemiLift.toFixed(2)})`);
+  ok(full.domeLift > 0.7, `and lifts the dome toward slate (${full.domeLift.toFixed(2)})`);
+  const nw = moonlitNight(1, 0.8, moonBrightness(0));
+  ok(nw.moonInt < 0.15 && nw.domeLift < 0.25,
+    `new-moon night stays near black (${nw.moonInt.toFixed(2)})`);
+  ok(nw.moonInt < full.moonInt && nw.hemiLift < full.hemiLift, 'phase scales the light');
+  const down = moonlitNight(1, -0.2, 1);
+  ok(down.moonInt === 0 && down.hemiLift === 0 && down.domeLift === 0,
+    'a set moon lights nothing');
+  const day = moonlitNight(0, 0.8, 1);
+  ok(day.moonInt === 0 && day.hemiLift === 0, 'daylight owns the day');
 }
 
 if (failed) { console.error(`verify-light: ${failed} FAILED`); process.exit(1); }

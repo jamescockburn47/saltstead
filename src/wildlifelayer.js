@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { waveHeight } from './waves.js';
-import { ambientSpecies, porpoiseY, porpoisePitch, circlePos, flapAngle } from './wildlife.js';
+import { ambientSpecies, porpoiseY, porpoisePitch, circlePos, flapAngle, podStation } from './wildlife.js';
 
 const GREY = new THREE.MeshPhongMaterial({ color: 0x8fa3ad, flatShading: true });
 const DARK = new THREE.MeshPhongMaterial({ color: 0x4a5860, flatShading: true });
@@ -70,8 +70,10 @@ export class WildlifeLayer {
     this.finDrift = { x: 0, z: 0 };
   }
 
-  // sx/sz: ship; mastTop: world y of the masthead; speed: hull m/s
-  update(t, dt, sx, sz, mastTop, speed, coastDist, latAbs) {
+  // sx/sz: ship; mastTop: world y of the masthead; speed: hull m/s;
+  // yaw/scale: the hull's heading and frame scale (shipframe.js) — the pod
+  // stations in the ship's own frame so the leaps clear any hull on the ladder
+  update(t, dt, sx, sz, mastTop, speed, coastDist, latAbs, yaw = 0, scale = 1) {
     const spec = ambientSpecies(coastDist, latAbs);
 
     // gulls wheel about the masthead — land is close
@@ -97,18 +99,22 @@ export class WildlifeLayer {
       this.alba.wl.rotation.z = f * 0.3; this.alba.wr.rotation.z = -f * 0.3;
     }
 
-    // dolphins ride the bow wave when you're making way offshore
+    // dolphins ride the bow wave when you're making way offshore — stationed
+    // in the SHIP's frame (podStation, verify-gated) so the leaps stay clear
+    // of the planking on every hull, and they face the way she sails
     const podOn = spec.dolphins && speed > 2.5;
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
     for (let i = 0; i < POD; i++) {
       const d = this.pod[i];
       d.visible = podOn;
       if (!podOn) continue;
-      const side = i % 2 ? 1 : -1;
-      const lag = 2 + i * 1.6;
+      const st = podStation(i, scale);
+      const lx = st.x + Math.sin(t * 0.5 + i * 2.1) * 0.5;
+      const lz = st.z + Math.sin(t * 0.4 + i) * 1.2;
+      const px = sx + lx * cy + lz * sy, pz = sz - lx * sy + lz * cy;
       const phase = t * 2.4 + i * 1.3;
-      const px = sx + side * (4.5 + i * 0.6), pz = sz - lag + Math.sin(t * 0.4 + i) * 1.2;
       d.position.set(px, waveHeight(px, pz, t) + porpoiseY(phase), pz);
-      d.rotation.set(porpoisePitch(phase), 0, 0);
+      d.rotation.set(porpoisePitch(phase), yaw, 0, 'YXZ');
     }
 
     // the fin circles a slow drift near an idling hull in warm shallows

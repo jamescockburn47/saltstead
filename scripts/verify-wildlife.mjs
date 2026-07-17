@@ -1,7 +1,7 @@
 // verify-wildlife: every species is a navigation instrument — gulls mean
 // land, the albatross means blue water, the fin means warm shallows — and
 // the motion maths stays inside its envelopes.
-import { ambientSpecies, porpoiseY, porpoisePitch, circlePos, flapAngle } from '../src/wildlife.js';
+import { ambientSpecies, porpoiseY, porpoisePitch, circlePos, flapAngle, podStation } from '../src/wildlife.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -30,6 +30,22 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
   ok(mn >= -1.5, `the dive stays shallow (floor ${mn.toFixed(2)})`);
   ok(Math.abs(porpoiseY(0) - porpoiseY(Math.PI * 2)) < 1e-9, 'the cycle closes');
   ok(porpoisePitch(0.5) > 0 && porpoisePitch(Math.PI - 0.5) < 0, 'nose up rising, nose down falling');
+}
+
+// the pod stations clear the planking on EVERY rung of the shipyard ladder
+// (hull lengths 9..30 -> frame scale 1..3.33; deck half-beam is 1.55*scale,
+// shipframe.js) — the regression was leaps INSIDE the flagship's hull
+{
+  for (const len of [9, 11, 13, 16, 19, 24, 30]) {
+    const s = len / 9;
+    for (let i = 0; i < 4; i++) {
+      const st = podStation(i, s);
+      ok(Math.abs(st.x) > 1.55 * s + 1,
+        `pod ${i} clears the beam at length ${len} (|x| ${Math.abs(st.x).toFixed(1)} vs half-beam ${(1.55 * s).toFixed(1)})`);
+    }
+  }
+  ok(podStation(0, 1).x * podStation(1, 1).x < 0, 'the pod rides both sides');
+  ok(podStation(0, 1).z > podStation(3, 1).z, 'and spreads aft from the bow');
 }
 
 // circling: on the circle, heading tangent

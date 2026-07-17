@@ -31,11 +31,11 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
       }
     }
   }
-  // playtest density: a five-minute blue-water leg must MEET somebody. The
-  // sample swath crosses continents (the land veto eats those cells), so
-  // ~0.7/cell here means the honest OCEAN cells carry better than one sail
-  // each — double the pre-playtest table.
-  ok(total >= 40, `the lanes are busy (${total} ships in 64 mixed cells)`);
+  // playtest density, round two: an encounter should be the expectation,
+  // not the event. The sample swath crosses continents (the land veto eats
+  // those cells), so ~1.2/cell here means the honest OCEAN cells carry
+  // about two and a half sails each — up from ~1.5 after the first playtest.
+  ok(total >= 75, `the lanes are busy (${total} ships in 64 mixed cells)`);
   ok(seen.trader > 0, 'traders work the lanes');
 }
 
@@ -56,7 +56,7 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
         if (d <= ACTIVE_R) { n++; nearest = Math.min(nearest, d); }
       }
     }
-    ok(n >= 3, `${name}: the waters are worked (${n} sails within ${ACTIVE_R} m)`);
+    ok(n >= 5, `${name}: the waters are worked (${n} sails within ${ACTIVE_R} m)`);
     ok(nearest <= LOOKOUT_R * 1.5,
       `${name}: someone near the lookout's reach (nearest ${Math.round(nearest)} m)`);
   }

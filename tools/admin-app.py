@@ -8,8 +8,15 @@ revoke, move room, approve invite — is proxied straight back to the ledger
 that owns the file. If a ledger is down, its panel says so and the rest of
 the board keeps working.
 
+The page is a four-tab office (redesign 2026-07-17): OVERVIEW opens on the
+mint desk — the tokens you hand players are the thing you come here FOR —
+with ready-to-hand-out unclaimed codes and at-a-glance health; SALTSTEAD
+and MOORSTEAD carry each game's full ledger; SERVER carries the EVO's
+vitals and units. Tab badges surface what needs a decision (invites
+waiting, fresh bugs, units down) from anywhere.
+
 Deployed at ~/admin/app.py on the EVO (repo copy: Saltstead tools/admin-app.py).
-Unit: evo-admin.service.
+Unit: evo-admin.service (enabled — the board must survive a reboot).
 """
 import json
 import re
@@ -182,22 +189,53 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 }
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:'Segoe UI',system-ui,sans-serif;
-  margin:0;padding:22px;line-height:1.45}
-.wrap{max-width:1180px;margin:0 auto}
-h1{color:var(--gold);letter-spacing:3px;font-size:22px;margin:0}
-.sub{color:var(--dim);font-style:italic;margin:2px 0 18px;font-size:13px}
+  margin:0;line-height:1.45}
+.wrap{max-width:1180px;margin:0 auto;padding:0 22px 26px}
+header.top{position:sticky;top:0;z-index:10;background:rgba(13,17,23,.97);
+  border-bottom:1px solid var(--line)}
+header.top .inner{max-width:1180px;margin:0 auto;padding:12px 22px 0;
+  display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px}
+h1{color:var(--gold);letter-spacing:3px;font-size:19px;margin:0}
+.tagline{color:var(--dim);font-size:12px;font-style:italic}
+.stamp{color:var(--dim);font-size:11px;margin-left:auto}
+nav.tabs{max-width:1180px;margin:0 auto;padding:4px 22px 0;display:flex;gap:2px;flex-wrap:wrap}
+nav.tabs button{background:none;border:none;border-bottom:3px solid transparent;
+  color:var(--dim);padding:7px 14px 9px;font-size:14px;font-weight:600;
+  letter-spacing:1px;cursor:pointer;border-radius:0}
+nav.tabs button:hover{color:var(--ink);background:none}
+nav.tabs button.on{color:#eef3f6;border-bottom-color:var(--gold)}
+nav.tabs button.t-salt.on{border-bottom-color:var(--sea)}
+nav.tabs button.t-moor.on{border-bottom-color:var(--moor)}
+nav.tabs .badge{background:#4a2620;color:#e8a294;border-radius:10px;
+  padding:0 7px;font-size:11px;margin-left:6px;font-weight:600}
+nav.tabs .dot{display:inline-block;width:8px;height:8px;border-radius:50%;
+  margin-left:7px;background:var(--moor);vertical-align:1px}
+nav.tabs .dot.bad{background:var(--bad)}
+.tab{display:none;padding-top:12px}.tab.on{display:block}
 .cards{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;
   padding:10px 16px;min-width:128px;flex:0 1 auto}
 .card .v{font-size:21px;font-weight:700;color:#eef3f6;white-space:nowrap}
 .card .k{font-size:11px;color:var(--dim);margin-top:1px}
+.card.click{cursor:pointer}
+.card.click:hover{border-color:#3a5878}
 .bar{height:5px;background:#233041;border-radius:3px;margin-top:7px;overflow:hidden}
 .bar i{display:block;height:100%;background:var(--moor)}
 .bar i.hot{background:var(--bad)}
 .ok{color:var(--moor)}.bad{color:var(--bad)}.warn{color:var(--warn)}
 .muted{color:var(--dim);font-size:12px}
+.desk{border:1px solid #4a3d1c;border-left:4px solid var(--gold);border-radius:10px;
+  background:linear-gradient(180deg,#1a1509,#131a23 75%);padding:14px 20px 16px;margin:14px 0}
+.desk h3{margin:0 0 1px;color:var(--gold);letter-spacing:2px;font-size:14px}
+.desk .tag{color:var(--dim);font-size:12px;font-style:italic}
+.desk .mints{display:flex;gap:28px;flex-wrap:wrap;margin-top:12px}
+.mintcol{display:flex;flex-direction:column;gap:8px;min-width:220px}
+.mintcol .lbl{font-size:11px;letter-spacing:1.5px;color:var(--dim);text-transform:uppercase;font-weight:700}
+.mintcol .lbl.salt{color:var(--sea)}.mintcol .lbl.moor{color:var(--moor)}
+.mintcol .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.handout{margin-top:4px;font-size:13px;line-height:2}
 section.game{border:1px solid var(--line);border-radius:10px;background:var(--panel);
-  padding:16px 20px 12px;margin:22px 0}
+  padding:16px 20px 12px;margin:14px 0}
 section.game.salt{border-left:4px solid var(--sea)}
 section.game.moor{border-left:4px solid var(--moor)}
 section.game>h2{margin:0 0 2px;font-size:17px;letter-spacing:2px}
@@ -230,7 +268,7 @@ button.gold:hover{background:#4c3f1c}
 select{background:#1a2c40;color:var(--ink);border:1px solid #2c4763;border-radius:5px;
   padding:5px 8px;font-size:13px}
 .mintrow{display:flex;gap:10px;align-items:center;margin:10px 0 4px;flex-wrap:wrap}
-#mintbanner{display:none;margin:12px 0;padding:12px 16px;border:1px solid #6a5726;
+#mintbanner{display:none;margin:12px 0 0;padding:12px 16px;border:1px solid #6a5726;
   border-radius:8px;background:#241f10}
 #mintbanner code{font-size:20px}
 .fbmsg{white-space:pre-wrap;max-width:640px}
@@ -240,19 +278,23 @@ select{background:#1a2c40;color:var(--ink);border:1px solid #2c4763;border-radiu
   padding:8px 12px;margin:6px 0;font-size:13px}
 .natter b{color:var(--warn)}.you{color:var(--moor)}.them{color:var(--ink)}
 .pid{color:var(--dim);font-size:11px;font-family:Consolas,monospace}
-.stamp{color:var(--dim);font-size:11px;text-align:right;margin-top:16px}
-</style></head><body><div class="wrap">
+</style></head><body>
+<header class="top"><div class="inner">
 <h1>THE ADMIRALTY BOARD</h1>
-<div class="sub">Moorstead &amp; Saltstead, one ledger office. LAN / Tailscale only — refreshes every 15 s.</div>
+<span class="tagline">one ledger office, both games &mdash; LAN / Tailscale only</span>
+<span class="stamp" id="stamp"></span></div>
+<nav class="tabs" id="tabs"></nav>
+</header>
+<div class="wrap">
 <div id="mintbanner"></div>
-<div id="content" class="muted">Fetching the ledgers&hellip;</div>
-<div class="stamp" id="stamp"></div>
+<div id="content" class="muted" style="padding-top:14px">Fetching the ledgers&hellip;</div>
+</div>
 <script>
 'use strict';
 const esc = s => String(s ?? '').replace(/[&<>"']/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ago = (now, t) => {
-  if (!t) return '\u2014';
+  if (!t) return '—';
   const s = now - t;
   if (s < 90) return Math.max(0, Math.round(s)) + 's ago';
   if (s < 5400) return Math.round(s / 60) + 'm ago';
@@ -284,7 +326,7 @@ async function post(url, body) {
 function minted(label, code) {
   const b = document.getElementById('mintbanner');
   b.style.display = 'block';
-  b.innerHTML = 'Freshly minted \u2014 ' + esc(label) + ': <code>' + esc(code) + '</code> ' +
+  b.innerHTML = 'Freshly minted — ' + esc(label) + ': <code>' + esc(code) + '</code> ' +
     '<button class="small" onclick="copyCode(\'' + esc(code) + '\', this)">copy</button> ' +
     '<button class="small" style="float:right" onclick="this.parentNode.style.display=\'none\'">dismiss</button>';
 }
@@ -300,8 +342,10 @@ async function saltRevoke(code) {
   await post('/api/salt/revoke', { code });
   refresh();
 }
-async function moorMint() {
-  const room = document.getElementById('moorroom').value;
+// the room select nearest the button pressed wins (mint desk + moor tab both carry one)
+async function moorMint(btn) {
+  const sel = btn.closest('.row, .mintrow').querySelector('select.moorroom');
+  const room = sel ? sel.value : 'moor';
   const d = await post('/api/moor/mint', { room });
   if (d.ok) minted('Moorstead invite (' + d.room + ')', d.code);
   else alert(d.err || 'mint failed');
@@ -331,6 +375,46 @@ async function moorInvite(id, action) {
   refresh();
 }
 
+// ---- tabs: sticky nav, remembered across visits ----
+const TABS = [
+  ['overview', 'OVERVIEW', ''],
+  ['salt', 'SALTSTEAD', 't-salt'],
+  ['moor', 'MOORSTEAD', 't-moor'],
+  ['server', 'SERVER', ''],
+];
+let activeTab = localStorage.getItem('ab-tab') || 'overview';
+function setTab(id) {
+  activeTab = id;
+  localStorage.setItem('ab-tab', id);
+  for (const [tid] of TABS) {
+    const sec = document.getElementById('tab-' + tid);
+    if (sec) sec.classList.toggle('on', tid === activeTab);
+    const btn = document.getElementById('tabbtn-' + tid);
+    if (btn) btn.classList.toggle('on', tid === activeTab);
+  }
+}
+function tabBar(D) {
+  const S = D.salt || {}, M = D.moor || {}, O = M.overview || {};
+  const pend = ((O.inviteRequests || {}).pending || []).length;
+  const saltBugs = (S.feedback || []).filter(f => f.kind === 'bug' && D.now - f.ts < 86400).length;
+  const moorBugs = ((O.feedback) || []).filter(f => f.kind === 'bug' && D.now - f.ts < 86400).length;
+  const downN = Object.values(D.services || {}).filter(v => v !== 'active').length;
+  const badge = n => n ? '<span class="badge">' + n + '</span>' : '';
+  const dot = up => '<span class="dot' + (up ? '' : ' bad') + '"></span>';
+  const extras = {
+    overview: badge(pend + saltBugs + moorBugs + downN),
+    salt: dot(S.up) + badge(saltBugs),
+    moor: dot(M.up) + badge(pend + moorBugs),
+    server: badge(downN),
+  };
+  let h = '';
+  for (const [id, label, cls] of TABS) {
+    h += '<button id="tabbtn-' + id + '" class="' + cls + (id === activeTab ? ' on' : '') +
+      '" onclick="setTab(\'' + id + '\')">' + label + (extras[id] || '') + '</button>';
+  }
+  document.getElementById('tabs').innerHTML = h;
+}
+
 // details panels keep their open/closed state across refreshes; on the very
 // first render a few sensible ones start open
 let firstRender = true;
@@ -343,7 +427,7 @@ function det(id, title, count, inner, alert) {
     (count != null ? ' <span class="count' + (alert ? ' alert' : '') + '">' + count + '</span>' : '') +
     '</summary>' + inner + '</details>';
 }
-function fbTable(now, fb, game) {
+function fbTable(now, fb) {
   if (!fb.length) return '<div class="muted">Nothing on the ledger.</div>';
   let h = '<table><tr><th>When</th><th>Kind</th><th>From</th><th>Message</th></tr>';
   for (const f of fb) {
@@ -353,7 +437,7 @@ function fbTable(now, fb, game) {
       .map(([k, v]) => k + ': ' + (typeof v === 'object' ? JSON.stringify(v) : v)).join('\n');
     h += '<tr><td class="muted" style="white-space:nowrap">' + ago(now, f.ts) + '</td>' +
       '<td class="' + (f.kind === 'bug' ? 'bad' : 'ok') + '">' + esc(f.kind) + '</td>' +
-      '<td class="muted">' + (who || '\u2014') + '</td>' +
+      '<td class="muted">' + (who || '—') + '</td>' +
       '<td><div class="fbmsg">' + esc(f.message) + '</div>' +
       (ctx || c.ua ? '<details><summary class="muted" style="font-weight:400">context</summary>' +
         '<div class="fbctx">' + esc(ctx) + (c.ua ? '\nua: ' + esc(c.ua) : '') + '</div></details>' : '') +
@@ -362,13 +446,190 @@ function fbTable(now, fb, game) {
   return h + '</table>';
 }
 
-function render(D) {
-  const open = openSet();
-  const now = D.now, s = D.sys || {};
+// the mint desk's ready-to-hand-out shelf: unclaimed codes, copy at hand
+function handoutShelf(codes, copyable) {
+  const un = codes.filter(c => !c.name);
+  if (!un.length) return '<div class="muted">none spare — mint one</div>';
+  let h = '<div class="handout">';
+  for (const c of un.slice(0, 6)) {
+    h += '<code>' + esc(c.code) + '</code>' + (c.warden ? ' <span class="warden">W</span>' : '') +
+      (c.room ? ' <span class="muted">' + esc(c.room) + '</span>' : '') +
+      ' <button class="small" onclick="copyCode(\'' + esc(c.code) + '\', this)">copy</button><br>';
+  }
+  if (un.length > 6) h += '<span class="muted">+' + (un.length - 6) + ' more on the game tab</span>';
+  return h + '</div>';
+}
+
+function saltCodesTable(now, codes) {
+  let t = '<table><tr><th>Code</th><th>Standing</th><th>Claimed by</th><th>Last seen</th><th></th></tr>';
+  for (const c of codes) {
+    t += '<tr><td><code>' + esc(c.code) + '</code> <button class="small" onclick="copyCode(\'' + esc(c.code) + '\', this)">copy</button></td>' +
+      '<td>' + (c.warden ? '<span class="warden">WARDEN</span>' : 'crew') + '</td>' +
+      '<td>' + (c.name ? esc(c.name) : '<span class="unclaimed">unclaimed</span>') + '</td>' +
+      '<td class="muted">' + ago(now, c.last) + '</td>' +
+      '<td><button class="small danger" onclick="saltRevoke(\'' + esc(c.code) + '\')">revoke</button></td></tr>';
+  }
+  return t + '</table>';
+}
+function moorCodesTable(now, codes) {
+  let t = '<table><tr><th>Code</th><th>Room</th><th>Claimed by</th><th>Last seen</th><th></th></tr>';
+  for (const c of codes) {
+    t += '<tr><td><code>' + esc(c.code) + '</code> <button class="small" onclick="copyCode(\'' + esc(c.code) + '\', this)">copy</button></td>' +
+      '<td><b>' + esc(c.room) + '</b></td>' +
+      '<td>' + (c.name ? esc(c.name) : '<span class="unclaimed">unclaimed</span>') + '</td>' +
+      '<td class="muted">' + ago(now, c.last) + '</td>' +
+      '<td><button class="small" onclick="moorMove(\'' + esc(c.code) + '\',\'' + esc(c.room) + '\')">move</button> ' +
+      '<button class="small danger" onclick="moorRevoke(\'' + esc(c.code) + '\')">revoke</button></td></tr>';
+  }
+  return t + '</table>';
+}
+const ROOMSEL = '<select class="moorroom"><option>moor</option><option>dale</option>' +
+  '<option>crag</option><option>tarn</option><option>bairns</option></select>';
+
+// ---- OVERVIEW: the mint desk first, then what needs a decision ----
+function renderOverview(D) {
+  const S = D.salt || {}, M = D.moor || {}, O = M.overview || {};
   let h = '';
 
-  // ---- the EVO itself ----
-  h += '<div class="cards">';
+  // THE MINT — the reason the office exists
+  h += '<div class="desk"><h3>THE MINT</h3>' +
+    '<div class="tag">strike a token, copy it, hand it to a player — the code IS the account</div>' +
+    '<div class="mints">';
+  h += '<div class="mintcol"><span class="lbl salt">Saltstead</span><div class="row">' +
+    '<button onclick="saltMint(false)">Mint crew invite</button>' +
+    '<button class="gold" onclick="saltMint(true)">Mint WARDEN</button></div>' +
+    '<span class="muted">wardens get the gold hatband and the Y-key shipyard</span>' +
+    (S.up ? handoutShelf(S.codes, true) : '<div class="down">ledger down</div>') + '</div>';
+  h += '<div class="mintcol"><span class="lbl moor">Moorstead</span><div class="row">' +
+    ROOMSEL + '<button onclick="moorMint(this)">Mint invite</button></div>' +
+    '<span class="muted">moor/dale/crag/tarn are grown-up rooms; bairns is the kids’ world</span>' +
+    (M.up ? handoutShelf(M.codes || [], true) : '<div class="down">ledger down</div>') + '</div>';
+  h += '</div></div>';
+
+  // what needs a decision / a glance
+  const pend = (O.inviteRequests || {}).pending || [];
+  const saltBugs = (S.feedback || []).filter(f => f.kind === 'bug' && D.now - f.ts < 86400).length;
+  const moorBugs = (O.feedback || []).filter(f => f.kind === 'bug' && D.now - f.ts < 86400).length;
+  const downN = Object.values(D.services || {}).filter(v => v !== 'active').length;
+  const live = O.live || [], st = O.stats || {};
+  const claimed = (S.codes || []).filter(c => c.name).length;
+  h += '<div class="cards">' +
+    '<div class="card click" onclick="setTab(\'moor\')"><div class="v' + (pend.length ? ' warn' : '') + '">' + pend.length + '</div><div class="k">invites waiting approval</div></div>' +
+    '<div class="card click" onclick="setTab(\'salt\')"><div class="v' + (saltBugs ? ' bad' : '') + '">' + saltBugs + '</div><div class="k">Saltstead bugs (24h)</div></div>' +
+    '<div class="card click" onclick="setTab(\'moor\')"><div class="v' + (moorBugs ? ' bad' : '') + '">' + moorBugs + '</div><div class="k">Moorstead bugs (24h)</div></div>' +
+    '<div class="card click" onclick="setTab(\'server\')"><div class="v' + (downN ? ' bad' : ' ok') + '">' + (downN ? downN + ' down' : 'all up') + '</div><div class="k">services</div></div>' +
+    '<div class="card click" onclick="setTab(\'moor\')"><div class="v">' + live.length + '</div><div class="k">on t’ moor now</div></div>' +
+    '<div class="card click" onclick="setTab(\'moor\')"><div class="v">' + (st.today ?? 0) + '</div><div class="k">Moorstead active today</div></div>' +
+    '<div class="card click" onclick="setTab(\'salt\')"><div class="v">' + claimed + ' / ' + (S.codes || []).length + '</div><div class="k">Saltstead codes claimed</div></div>' +
+    '</div>';
+  h += '<div class="muted">Everything else lives on its game’s tab; the EVO’s vitals under SERVER. Refreshes every 15 s.</div>';
+  return h;
+}
+
+// ---- SALTSTEAD ----
+function renderSalt(D) {
+  const now = D.now, S = D.salt || {};
+  let h = '<section class="game salt"><h2>SALTSTEAD</h2><div class="tag">the harbourmaster’s ledger — letters of marque, one per player; the code IS the account</div>';
+  if (!S.up) return h + '<div class="down">saltstead-dash (:8097) is not answering</div></section>';
+  const claimed = S.codes.filter(c => c.name).length;
+  const wardens = S.codes.filter(c => c.warden).length;
+  h += '<div class="cards">' +
+    '<div class="card"><div class="v">' + claimed + ' / ' + S.codes.length + '</div><div class="k">codes claimed</div></div>' +
+    '<div class="card"><div class="v">' + wardens + '</div><div class="k">warden codes</div></div>' +
+    '<div class="card"><div class="v">' + S.feedback.length + '</div><div class="k">recent feedback</div></div></div>';
+  h += '<div class="mintrow"><button onclick="saltMint(false)">Mint an invite</button>' +
+    '<button class="gold" onclick="saltMint(true)">Mint a WARDEN code</button>' +
+    '<span class="muted">wardens get the gold hatband and the Y-key shipyard</span></div>';
+  h += det('salt-codes', 'INVITE CODES', S.codes.length, saltCodesTable(now, S.codes));
+  h += det('salt-fb', 'FEEDBACK & BUGS', S.feedback.length, fbTable(now, S.feedback),
+    S.feedback.some(f => f.kind === 'bug' && now - f.ts < 86400));
+  return h + '</section>';
+}
+
+// ---- MOORSTEAD ----
+function renderMoor(D) {
+  const now = D.now, M = D.moor || {}, O = M.overview || {};
+  let h = '<section class="game moor"><h2>MOORSTEAD</h2><div class="tag">t’ parish ledger — players, natters an’ t’ brain</div>';
+  if (!M.up) return h + '<div class="down">moorstead-dash (:8095) is not answering</div></section>';
+  const st = O.stats || {}, live = O.live || [], t9 = O.talk || {};
+  h += '<div class="cards">' +
+    '<div class="card"><div class="v">' + live.length + '</div><div class="k">on t’ moor now</div></div>' +
+    '<div class="card"><div class="v">' + (st.today ?? 0) + '</div><div class="k">active today</div></div>' +
+    '<div class="card"><div class="v">' + (st.week ?? 0) + '</div><div class="k">active last 7 days</div></div>' +
+    '<div class="card"><div class="v">' + (st.total ?? 0) + '</div><div class="k">browsers ever seen</div></div>' +
+    '<div class="card"><div class="v ' + ((O.llm || {}).status === 'ok' ? 'ok' : 'bad') + '">' + ((O.llm || {}).status === 'ok' ? 'UP' : 'DOWN') + '</div><div class="k">villager brain (LLM)</div></div>' +
+    '<div class="card"><div class="v">' + (t9.talksLastHour ?? 0) + '</div><div class="k">chats last hour' + (t9.p95 ? ' · p95 ' + t9.p95 + 's' : '') + '</div></div>' +
+    '</div>';
+
+  // codes: the full mint/retrieve/revoke desk
+  h += '<div class="mintrow">' + ROOMSEL +
+    '<button onclick="moorMint(this)">Mint an invite</button>' +
+    '<span class="muted">moor/dale/crag/tarn are grown-up rooms; bairns is the kids’ world</span></div>';
+  h += det('moor-codes', 'INVITE CODES', (M.codes || []).length, moorCodesTable(now, M.codes || []));
+
+  // invite requests
+  const pend = (O.inviteRequests || {}).pending || [];
+  const dec = (O.inviteRequests || {}).recent || [];
+  let rq = '';
+  if (pend.length) {
+    rq += '<table><tr><th>When</th><th>Email</th><th>Name</th><th>Note</th><th>IP</th><th></th></tr>';
+    for (const r of pend) rq += '<tr><td class="muted">' + ago(now, r.ts) + '</td><td>' + esc(r.email) + '</td><td>' + esc(r.name || '') + '</td><td>' + esc(r.note || '') + '</td><td class="muted">' + esc(r.ip) + '</td>' +
+      '<td><button class="small" onclick="moorInvite(\'' + esc(r.id) + '\',\'approve\')">approve</button> <button class="small danger" onclick="moorInvite(\'' + esc(r.id) + '\',\'reject\')">reject</button></td></tr>';
+    rq += '</table>';
+  } else rq += '<div class="muted">None waiting.</div>';
+  if (dec.length) {
+    rq += '<div class="muted" style="margin-top:6px">Recent decisions</div><table><tr><th>When</th><th>Email</th><th>Status</th><th>Code</th><th>Room</th></tr>';
+    for (const r of dec) rq += '<tr><td class="muted">' + ago(now, r.approvedTs || r.closedTs || r.ts) + '</td><td>' + esc(r.email) + '</td><td>' + esc(r.status) + '</td><td class="pid">' + esc(r.code || '') + '</td><td>' + esc(r.room || '') + '</td></tr>';
+    rq += '</table>';
+  }
+  h += det('moor-req', 'INVITE REQUESTS', pend.length + ' waiting', rq, pend.length > 0);
+
+  h += det('moor-fb', 'FEEDBACK & BUGS', (O.feedback || []).length, fbTable(now, O.feedback || []),
+    (O.feedback || []).some(f => f.kind === 'bug' && now - f.ts < 86400));
+
+  // who's out, who's been
+  let lv = '';
+  if (!live.length) lv = '<div class="muted">Nob’dy out just now.</div>';
+  else {
+    lv = '<table><tr><th>Name</th><th>Where</th><th>Day</th><th>Standing</th><th>Croft</th><th>Ventures</th><th>Seen</th></tr>';
+    for (const x of live) lv += '<tr><td class="ok"><b>' + esc(x.name || '(nameless)') + '</b></td><td>' + esc(x.loc) + '</td><td>' + x.day + '</td><td>' + esc(x.standing) + '</td><td>' + x.croft + '/4</td><td>' + x.quests + '</td><td class="muted">' + ago(now, x.ts) + '</td></tr>';
+    lv += '</table>';
+  }
+  h += det('moor-live', 'ON T’ MOOR NOW', live.length, lv, false);
+
+  const ps = Object.entries(O.players || {}).sort((a, b) =>
+    ((b[1].visitDays || []).length - (a[1].visitDays || []).length) || (b[1].last - a[1].last));
+  let pl = '<table><tr><th>Name(s)</th><th>Days</th><th>Visits</th><th>Minutes</th><th>Worlds</th><th>Last IP</th><th>Last seen</th><th>id</th></tr>';
+  for (const [pid, p] of ps) pl += '<tr><td>' + esc((p.names || []).join(', ') || '(nameless)') + '</td><td>' + (p.visitDays || []).length + '</td><td>' + (p.visits || 0) + '</td><td>' + (p.minutes || 0) + '</td><td>' + Object.keys(p.worlds || {}).length + '</td><td class="muted">' + esc(p.lastIp || '') + '</td><td class="muted">' + ago(now, p.last) + '</td><td class="pid">' + esc(pid.slice(0, 12)) + '</td></tr>';
+  pl += '</table>';
+  h += det('moor-players', 'ALL PLAYERS & BROWSERS', ps.length, pl);
+
+  let nat = '';
+  for (const c of (O.conversations || []).slice(0, 8)) {
+    nat += '<div class="natter"><span class="pid">' + esc(c.pid.slice(0, 18)) + '</span> — <span class="muted">' + ago(now, c.mtime) + '</span>';
+    for (const ch of (c.chars || [])) {
+      nat += '<div style="margin-top:6px"><b>' + esc((ch.playerName ? ch.playerName + ' ↔ ' : '') + ch.char.replace('char_', 'villager ')) + '</b> <span class="muted">(trust ' + ch.trust + ')</span>';
+      if (ch.summary) nat += '<div class="muted" style="font-style:italic">remembers: ' + esc(ch.summary) + '</div>';
+      for (const m of (ch.last || [])) nat += '<div class="' + (m.role === 'user' ? 'you' : 'them') + '">' + (m.role === 'user' ? '▸ ' : '◂ ') + esc(m.text) + '</div>';
+      nat += '</div>';
+    }
+    nat += '</div>';
+  }
+  h += det('moor-nat', 'LATEST NATTERS', (O.conversations || []).length, nat || '<div class="muted">Quiet on t’ moor.</div>');
+
+  let tr = '<table><tr><th>When</th><th>Event</th><th>Name</th><th>IP</th><th>Browser id</th></tr>';
+  for (const v of (O.recentVisits || [])) tr += '<tr><td class="muted">' + ago(now, v.ts) + '</td><td>' + esc(v.event) + '</td><td>' + esc(v.name || '(anon)') + '</td><td class="muted">' + esc(v.ip) + '</td><td class="pid">' + esc((v.pid || '').slice(0, 12)) + '</td></tr>';
+  tr += '</table><div class="muted">Backend traffic by IP (Caddy log)</div><table><tr><th>IP</th><th>Requests</th><th>First</th><th>Last</th></tr>';
+  for (const v of (O.visitors || []).slice(0, 30)) tr += '<tr><td>' + esc(v.ip) + '</td><td>' + v.n + '</td><td class="muted">' + ago(now, v.first) + '</td><td class="muted">' + ago(now, v.last) + '</td></tr>';
+  tr += '</table>';
+  h += det('moor-traffic', 'SITE ACTIVITY & TRAFFIC', (O.recentVisits || []).length, tr);
+  return h + '</section>';
+}
+
+// ---- SERVER: the EVO's own vitals + every unit ----
+function renderServer(D) {
+  const s = D.sys || {};
+  let h = '<div class="cards">';
   if (s.load) h += '<div class="card"><div class="v">' + s.load[0] + '</div><div class="k">CPU load (1m) / ' + s.cores + ' cores</div>' + bar(s.load[0], s.cores) + '</div>';
   if (s.memUsedGB !== undefined) h += '<div class="card"><div class="v">' + s.memUsedGB + ' / ' + s.memTotalGB + ' GB</div><div class="k">system RAM (CPU side of UMA)</div>' + bar(s.memUsedGB, s.memTotalGB) + '</div>';
   if (s.vramUsedGB !== undefined) h += '<div class="card"><div class="v">' + s.vramUsedGB + ' / ' + s.vramTotalGB + ' GB</div><div class="k">GPU pool (models live here)</div>' + bar(s.vramUsedGB, s.vramTotalGB) + '</div>';
@@ -382,129 +643,22 @@ function render(D) {
   let svcH = '<table><tr><th>Unit</th><th>State</th></tr>';
   for (const [k, v] of Object.entries(svc)) svcH += '<tr><td>' + esc(k) + '</td><td class="' + (v === 'active' ? 'ok' : 'bad') + '">' + esc(v) + '</td></tr>';
   svcH += '</table>';
-  h += det('evo-services', 'SERVICES', Object.keys(svc).length + (downN ? ' \u2022 ' + downN + ' down' : ''), svcH, downN > 0);
+  h += det('evo-services', 'SERVICES', Object.keys(svc).length + (downN ? ' • ' + downN + ' down' : ''), svcH, downN > 0);
+  return h;
+}
 
-  // ---- SALTSTEAD ----
-  const S = D.salt || {};
-  h += '<section class="game salt"><h2>SALTSTEAD</h2><div class="tag">the harbourmaster\u2019s ledger \u2014 letters of marque, one per player; the code IS the account</div>';
-  if (!S.up) h += '<div class="down">saltstead-dash (:8097) is not answering</div>';
-  else {
-    const claimed = S.codes.filter(c => c.name).length;
-    const wardens = S.codes.filter(c => c.warden).length;
-    h += '<div class="cards">' +
-      '<div class="card"><div class="v">' + claimed + ' / ' + S.codes.length + '</div><div class="k">codes claimed</div></div>' +
-      '<div class="card"><div class="v">' + wardens + '</div><div class="k">warden codes</div></div>' +
-      '<div class="card"><div class="v">' + S.feedback.length + '</div><div class="k">recent feedback</div></div></div>';
-    h += '<div class="mintrow"><button onclick="saltMint(false)">Mint an invite</button>' +
-      '<button class="gold" onclick="saltMint(true)">Mint a WARDEN code</button>' +
-      '<span class="muted">wardens get the gold hatband and the Y-key shipyard</span></div>';
-    let t = '<table><tr><th>Code</th><th>Standing</th><th>Claimed by</th><th>Last seen</th><th></th></tr>';
-    for (const c of S.codes) {
-      t += '<tr><td><code>' + esc(c.code) + '</code> <button class="small" onclick="copyCode(\'' + esc(c.code) + '\', this)">copy</button></td>' +
-        '<td>' + (c.warden ? '<span class="warden">WARDEN</span>' : 'crew') + '</td>' +
-        '<td>' + (c.name ? esc(c.name) : '<span class="unclaimed">unclaimed</span>') + '</td>' +
-        '<td class="muted">' + ago(now, c.last) + '</td>' +
-        '<td><button class="small danger" onclick="saltRevoke(\'' + esc(c.code) + '\')">revoke</button></td></tr>';
-    }
-    t += '</table>';
-    h += det('salt-codes', 'INVITE CODES', S.codes.length, t);
-    h += det('salt-fb', 'FEEDBACK & BUGS', S.feedback.length, fbTable(now, S.feedback, 'salt'),
-      S.feedback.some(f => f.kind === 'bug' && now - f.ts < 86400));
-  }
-  h += '</section>';
-
-  // ---- MOORSTEAD ----
-  const M = D.moor || {}, O = M.overview || {};
-  h += '<section class="game moor"><h2>MOORSTEAD</h2><div class="tag">t\u2019 parish ledger \u2014 players, natters an\u2019 t\u2019 brain</div>';
-  if (!M.up) h += '<div class="down">moorstead-dash (:8095) is not answering</div>';
-  else {
-    const st = O.stats || {}, live = O.live || [], t9 = O.talk || {};
-    h += '<div class="cards">' +
-      '<div class="card"><div class="v">' + live.length + '</div><div class="k">on t\u2019 moor now</div></div>' +
-      '<div class="card"><div class="v">' + (st.today ?? 0) + '</div><div class="k">active today</div></div>' +
-      '<div class="card"><div class="v">' + (st.week ?? 0) + '</div><div class="k">active last 7 days</div></div>' +
-      '<div class="card"><div class="v">' + (st.total ?? 0) + '</div><div class="k">browsers ever seen</div></div>' +
-      '<div class="card"><div class="v ' + ((O.llm || {}).status === 'ok' ? 'ok' : 'bad') + '">' + ((O.llm || {}).status === 'ok' ? 'UP' : 'DOWN') + '</div><div class="k">villager brain (LLM)</div></div>' +
-      '<div class="card"><div class="v">' + (t9.talksLastHour ?? 0) + '</div><div class="k">chats last hour' + (t9.p95 ? ' \u00b7 p95 ' + t9.p95 + 's' : '') + '</div></div>' +
-      '</div>';
-
-    // codes: the full mint/retrieve/revoke desk
-    h += '<div class="mintrow"><select id="moorroom"><option>moor</option><option>dale</option>' +
-      '<option>crag</option><option>tarn</option><option>bairns</option></select>' +
-      '<button onclick="moorMint()">Mint an invite</button>' +
-      '<span class="muted">moor/dale/crag/tarn are grown-up rooms; bairns is the kids\u2019 world</span></div>';
-    let t = '<table><tr><th>Code</th><th>Room</th><th>Claimed by</th><th>Last seen</th><th></th></tr>';
-    for (const c of (M.codes || [])) {
-      t += '<tr><td><code>' + esc(c.code) + '</code> <button class="small" onclick="copyCode(\'' + esc(c.code) + '\', this)">copy</button></td>' +
-        '<td><b>' + esc(c.room) + '</b></td>' +
-        '<td>' + (c.name ? esc(c.name) : '<span class="unclaimed">unclaimed</span>') + '</td>' +
-        '<td class="muted">' + ago(now, c.last) + '</td>' +
-        '<td><button class="small" onclick="moorMove(\'' + esc(c.code) + '\',\'' + esc(c.room) + '\')">move</button> ' +
-        '<button class="small danger" onclick="moorRevoke(\'' + esc(c.code) + '\')">revoke</button></td></tr>';
-    }
-    t += '</table>';
-    h += det('moor-codes', 'INVITE CODES', (M.codes || []).length, t);
-
-    // invite requests
-    const pend = (O.inviteRequests || {}).pending || [];
-    const dec = (O.inviteRequests || {}).recent || [];
-    let rq = '';
-    if (pend.length) {
-      rq += '<table><tr><th>When</th><th>Email</th><th>Name</th><th>Note</th><th>IP</th><th></th></tr>';
-      for (const r of pend) rq += '<tr><td class="muted">' + ago(now, r.ts) + '</td><td>' + esc(r.email) + '</td><td>' + esc(r.name || '') + '</td><td>' + esc(r.note || '') + '</td><td class="muted">' + esc(r.ip) + '</td>' +
-        '<td><button class="small" onclick="moorInvite(\'' + esc(r.id) + '\',\'approve\')">approve</button> <button class="small danger" onclick="moorInvite(\'' + esc(r.id) + '\',\'reject\')">reject</button></td></tr>';
-      rq += '</table>';
-    } else rq += '<div class="muted">None waiting.</div>';
-    if (dec.length) {
-      rq += '<div class="muted" style="margin-top:6px">Recent decisions</div><table><tr><th>When</th><th>Email</th><th>Status</th><th>Code</th><th>Room</th></tr>';
-      for (const r of dec) rq += '<tr><td class="muted">' + ago(now, r.approvedTs || r.closedTs || r.ts) + '</td><td>' + esc(r.email) + '</td><td>' + esc(r.status) + '</td><td class="pid">' + esc(r.code || '') + '</td><td>' + esc(r.room || '') + '</td></tr>';
-      rq += '</table>';
-    }
-    h += det('moor-req', 'INVITE REQUESTS', pend.length + ' waiting', rq, pend.length > 0);
-
-    h += det('moor-fb', 'FEEDBACK & BUGS', (O.feedback || []).length, fbTable(now, O.feedback || [], 'moor'),
-      (O.feedback || []).some(f => f.kind === 'bug' && now - f.ts < 86400));
-
-    // who's out, who's been
-    let lv = '';
-    if (!live.length) lv = '<div class="muted">Nob\u2019dy out just now.</div>';
-    else {
-      lv = '<table><tr><th>Name</th><th>Where</th><th>Day</th><th>Standing</th><th>Croft</th><th>Ventures</th><th>Seen</th></tr>';
-      for (const x of live) lv += '<tr><td class="ok"><b>' + esc(x.name || '(nameless)') + '</b></td><td>' + esc(x.loc) + '</td><td>' + x.day + '</td><td>' + esc(x.standing) + '</td><td>' + x.croft + '/4</td><td>' + x.quests + '</td><td class="muted">' + ago(now, x.ts) + '</td></tr>';
-      lv += '</table>';
-    }
-    h += det('moor-live', 'ON T\u2019 MOOR NOW', live.length, lv, false);
-
-    const ps = Object.entries(O.players || {}).sort((a, b) =>
-      ((b[1].visitDays || []).length - (a[1].visitDays || []).length) || (b[1].last - a[1].last));
-    let pl = '<table><tr><th>Name(s)</th><th>Days</th><th>Visits</th><th>Minutes</th><th>Worlds</th><th>Last IP</th><th>Last seen</th><th>id</th></tr>';
-    for (const [pid, p] of ps) pl += '<tr><td>' + esc((p.names || []).join(', ') || '(nameless)') + '</td><td>' + (p.visitDays || []).length + '</td><td>' + (p.visits || 0) + '</td><td>' + (p.minutes || 0) + '</td><td>' + Object.keys(p.worlds || {}).length + '</td><td class="muted">' + esc(p.lastIp || '') + '</td><td class="muted">' + ago(now, p.last) + '</td><td class="pid">' + esc(pid.slice(0, 12)) + '</td></tr>';
-    pl += '</table>';
-    h += det('moor-players', 'ALL PLAYERS & BROWSERS', ps.length, pl);
-
-    let nat = '';
-    for (const c of (O.conversations || []).slice(0, 8)) {
-      nat += '<div class="natter"><span class="pid">' + esc(c.pid.slice(0, 18)) + '</span> \u2014 <span class="muted">' + ago(now, c.mtime) + '</span>';
-      for (const ch of (c.chars || [])) {
-        nat += '<div style="margin-top:6px"><b>' + esc((ch.playerName ? ch.playerName + ' \u2194 ' : '') + ch.char.replace('char_', 'villager ')) + '</b> <span class="muted">(trust ' + ch.trust + ')</span>';
-        if (ch.summary) nat += '<div class="muted" style="font-style:italic">remembers: ' + esc(ch.summary) + '</div>';
-        for (const m of (ch.last || [])) nat += '<div class="' + (m.role === 'user' ? 'you' : 'them') + '">' + (m.role === 'user' ? '\u25B8 ' : '\u25C2 ') + esc(m.text) + '</div>';
-        nat += '</div>';
-      }
-      nat += '</div>';
-    }
-    h += det('moor-nat', 'LATEST NATTERS', (O.conversations || []).length, nat || '<div class="muted">Quiet on t\u2019 moor.</div>');
-
-    let tr = '<table><tr><th>When</th><th>Event</th><th>Name</th><th>IP</th><th>Browser id</th></tr>';
-    for (const v of (O.recentVisits || [])) tr += '<tr><td class="muted">' + ago(now, v.ts) + '</td><td>' + esc(v.event) + '</td><td>' + esc(v.name || '(anon)') + '</td><td class="muted">' + esc(v.ip) + '</td><td class="pid">' + esc((v.pid || '').slice(0, 12)) + '</td></tr>';
-    tr += '</table><div class="muted">Backend traffic by IP (Caddy log)</div><table><tr><th>IP</th><th>Requests</th><th>First</th><th>Last</th></tr>';
-    for (const v of (O.visitors || []).slice(0, 30)) tr += '<tr><td>' + esc(v.ip) + '</td><td>' + v.n + '</td><td class="muted">' + ago(now, v.first) + '</td><td class="muted">' + ago(now, v.last) + '</td></tr>';
-    tr += '</table>';
-    h += det('moor-traffic', 'SITE ACTIVITY & TRAFFIC', (O.recentVisits || []).length, tr);
-  }
-  h += '</section>';
-
-  document.getElementById('content').innerHTML = h;
+function render(D) {
+  const open = openSet();
+  // remember any room selection through the redraw
+  const roomVal = document.querySelector('select.moorroom')?.value;
+  tabBar(D);
+  document.getElementById('content').innerHTML =
+    '<div class="tab" id="tab-overview">' + renderOverview(D) + '</div>' +
+    '<div class="tab" id="tab-salt">' + renderSalt(D) + '</div>' +
+    '<div class="tab" id="tab-moor">' + renderMoor(D) + '</div>' +
+    '<div class="tab" id="tab-server">' + renderServer(D) + '</div>';
+  setTab(activeTab);
+  if (roomVal) for (const sel of document.querySelectorAll('select.moorroom')) sel.value = roomVal;
   const toOpen = firstRender ? new Set(DEFAULT_OPEN) : open;
   for (const id of toOpen) { const el = document.getElementById(id); if (el) el.open = true; }
   firstRender = false;
@@ -521,7 +675,7 @@ async function refresh() {
 }
 refresh();
 setInterval(refresh, 15000);
-</script></div></body></html>"""
+</script></body></html>"""
 
 
 @app.get("/", response_class=HTMLResponse)
