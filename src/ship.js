@@ -10,7 +10,7 @@
 
 import * as THREE from 'three';
 import { SLOOP } from './shipphysics.js';
-import { frameFor, gunPosts } from './shipframe.js';
+import { frameFor, gunPosts, holdFor } from './shipframe.js';
 import { tackSign } from './sailing.js';
 import { woodPixels } from './woodgrain.js';
 
@@ -62,6 +62,175 @@ function buildHull(D, s) {
   geo.computeVertexNormals();
   // strakes: 8 plank courses up the topsides, grain running bow to stern
   return new THREE.Mesh(geo, woodMat({ base: [110, 74, 47], nPlanks: 8, seed: 7 }));
+}
+
+// THE HOLD — a whole environment below the weather deck for hulls that
+// carry one (shipyard.js below: true, brig and up). Built to the same frame
+// main.js walks (shipframe.js holdFor), so every plank the captain sees is
+// a wall he genuinely cannot pass: sole, ribs, deck beams overhead, cargo
+// stacked deterministically, cannon housed at the gun posts on the fighting
+// classes, and a companionway ladder up to a hatch you can find from above.
+function buildBelowDecks(D, s, def, spec, railMat, sparMat) {
+  const H = holdFor(spec);
+  const g = new THREE.Group();
+  const w = H.maxX - H.minX, l = H.maxZ - H.minZ;
+  const midZ = (H.maxZ + H.minZ) / 2;
+  const wallH = D.y - 0.12 * s - H.y; // sole to the underside of the deck
+
+  // the sole: hold planking, laid fore-and-aft like the deck above
+  const sole = new THREE.Mesh(
+    new THREE.BoxGeometry(w, 0.12 * s, l),
+    woodMat({ base: [122, 94, 61], nPlanks: 9, seed: 23, vary: 0.12 }, { rotate: true }));
+  sole.position.set(0, H.y - 0.06 * s, midZ);
+  g.add(sole);
+
+  // walls — thick boxes overlapping sole, ceiling and each other, so the
+  // room is LIGHT-TIGHT: no seam ever leaks sky or sea into the hold (their
+  // faces read from the inside; the hull's own shell culls away when the
+  // lens is within her)
+  const skinMat = woodMat({ base: [96, 68, 42], nPlanks: 7, seed: 29, vary: 0.14 });
+  // walls run from below the sole up INTO the deck planking (top at
+  // D.y - 0.04s, inside the plank slab) — sealed above and below, and never
+  // poking through the weather deck
+  const sealH = wallH + 0.38 * s;
+  const sealY = H.y - 0.3 * s + sealH / 2;
+  for (const side of [-1, 1]) {
+    const wall = new THREE.Mesh(
+      new THREE.BoxGeometry(0.34 * s, sealH, l + 0.8 * s), skinMat);
+    wall.position.set(side * (w / 2 + 0.14 * s), sealY, midZ);
+    g.add(wall);
+  }
+  for (const [z] of [[H.minZ - 0.2 * s], [H.maxZ + 0.2 * s]]) {
+    const bulk = new THREE.Mesh(
+      new THREE.BoxGeometry(w + 1.0 * s, sealH, 0.34 * s), skinMat);
+    bulk.position.set(0, sealY, z);
+    g.add(bulk);
+  }
+  // the sole extends under the walls too — no gap at the garboard
+  const bilge = new THREE.Mesh(
+    new THREE.BoxGeometry(w + 1.0 * s, 0.12 * s, l + 0.8 * s), skinMat);
+  bilge.position.set(0, H.y - 0.2 * s, midZ);
+  g.add(bilge);
+
+  // ribs down both sides and beams overhead — the skeleton that makes a
+  // hold read as the inside of a SHIP and not a corridor
+  const boneMat = mat(0x4a3421);
+  const nRibs = Math.max(4, Math.round(l / (1.3 * s)));
+  for (let i = 0; i <= nRibs; i++) {
+    const z = H.minZ + (l * i) / nRibs;
+    for (const side of [-1, 1]) {
+      const rib = new THREE.Mesh(new THREE.BoxGeometry(0.12 * s, wallH, 0.16 * s), boneMat);
+      rib.position.set(side * (w / 2 - 0.08 * s), H.y + wallH / 2, z);
+      g.add(rib);
+    }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(w, 0.14 * s, 0.16 * s), boneMat);
+    beam.position.set(0, D.y - 0.19 * s, z);
+    g.add(beam);
+  }
+
+  // the cargo: barrels and crates lashed along the walls, more of it the
+  // bigger the hull. Deterministic scatter off the rib count.
+  const barrelMat = woodMat({ base: [104, 72, 40], nPlanks: 5, seed: 31, vary: 0.16 });
+  const crateMat = woodMat({ base: [128, 98, 62], nPlanks: 4, seed: 37, vary: 0.1 });
+  const nCargo = Math.round(4 + s * 2.5);
+  for (let i = 0; i < nCargo; i++) {
+    const u = (Math.sin((i + 1) * 12.9898) * 43758.5453) % 1; // cheap unit hash
+    const side = i % 2 ? 1 : -1;
+    const z = H.minZ + 0.6 * s + (l - 1.2 * s) * ((i + 0.5) / nCargo);
+    if (Math.abs(z - H.hatch.z) < 1.3 * s) continue; // the ladder landing stays clear
+    // keep the waist clear: cargo hugs the walls, the captain walks the middle
+    const x = side * (w / 2 - 0.55 * s);
+    if (Math.abs(u) > 0.45) {
+      const barrel = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.28 * s, 0.32 * s, 0.62 * s, 8), barrelMat);
+      barrel.position.set(x, H.y + 0.31 * s, z);
+      g.add(barrel);
+    } else {
+      const crate = new THREE.Mesh(
+        new THREE.BoxGeometry(0.55 * s, 0.5 * s, 0.55 * s), crateMat);
+      crate.position.set(x, H.y + 0.25 * s, z);
+      crate.rotation.y = u * 2;
+      g.add(crate);
+    }
+  }
+
+  // the fighting classes house their spare broadside below: cannon bowsed
+  // down at the gun posts, muzzles to the wall
+  if (def.guns >= 3) {
+    const gunMat = mat(0x23232a);
+    for (const side of [-1, 1]) {
+      for (const z of gunPosts(D, s, def.guns)) {
+        if (z < H.minZ + 0.8 * s || z > H.maxZ - 0.8 * s) continue;
+        const barrel = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.07 * s, 0.09 * s, 1.0 * s, 6), gunMat);
+        barrel.rotation.z = Math.PI / 2;
+        barrel.position.set(side * (w / 2 - 0.6 * s), H.y + 0.34 * s, z + 0.55 * s);
+        const carriage = new THREE.Mesh(
+          new THREE.BoxGeometry(0.46 * s, 0.3 * s, 0.42 * s), railMat);
+        carriage.position.set(side * (w / 2 - 0.6 * s), H.y + 0.15 * s, z + 0.55 * s);
+        g.add(barrel, carriage);
+      }
+    }
+  }
+
+  // the galleon's great-cabin corner: a chart table and the strongboxes
+  // that explain the whole voyage
+  if (def.castle) {
+    const table = new THREE.Mesh(new THREE.BoxGeometry(1.1 * s, 0.08 * s, 0.7 * s), crateMat);
+    table.position.set(0, H.y + 0.62 * s, H.minZ + 0.9 * s);
+    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.08 * s, 0.6 * s, 0.6 * s), boneMat);
+    legL.position.set(-0.45 * s, H.y + 0.3 * s, H.minZ + 0.9 * s);
+    const legR = legL.clone(); legR.position.x = 0.45 * s;
+    g.add(table, legL, legR);
+    for (const side of [-1, 1]) {
+      const chest = new THREE.Mesh(new THREE.BoxGeometry(0.5 * s, 0.34 * s, 0.34 * s), barrelMat);
+      chest.position.set(side * 0.75 * s, H.y + 0.17 * s, H.minZ + 0.45 * s);
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.52 * s, 0.06 * s, 0.36 * s), mat(0xc9a24a));
+      band.position.set(side * 0.75 * s, H.y + 0.2 * s, H.minZ + 0.45 * s);
+      g.add(chest, band);
+    }
+  }
+
+  // the companionway: a ladder from the sole to the hatch, and the hatch
+  // itself — coaming and grating — piercing the weather deck overhead
+  const hz = H.hatch.z;
+  for (const side of [-1, 1]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06 * s, wallH, 0.06 * s), boneMat);
+    rail.position.set(H.hatch.x + side * 0.35 * s, H.y + wallH / 2, hz + 0.45 * s);
+    rail.rotation.x = -0.18; // she leans like a proper ship's ladder
+    g.add(rail);
+  }
+  const nRungs = Math.max(4, Math.round(wallH / (0.32 * s)));
+  for (let i = 1; i < nRungs; i++) {
+    const rung = new THREE.Mesh(new THREE.CylinderGeometry(0.035 * s, 0.035 * s, 0.7 * s, 5), sparMat);
+    rung.rotation.z = Math.PI / 2;
+    const t = i / nRungs;
+    rung.position.set(H.hatch.x, H.y + wallH * t, hz + 0.45 * s - 0.18 * wallH * t);
+    g.add(rung);
+  }
+  // a lantern by the ladder — the warm point main.js hangs its real light on
+  const lamp = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12 * s, 8, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffc978 }));
+  lamp.position.set(H.hatch.x + 0.5 * s, D.y - 0.45 * s, hz);
+  g.add(lamp);
+
+  // topside: the hatch reads from above — coaming rim + dark grating
+  const rimMat = mat(0x4a3421);
+  for (const [dx, dz, ww, dd] of [
+    [0, 0.65 * s, 1.3 * s, 0.12 * s], [0, -0.65 * s, 1.3 * s, 0.12 * s],
+    [0.65 * s, 0, 0.12 * s, 1.3 * s], [-0.65 * s, 0, 0.12 * s, 1.3 * s],
+  ]) {
+    const rim = new THREE.Mesh(new THREE.BoxGeometry(ww, 0.22 * s, dd), rimMat);
+    rim.position.set(H.hatch.x + dx, D.y + 0.11 * s, hz + dz);
+    g.add(rim);
+  }
+  const grate = new THREE.Mesh(
+    new THREE.BoxGeometry(1.15 * s, 0.05 * s, 1.15 * s), mat(0x241a10));
+  grate.position.set(H.hatch.x, D.y + 0.03 * s, hz);
+  g.add(grate);
+
+  return g;
 }
 
 // one SQUARE rig: mast + braced yards + rectangular courses, planted at
@@ -255,6 +424,11 @@ export function buildShip(def = SLOOP, legacyMasts) {
       }
     }
   }
+
+  // the hold: a real room below the weather deck (walked by main.js in
+  // 'below' mode). Only hulls that declare one — NPC traffic never shows
+  // its bilges to anybody, so it never pays for them.
+  if (def.below) group.add(buildBelowDecks(D, s, def, spec, railMat, sparMat));
 
   // the masthead lantern: a warm point at the MAIN top (the tallest stick),
   // lit after dark by setLantern. fog:false — a ship's light carries beyond

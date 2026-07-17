@@ -22,7 +22,8 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 - `npm run verify` — the headless gate (30 checks). **Must be green before deploy.**
  Add a verify script with every feature; prefer testing pure modules headlessly over
  eyeballing. `scripts/live-classes.mjs` (puppeteer, needs the dev server) smoke-tests
- the seven ship classes, a long-range battle and a ramming in a real browser.
+ the seven ship classes, a long-range battle and a ramming in a real browser;
+ `scripts/live-hold.mjs` does the same for below-decks and the warden's writ.
 - Dev: `npm run dev` (port 5173). `window.saltstead` is the live Game handle
   (`.ship`, `.cam`, `.aground`, `.coastDist`, `.dayStart`, `.ocean.uniforms`).
 - Marketing footage: `saltstead.showreel()` in the live console records the
@@ -62,7 +63,8 @@ Caddy's global `trusted_proxies private_ranges` keeps the real player IP in
 x-forwarded-for (the feedback rate cap is per-IP, 8/day). Codes minted with
 `warden: true` grant warden standing (gold hatband + epaulettes on the captain,
 `isWarden(auth)` in `identity.js`); the claim response carries `warden` into the
-auth blob. Caddy backups: `Caddyfile.bak-20260716-saltstead`, `-feedback`; tunnel
+auth blob. Wardens press **Y** in-game to materialise the next ship class (cycles
+the whole shipyard ladder, free) — the inspection tool for any hull on any water. Caddy backups: `Caddyfile.bak-20260716-saltstead`, `-feedback`; tunnel
 backup: `config.yml.bak-20260716-saltstead`.
 
 ## Setting

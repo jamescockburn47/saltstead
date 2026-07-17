@@ -12,8 +12,8 @@ import { isWarden, loadAuth, displayName } from './identity.js';
 import { FoamLayer } from './foamlayer.js';
 import { SkyFx } from './skyfx.js';
 import { newShipState, stepShip, shipAttitude, beaches } from './shipphysics.js';
-import { frameFor, clampToDeck, localToWorld, gunPosts } from './shipframe.js';
-import { hullById, nextHull, prevHull, buyHull } from './shipyard.js';
+import { frameFor, clampToDeck, localToWorld, gunPosts, holdFor } from './shipframe.js';
+import { HULLS, hullById, nextHull, prevHull, buyHull } from './shipyard.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
 import { waveHeight } from './waves.js';
 import { TerrainLayer } from './terrain.js';
@@ -187,13 +187,15 @@ class Game {
     this.setLantern = built.setLantern;
     this.scene.add(this.shipGroup);
     this.riseMastLight();
+    this.riseHoldLight(this.hullDef);
 
-    this.captain = buildCaptain(isWarden(auth));
+    this.warden = isWarden(auth); // the harbourmaster's own standing
+    this.captain = buildCaptain(this.warden);
     this.cap = { x: 0, z: -2.2, facing: 0, moving: false };
     this.captain.group.position.set(this.cap.x, this.shipFrame.deck.y, this.cap.z);
     this.shipGroup.add(this.captain.group);
 
-    this.mode = 'walk'; // 'walk' | 'helm'
+    this.mode = 'walk'; // 'walk' | 'helm' | 'below' | 'ashore'
     this.wind = { from: 2.3, speed: 7 };
     // the procedural wind machine's base; real weather (open-meteo at the
     // ship's REAL lat/lon) eases these when it lands — a layer, never a
@@ -220,6 +222,7 @@ class Game {
       if (e.code === 'KeyT') this.toggleTiller();
       if (e.code === 'KeyF' && !e.repeat) this.fireGuns();
       if (e.code === 'KeyR' && !e.repeat) this.toggleShot();
+      if (e.code === 'KeyY' && !e.repeat) this.wardenMaterialise();
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     this.dragging = false;
@@ -380,6 +383,8 @@ class Game {
 
   // swap the hull under the captain: spec, frame, and the visible ship
   setHull(def) {
+    if (this.mode === 'below') { this.mode = 'walk'; this.cam.targetDist = 8; }
+    this.holdFrame = null;
     this.hullDef = def;
     this.hullId = def.id;
     this.spec = def.spec;
@@ -392,6 +397,7 @@ class Game {
     this.setLantern = built.setLantern;
     this.scene.add(this.shipGroup);
     this.riseMastLight();
+    this.riseHoldLight(def);
     if (this.mode !== 'ashore') this.shipGroup.add(this.captain.group);
     const p = clampToDeck(this.cap.x, this.cap.z, 0.2, this.shipFrame.deck);
     this.cap.x = p.x; this.cap.z = p.z;
@@ -408,6 +414,34 @@ class Game {
     this.mastLight = new THREE.PointLight(0xffc978, 0, 30 * F.scale, 1.6);
     this.mastLight.position.set(0, F.deck.y + 7.4 * F.scale, 1.2 * F.scale);
     this.shipGroup.add(this.mastLight);
+  }
+
+  // the hold's lantern — one warm PointLight by the companionway, lit only
+  // while the captain is actually below (the hold is windowless; without it
+  // the room is a coal cellar). Player's own hull only, like the mast light.
+  riseHoldLight(def) {
+    this.holdLight = null;
+    if (!def.below) return;
+    const H = holdFor(def.spec), sc = this.shipFrame.scale;
+    this.holdLight = new THREE.Group();
+    // one lamp at the companionway, one forward, and one aft over the
+    // great cabin on castle hulls — a galleon's hold is a warehouse, and a
+    // single lantern reads as a coal cellar
+    const lampZ = [H.hatch.z, (H.maxZ + H.hatch.z) / 2];
+    if (def.castle) lampZ.push(H.minZ + 1.2 * sc);
+    for (const z of lampZ) {
+      const lamp = new THREE.PointLight(0xffc070, 0, 16 * sc, 1.2);
+      lamp.position.set(0.5 * sc, this.shipFrame.deck.y - 0.5 * sc, z);
+      this.holdLight.add(lamp);
+    }
+    this.shipGroup.add(this.holdLight);
+  }
+
+  // the hold lamps light as one (goBelow/goUp); intensity carries the scale
+  setHoldLight(on) {
+    if (!this.holdLight) return;
+    const glow = on ? 4 + 3.5 * this.shipFrame.scale : 0;
+    for (const lamp of this.holdLight.children) lamp.intensity = glow;
   }
 
   putIn() {
@@ -542,10 +576,12 @@ class Game {
   }
 
   // T is the tiller, from anywhere on deck — the captain runs aft. T again
-  // hands it back. It also slams the port panel shut: T ALWAYS means "sail".
+  // hands it back. It also slams the port panel shut: T ALWAYS means "sail" —
+  // even from the hold: he takes the ladder at a run.
   toggleTiller() {
     if (this.portui.open) this.portui.hide();
     if (this.mode === 'helm') { this.mode = 'walk'; this.cam.targetDist = 8; return; }
+    if (this.mode === 'below') this.goUp();
     if (this.mode !== 'walk') return; // ashore: the tiller is back on the ship
     this.mode = 'helm';
     this.cap.x = this.shipFrame.helm.x; this.cap.z = this.shipFrame.helm.z + 0.6;
@@ -557,6 +593,7 @@ class Game {
   // in at port. The tiller lives on T alone, so E can never trap you off it.
   onE() {
     if (this.portui.open) { this.portui.hide(); return; }
+    if (this.mode === 'below') { this.goUp(); return; } // the hold has one door
     if (this.mode === 'ashore') {
       if (this.hoardReady) { this.lootHoard(); return; }
       if (this.digReady && this.digTimer <= 0) {
@@ -587,7 +624,54 @@ class Game {
     }
     if (this.bankReady) { this.bankTreasure(); return; }
     if (this.port && inAnchorage(this.port.dist, this.ship.speed)) { this.putIn(); return; }
+    if (this.canGoBelow()) { this.goBelow(); return; }
     if (this.canStepAshore()) { this.goAshore(); return; }
+  }
+
+  // ---- below decks (shipframe.js holdFor, ship.js buildBelowDecks) ----
+  // standing on the hatch grating, on a hull that HAS a hold
+  canGoBelow() {
+    if (this.mode !== 'walk' || !this.hullDef.below) return false;
+    const H = holdFor(this.spec);
+    return Math.hypot(this.cap.x - H.hatch.x, this.cap.z - H.hatch.z)
+      <= 1.3 * this.shipFrame.scale;
+  }
+
+  goBelow() {
+    this.holdFrame = holdFor(this.spec);
+    this.mode = 'below';
+    this.cap.x = this.holdFrame.hatch.x;
+    this.cap.z = this.holdFrame.hatch.z;
+    this.cam.targetDist = 3.4;
+    this.setHoldLight(true);
+    this.say('Down the companionway \u2014 the hold smells of tar, salt beef and powder', 4);
+  }
+
+  goUp() {
+    const H = this.holdFrame || holdFor(this.spec);
+    this.mode = 'walk';
+    this.cap.x = H.hatch.x;
+    this.cap.z = H.hatch.z;
+    this.cam.targetDist = 8;
+    this.setHoldLight(false);
+  }
+
+  // ---- the warden's writ (identity.js isWarden) ----
+  // The harbourmaster materialises any class of ship under his own boots —
+  // Y walks the whole ladder, top rung wraps to the sloop. Warden only;
+  // for everyone else the key does nothing at all.
+  wardenMaterialise() {
+    if (!this.warden || this.portui.open) return;
+    if (this.mode === 'ashore') { this.say('Come back aboard first, Warden', 3); return; }
+    const i = HULLS.findIndex((h) => h.id === this.hullId);
+    const def = HULLS[(i + 1) % HULLS.length];
+    this.setHull(def);
+    this.hull.rig = 1; this.hull.hull = 1;
+    this.crippled = false;
+    this.say(`THE WARDEN\u2019S WRIT \u2014 a ${def.name.toUpperCase()} materialises beneath you `
+      + `(${def.guns} gun${def.guns > 1 ? 's' : ''} a side, ${def.berths} berths)`, 6);
+    this.logEvent(`The warden's writ raised a ${def.name} from the sea`);
+    this.persist();
   }
 
   // ---- the guns (combat.js) ----
@@ -1316,7 +1400,7 @@ class Game {
     this.cap.moving = false;
     const ix = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
     const iz = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
-    if (this.mode === 'walk' && (ix || iz)) {
+    if ((this.mode === 'walk' || this.mode === 'below') && (ix || iz)) {
       const fwd = new THREE.Vector3();
       this.camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
       const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0));
@@ -1324,8 +1408,10 @@ class Game {
       // world direction -> ship-local (yaw only)
       const s = Math.sin(this.ship.yaw), c = Math.cos(this.ship.yaw);
       const lx = dir.x * c - dir.z * s, lz = dir.x * s + dir.z * c;
+      // below, the walls of the HOLD are the walls of the world
+      const bounds = this.mode === 'below' ? this.holdFrame : this.shipFrame.deck;
       const p = clampToDeck(this.cap.x + lx * 2.6 * dt, this.cap.z + lz * 2.6 * dt,
-        0.2, this.shipFrame.deck);
+        this.mode === 'below' ? 0.35 : 0.2, bounds);
       this.cap.x = p.x; this.cap.z = p.z;
       this.cap.facing = Math.atan2(lx, lz);
       this.cap.moving = true;
@@ -1349,7 +1435,8 @@ class Game {
         this.shore.x, Math.max(elevation(sll.lat, sll.lon), -0.3), this.shore.z);
       this.captain.group.rotation.y = this.shore.facing;
     } else {
-      this.captain.group.position.set(this.cap.x, this.shipFrame.deck.y, this.cap.z);
+      const floorY = this.mode === 'below' ? this.holdFrame.y : this.shipFrame.deck.y;
+      this.captain.group.position.set(this.cap.x, floorY, this.cap.z);
       this.captain.group.rotation.y = this.cap.facing;
     }
     this.captain.animate(dt, this.cap.moving);
@@ -1367,9 +1454,21 @@ class Game {
       target.x + Math.sin(this.cam.yaw) * Math.cos(cp) * cd,
       target.y + Math.sin(cp) * cd,
       target.z + Math.cos(this.cam.yaw) * Math.cos(cp) * cd);
-    // never let the lens dip under the swell
+    // never let the lens dip under the swell — unless we're BELOW DECKS,
+    // where the lens instead stays inside the hold's walls (ship-local
+    // clamp through the live hull transform, so pitch and roll carry it)
     const wy = waveHeight(this.camera.position.x, this.camera.position.z, t);
-    if (this.camera.position.y < wy + 0.6) this.camera.position.y = wy + 0.6;
+    if (this.mode === 'below' && this.holdFrame) {
+      const H = this.holdFrame;
+      this.shipGroup.updateMatrixWorld();
+      const lp = this.shipGroup.worldToLocal(this.camera.position.clone());
+      lp.x = Math.max(H.minX + 0.3, Math.min(H.maxX - 0.3, lp.x));
+      lp.z = Math.max(H.minZ + 0.3, Math.min(H.maxZ - 0.3, lp.z));
+      lp.y = Math.max(H.y + 0.5, Math.min(this.shipFrame.deck.y - 0.35, lp.y));
+      this.camera.position.copy(this.shipGroup.localToWorld(lp));
+    } else if (this.camera.position.y < wy + 0.6) {
+      this.camera.position.y = wy + 0.6;
+    }
     this.camera.lookAt(target);
 
     // the showreel's pinned lens (showreel.js): while a reel runs, the photo
@@ -1502,7 +1601,9 @@ class Game {
       if (this.boardable.m.type === 'derelict') return 'E \u2014 board the derelict\u2026';
       return 'E \u2014 BOARD HER!';
     };
-    this.hud.hint.textContent = this.mode === 'ashore'
+    this.hud.hint.textContent = this.mode === 'below'
+      ? 'THE HOLD \u2014 WASD to walk her \u00b7 E \u2014 up the ladder \u00b7 T \u2014 straight to the tiller'
+      : this.mode === 'ashore'
       ? (this.hoardReady
         ? 'E \u2014 THE DRAGON\u2019S HOARD'
         : this.digTimer > 0
@@ -1557,7 +1658,18 @@ class Game {
                     ? (beaches(this.spec)
                       ? 'BEACHED \u2014 E to step ashore \u00b7 T to take the tiller'
                       : 'ANCHORED OFF \u2014 E sends the longboat ashore \u00b7 T to take the tiller')
+                    : this.canGoBelow()
+                      ? 'E \u2014 go below \u00b7 T \u2014 take the tiller \u00b7 WASD \u2014 walk the deck'
                     : 'T — take the tiller · WASD — walk the deck · F — fire · M — chart · N — stars · L — log';
+    // below decks the hold is windowless: the sea and its foam would only
+    // ever render as leaks through the planking seams — douse them outright
+    // (self-healing every frame, so any path out of 'below' restores them)
+    const topside = this.mode !== 'below';
+    this.ocean.mesh.visible = topside;
+    this.foam.wakeMesh.visible = topside;
+    this.foam.fleckMesh.visible = topside;
+    if (!topside) this.skyfx.rain.visible = false; // rain wraps the lens — not in here
+
     this.hud.toast.style.display = t < this.toast.until ? 'block' : 'none';
     if (t < this.toast.until) this.hud.toast.textContent = this.toast.text;
     // a nudge toward good trim, teaching by whisper not tutorial

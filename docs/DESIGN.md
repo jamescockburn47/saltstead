@@ -226,6 +226,23 @@ sloop's is "run, hunt traders, dig treasure, hide in the shallows" (corvettes
 break off the chase over water thinner than NAVY_SHOAL); the galleon's is
 "you don't chase anymore — they come to you".
 
+**Below decks** (shipframe.js holdFor + ship.js buildBelowDecks): every hull
+from the brig up carries a walkable hold under the weather deck — a second
+ship-local frame (`mode: 'below'`) entered by E on the hatch grating abaft
+the mainmast. The room is built light-tight to the same numbers main.js
+walks, the sea/foam/rain layers douse while the lens is inside (a windowless
+hold can only ever show them as leaks through seams), and the orbit camera
+clamps within the hold's walls through the live hull transform so pitch and
+roll carry it. Lit by its own lanterns, dressed by class: cargo everywhere,
+housed guns on the fighting hulls, the great cabin on the galleon. NPC hulls
+never build interiors nobody can visit.
+
+**The warden's writ** (identity.js isWarden): a warden — the harbourmaster's
+own standing, minted on the invite ledger — presses **Y** to materialise the
+next class of ship under his boots, walking the whole seven-rung ladder and
+wrapping at the top, whole and uncrippled, free. For anyone else the key is
+dead silence. It is the inspection tool: any hull, any water, no economy.
+
 **Collision is real** (collide.js): every hull is a capsule, contacts shoulder
 apart, and closing speed above RAM_HURT wounds both ships through the same
 combat.js damage states a broadside uses — the lighter hull pays more. The

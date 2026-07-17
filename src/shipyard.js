@@ -113,6 +113,7 @@ export const HULLS = [
     guns: 2,
     masts: 2,
     square: true,
+    below: true,
     berths: 20,
     pitch: 'Two masts, two guns a side, twenty berths. Fast on a reach, slow '
       + 'in the turn, and she draws too much to beach.',
@@ -147,6 +148,7 @@ export const HULLS = [
     guns: 3,
     masts: 2,
     square: true,
+    below: true,
     berths: 26,
     pitch: 'A warship\u2019s hull in a pirate\u2019s hands: three guns a side, '
       + 'navy speed, and the King\u2019s own hunters suddenly look catchable.',
@@ -177,6 +179,7 @@ export const HULLS = [
     guns: 4,
     masts: 3,
     square: true,
+    below: true,
     berths: 34,
     pitch: 'Three masts, four guns a side, thirty-four berths. The sea\u2019s '
       + 'answer to most questions, asked politely at four hundred yards.',
@@ -206,6 +209,7 @@ export const HULLS = [
     masts: 3,
     square: true,
     castle: true,
+    below: true,
     berths: 45,
     pitch: 'The crown of the ladder: a towering sterncastle, six guns a '
       + 'side, forty-five berths. Slower than the frigate \u2014 and it '

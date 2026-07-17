@@ -84,6 +84,13 @@ a **real row of cannon** at the rail — the guns you see are the broadside you 
 NPC ships sail the same ladder (traders are schooners, Indiamen three-masted
 square-riggers, the navy corvettes), with **visible crews** working their decks.
 
+From the brig up, every hull carries a **whole environment below decks**: press
+**E** on the hatch grating abaft the mainmast and the companionway takes you down
+into a lantern-lit hold — ribs and deck beams, lashed cargo, the spare broadside
+bowsed to the walls on the fighting classes, and the galleon's great-cabin corner
+with its chart table and strongboxes. E climbs back up; T runs you straight from
+the hold to the tiller.
+
 ### Battle
 
 Broadsides fire off the **beam** — you turn the ship to bear, that's the whole

@@ -28,6 +28,24 @@ export function frameFor(spec) {
   };
 }
 
+// THE HOLD — the walkable frame BELOW deck for hulls that carry one
+// (shipyard.js `below: true`, brig and up). Same ship-local convention as
+// the deck: bow +z, y up from the group origin. The room sits inside the
+// hull's taper (buildHull pinches the keel to 0.55 of the beam and tucks
+// the ends), so the walls are honest — you cannot walk through the planking
+// into the sea. hatch: where the companionway pierces the weather deck —
+// go below there, come up there, on BOTH frames.
+export function holdFor(spec) {
+  const s = spec.length / 9; // the unit sloop again
+  return {
+    minX: -1.1 * s, maxX: 1.1 * s,
+    minZ: -4.0 * s, maxZ: 2.5 * s,   // the bow taper keeps the fore-peak for cargo
+    y: 1.15 * s - 1.5 * s,           // the hold sole, under the deck beams
+    headroom: 1.38 * s,              // sole to beams (deck planking is 0.12s)
+    hatch: { x: 0, z: -0.9 * s },    // the companionway, just abaft the waist
+  };
+}
+
 // Where the broadside lives: deck-local z posts for n guns a side, spaced
 // down the waist and ALWAYS inside the hull, however many guns the rung
 // carries. ship.js plants the visible cannon here and main.js muzzlePos

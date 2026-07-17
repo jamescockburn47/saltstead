@@ -3,9 +3,10 @@
 // helm must be a reachable spot ON the deck.
 import {
   DECK, HELM, frameFor, localToWorld, worldToLocal, clampToDeck, nearHelm,
-  gunPosts, crewPosts,
+  gunPosts, crewPosts, holdFor,
 } from '../src/shipframe.js';
 import { SLOOP, BRIG, SPECS } from '../src/shipphysics.js';
+import { HULLS } from '../src/shipyard.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -82,6 +83,30 @@ for (const [name, spec] of Object.entries(SPECS)) {
 // deterministic
 ok(JSON.stringify(crewPosts(DECK, 4, 7)) === JSON.stringify(crewPosts(DECK, 4, 7)),
   'crew stations deterministic');
+
+// the hold: for every hull that declares one (shipyard below: true), the
+// below-decks frame fits inside the ship and a captain can stand in it
+{
+  const belows = HULLS.filter((h) => h.below);
+  ok(belows.length >= 4, `the big hulls carry holds (${belows.length})`);
+  ok(!HULLS.find((h) => h.id === 'sloop').below, 'the sloop is an open boat — no hold');
+  for (const h of belows) {
+    const F = frameFor(h.spec), H = holdFor(h.spec);
+    ok(H.minX > F.deck.minX && H.maxX < F.deck.maxX
+      && H.minZ > F.deck.minZ && H.maxZ < F.deck.maxZ,
+      `${h.id}: the hold nests inside the hull's footprint`);
+    ok(H.y < F.deck.y, `${h.id}: the hold sole lies below the weather deck`);
+    ok(H.headroom > 1.35, `${h.id}: a captain stands below (${H.headroom.toFixed(2)} m headroom)`);
+    ok(H.hatch.x > H.minX && H.hatch.x < H.maxX && H.hatch.z > H.minZ && H.hatch.z < H.maxZ,
+      `${h.id}: the companionway lands ON the hold sole`);
+    ok(H.hatch.x > F.deck.minX && H.hatch.x < F.deck.maxX
+      && H.hatch.z > F.deck.minZ && H.hatch.z < F.deck.maxZ,
+      `${h.id}: and pierces the walkable weather deck`);
+    // the clamp walks the hold like it walks the deck
+    const p = clampToDeck(99, -99, 0.35, H);
+    ok(p.x === H.maxX - 0.35 && p.z === H.minZ + 0.35, `${h.id}: the clamp holds her walls`);
+  }
+}
 
 if (failed) { console.error(`verify-shipframe: ${failed} FAILED`); process.exit(1); }
 console.log('verify-shipframe: OK — frame round-trips, deck clamp holds, helm reachable, guns + crew on deck');
