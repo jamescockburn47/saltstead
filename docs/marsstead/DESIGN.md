@@ -103,7 +103,8 @@ Real Mars is the whole hook, and it is honoured to the metre:
 
 Two game-design overrides, in the Saltstead tradition where truth loses to fun:
 **you are never truly alone with your thoughts** (an optional mission-control /
-crew voice, C-block below), and **the cold clock is generous** (survival is
+crew voice — the NPC-brains row of the ports table below), and **the cold clock
+is generous** (survival is
 tense, not a stopwatch — see the blackout rule). Everything else defers to the
 real planet.
 
