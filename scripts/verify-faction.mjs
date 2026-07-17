@@ -4,7 +4,10 @@
 // the boarding law.
 import {
   FACTIONS, factionOf, attitude, canBoardType, signalAnswer, escortBerth,
+  homeAnchorage,
 } from '../src/faction.js';
+import { isLand, coastDistGame } from '../src/earth.js';
+import { inZone } from '../src/legendfx.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -59,6 +62,34 @@ ok(canBoardType('raider', 'navy') && canBoardType('derelict', 'navy'),
   ok(thin.converge.length === 0 && thin.spawn, 'an empty sea brings the Admiralty');
   const one = signalAnswer([sails[0]], 0, 0, 4500, 2);
   ok(one.converge.length === 1 && one.spawn, 'a lone answer still calls for one more');
+}
+
+// each side weighs anchor in its own home waters — the black flag in the
+// Caribbean, the King's ships in England — and both anchorages are honest
+// water with sea room, not a spawn inside a hill
+{
+  const p = homeAnchorage('pirate'), n = homeAnchorage('navy');
+  ok(p.name === 'Port Royal' && p.lat > 15 && p.lat < 20 && p.lon < -70,
+    'the black flag weighs off Port Royal, Caribbean');
+  ok(n.name === 'Spithead' && n.lat > 50 && n.lat < 51.5 && n.lon > -2 && n.lon < 0,
+    "the King's commission begins at Spithead, England");
+  // coastDistGame is GAME metres (the gait-compressed ocean): Port Royal's
+  // own anchorage reads ~13 — the assertion is honest water clear of the
+  // hard, not blue-water sea room
+  for (const [side, h] of [['pirate', p], ['navy', n]]) {
+    ok(!isLand(h.lat, h.lon), `${side}: the anchorage is water`);
+    const cd = coastDistGame(h.lat, h.lon);
+    ok(cd > 5, `${side}: clear of the hard (${Math.round(cd)} game-m)`);
+  }
+  // the regression that moved the navy from Bristol: no fresh captain
+  // spawns inside a legend zone — the first dragon should be SOUGHT
+  for (const [side, h] of [['pirate', p], ['navy', n]]) {
+    for (const z of ['dragons-wales', 'bermuda-triangle', 'kraken-deeps', 'corryvreckan']) {
+      ok(!inZone(h.lat, h.lon, z), `${side}: home water is outside ${z}`);
+    }
+  }
+  ok(homeAnchorage('anything-else').name === 'Port Royal',
+    'an unknown flag launches with the black');
 }
 
 // the escort arrives from over the horizon, not out of thin air

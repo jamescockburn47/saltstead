@@ -45,7 +45,7 @@ import { canSight, takeSight, sightText } from './navigation.js';
 import { StarChartUI } from './starchartui.js';
 import { LogUI } from './logui.js';
 import { TYPES, NAVY_SHOAL, LOOKOUT_R, compassPoint } from './merchants.js';
-import { factionOf, canBoardType, signalAnswer, escortBerth } from './faction.js';
+import { factionOf, canBoardType, signalAnswer, escortBerth, homeAnchorage } from './faction.js';
 import { LIVERIES } from './livery.js';
 import { collideShips, ramSeverity } from './collide.js';
 import {
@@ -116,10 +116,12 @@ class Game {
     this.skyfx = new SkyFx(this.scene); // the VISIBLE weather: clouds + rain
     this.terrain = new TerrainLayer(this.scene);
 
-    // spawn in the Caribbean, off Port Royal — the Phase 1 haven
-    const spawn = latLonToWorld(17.85, -76.9);
+    // each side weighs anchor in its own home waters (faction.js): the
+    // black flag off Port Royal, the King's commission out of Bristol
+    this.home = homeAnchorage(this.faction);
+    const spawn = latLonToWorld(this.home.lat, this.home.lon);
     this.ship = newShipState(spawn.x, spawn.z);
-    this.ship.yaw = 0.5; // bow toward the Jamaican coast
+    this.ship.yaw = this.home.yaw;
     this.ship.trim = 0.5;
     this.gold = 0;
     this.treasureMap = null;   // { seed, lat, lon } — the X on the charts
@@ -312,7 +314,7 @@ class Game {
     this.t = 0;
     this.last = performance.now();
     if (!save) {
-      this.logEvent(`Weighed anchor off Port Royal under ${this.fac.tag} \u2014 the voyage begins`);
+      this.logEvent(`Weighed anchor off ${this.home.name} under ${this.fac.tag} \u2014 the voyage begins`);
       // a fresh captain gets the survival doctrine before the sea does
       showBriefingFor(this.hullDef);
       // ...and the doctrine of the flag overhead
