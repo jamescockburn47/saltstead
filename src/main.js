@@ -677,7 +677,9 @@ class Game {
       this.logEvent('Graphics eased to plain — the frame could not hold');
     } else if (verdict === 'drop-pixels' && !gw.pixelDropped) {
       gw.pixelDropped = true;
-      this.renderer.setPixelRatio(1);
+      // a DPR-1 screen has no ratio to shed — go to three-quarters instead
+      const cur = this.renderer.getPixelRatio();
+      this.renderer.setPixelRatio(cur > 1 ? 1 : 0.75);
       this.say('Fewer pixels, truer wind — resolution eased for smooth sailing', 6);
     }
   }
