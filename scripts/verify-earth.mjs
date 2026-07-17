@@ -6,6 +6,7 @@ import {
   elevation, gaitFactor, riverDistGame, mountainness,
   encounterGait, ENCOUNTER_NEAR, ENCOUNTER_FAR, GAIT_MAX,
   RING_COUNT, POINT_COUNT, RIVER_COUNT, MTN_COUNT, M_PER_DEG, COAST_CAP, RIVER_CAP,
+  WORLD_W, wrapX, dxWrap,
 } from '../src/earth.js';
 
 let failed = 0;
@@ -114,6 +115,19 @@ let prev = -1, mono = true;
 for (let d = 0; d <= 6000; d += 50) { const g = gaitFactor(d); if (g < prev - 1e-9) mono = false; prev = g; }
 ok(mono, 'monotonic ramp all the way out');
 ok(gaitFactor(coastDistGame(30, -45)) === GAIT_MAX, 'mid-Atlantic sails at full blue-water gait');
+
+// the world wraps east-west: WORLD_W is the globe's girth; wrapX folds x into
+// range; dxWrap gives the short signed delta across the seam
+ok(WORLD_W === 360 * M_PER_DEG, 'the globe is 360 degrees around');
+ok(wrapX(WORLD_W / 2 + 1000) < 0 && wrapX(-WORLD_W / 2 - 1000) > 0, 'x folds over the seam');
+ok(Math.abs(wrapX(0)) < 1e-9 && Math.abs(wrapX(WORLD_W)) < 1e-9, 'a whole lap returns to the start');
+{
+  // a point just east of +180 and one just west of -180 are neighbours
+  const a = (179.9) * M_PER_DEG, b = (-179.9) * M_PER_DEG;
+  ok(Math.abs(dxWrap(a, b)) < 0.3 * M_PER_DEG, 'across the dateline is a short hop, not a lap');
+  ok(dxWrap(a, b) > 0, 'and it points east, the short way');
+  ok(Math.abs(dxWrap(1000, 2000) - 1000) < 1e-9, 'well inside the map, dxWrap is just the difference');
+}
 
 // encounter gait: alone the current runs full; in company it dies to 1x
 ok(encounterGait(GAIT_MAX, Infinity) === GAIT_MAX, 'empty sea, full current');

@@ -9,7 +9,7 @@
 // corridor HALF-width in game metres (traffic disperses across it, later plan);
 // `choke:true` flags a funnel (pirate water, later plan).
 
-import { latLonToWorld, worldToLatLon, coastDistGame, gaitFactor } from './earth.js';
+import { latLonToWorld, worldToLatLon, coastDistGame, gaitFactor, dxWrap, wrapX } from './earth.js';
 import { madeGoodFactor } from './sailing.js';
 import { windAt } from './wind.js';
 import { currentAt } from './currents.js';
@@ -27,15 +27,20 @@ export const LANES = [
     { lat: 37, lon: -12, width: 4000, choke: true },
     { port: 'cadiz' },
   ] },
-  // NB: no lane may straddle +/-180 — the map does not wrap (earth.js: x=lon*444),
-  // so a dateline-crossing edge inverts into a wrong-way sweep across the whole
-  // world. A trans-Pacific galleon lane needs proper wrap handling (later); for
-  // now the second lane is the North Atlantic packet run, all open ocean.
+  // The world wraps east-west (earth.js dxWrap/wrapX), so a lane MAY cross +/-180:
+  // routing and the helmsman take the short way across the seam.
   { id: 'north-atlantic', name: 'The North Atlantic Packet', marks: [
     { port: 'boston' },
     { lat: 44, lon: -50, width: 14000 },
     { lat: 49, lon: -22, width: 12000, choke: true },
     { port: 'bristol' },
+  ] },
+  { id: 'manila-galleon', name: 'The Manila Galleon', marks: [
+    { port: 'manila' },
+    { lat: 18, lon: 150, width: 14000 },
+    { lat: 20, lon: -170, width: 15000 }, // crosses the dateline — wrap handles it
+    { lat: 18, lon: -120, width: 8000 },
+    { port: 'acapulco' },
   ] },
 ];
 
@@ -63,14 +68,15 @@ export function resolveMark(mark) {
 const SAMPLE_M = 2000; // sample the sea every ~2 km
 
 export function segmentCost(ax, az, bx, bz) {
-  const len = Math.hypot(bx - ax, bz - az);
+  const dx = dxWrap(ax, bx); // shortest east-west span across the world seam
+  const len = Math.hypot(dx, bz - az);
   if (len === 0) return 0;
-  const heading = Math.atan2(bx - ax, bz - az); // yaw of the course (sin,cos = x,z)
+  const heading = Math.atan2(dx, bz - az); // yaw of the course (sin,cos = x,z)
   const n = Math.max(1, Math.ceil(len / SAMPLE_M));
   let cost = 0;
   for (let i = 0; i < n; i++) {
     const t = (i + 0.5) / n;
-    const x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+    const x = wrapX(ax + dx * t), z = az + (bz - az) * t;
     const ll = worldToLatLon(x, z);
     const gait = gaitFactor(coastDistGame(ll.lat, ll.lon));
     const w = windAt(x, z);
@@ -123,7 +129,7 @@ export function laneEdges(id) { return (ADJ.get(id) || []).map((e) => ({ ...e })
 export function nearestNode(x, z) {
   let best = -1, bestD = Infinity;
   for (const n of NODES) {
-    const d = Math.hypot(n.x - x, n.z - z);
+    const d = Math.hypot(dxWrap(x, n.x), n.z - z);
     if (d < bestD) { bestD = d; best = n.id; }
   }
   return best >= 0 ? { id: best, dist: bestD } : null;

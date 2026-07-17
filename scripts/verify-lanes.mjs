@@ -3,7 +3,7 @@
 // (the acceptance scenario), short/off-lane hops sail direct (no regression),
 // and route() is deterministic.
 import { LANES, resolveMark, segmentCost, nearestNode, route, laneNodes } from '../src/lanes.js';
-import { isLand, coastDistGame, latLonToWorld, worldToLatLon } from '../src/earth.js';
+import { isLand, coastDistGame, latLonToWorld, worldToLatLon, dxWrap, WORLD_W } from '../src/earth.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -60,13 +60,15 @@ for (const lane of LANES) {
     'route is deterministic');
 }
 
-// no lane edge may straddle the antimeridian: the map does not wrap, so a
-// >180 deg longitude span inverts into a wrong-way sweep across the whole world
-for (const lane of LANES) {
-  const lons = lane.marks.map((m) => worldToLatLon(resolveMark(m).x, resolveMark(m).z).lon);
-  for (let i = 0; i < lons.length - 1; i++) {
-    ok(Math.abs(lons[i] - lons[i + 1]) < 180, `${lane.id}: no edge straddles +/-180`);
-  }
+// the world wraps east-west: a trans-Pacific course (Manila -> Acapulco) routes
+// the SHORT way EAST across the dateline, not the long way round the globe
+{
+  const m = latLonToWorld(14.55, 120.85), ac = latLonToWorld(16.8, -99.9);
+  ok(dxWrap(m.x, ac.x) > 0 && ac.x - m.x < 0,
+    'Manila->Acapulco: wrap routes EAST across the dateline (the short way), not west the long way');
+  const r = route(m.x, m.z, ac.x, ac.z);
+  ok(r.length >= 1 && Math.abs(r[r.length - 1].x - ac.x) < 1, 'the trans-Pacific route ends at Acapulco');
+  ok(Math.abs(dxWrap(m.x, ac.x)) < WORLD_W / 2, 'and the crossing is the short arc');
 }
 
 ok(laneNodes().length >= 4, 'the graph has nodes');

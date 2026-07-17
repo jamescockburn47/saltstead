@@ -27,6 +27,18 @@ export function worldToLatLon(x, z) {
   return { lat: -z / M_PER_DEG, lon: x / M_PER_DEG };
 }
 
+// The world wraps east-west: the globe is WORLD_W game metres around (360 deg),
+// so +180 deg and -180 deg are the same meridian. wrapX folds a world x back into
+// [-WORLD_W/2, WORLD_W/2) (keep the ship's lon in range so geography stays valid);
+// dxWrap gives the SHORTEST signed east-west delta from->to across the seam, so
+// navigation, routing and currents can cross the antimeridian the short way.
+export const WORLD_W = 360 * M_PER_DEG;
+export function wrapX(x) { return x - Math.round(x / WORLD_W) * WORLD_W; }
+export function dxWrap(fromX, toX) {
+  const d = toX - fromX;
+  return d - Math.round(d / WORLD_W) * WORLD_W;
+}
+
 // ---------- decode ----------
 function b64ToBytes(b64) {
   if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(b64, 'base64'));

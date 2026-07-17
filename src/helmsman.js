@@ -9,6 +9,7 @@
 // deck, the hold, the guns — the ship keeps sailing.
 
 import { BEAT, optimalTrim, wrapAngle } from './sailing.js';
+import { dxWrap } from './earth.js';
 
 export const ARRIVE_R = 250;    // close enough: the mark is made
 export const TACK_S = 50;       // seconds a watch holds each board upwind
@@ -21,11 +22,12 @@ export const TACK_S = 50;       // seconds a watch holds each board upwind
 // arrived, tacking } — the caller applies rudder/trim while a hand is
 // aboard to obey them.
 export function helmOrder(yaw, x, z, tx, tz, windFrom, t = 0) {
-  const dist = Math.hypot(tx - x, tz - z);
+  const dxw = dxWrap(x, tx); // shortest east-west delta across the world seam
+  const dist = Math.hypot(dxw, tz - z);
   if (dist <= ARRIVE_R) {
     return { rudder: 0, trim: 0, arrived: true, tacking: false };
   }
-  const bearing = Math.atan2(tx - x, tz - z);
+  const bearing = Math.atan2(dxw, tz - z);
   // the eye of the wind: heading === windFrom is bow dead INTO it
   // (sailing.js convention — rel = heading - windFrom, 0 = in irons)
   const eye = windFrom;
@@ -58,7 +60,7 @@ export function helmRoute(ship, route, i, windFrom, t = 0) {
   let idx = Math.max(0, Math.min(i, route.length - 1));
   while (idx < route.length - 1) {
     const m = route[idx];
-    if (Math.hypot(m.x - ship.x, m.z - ship.z) <= ARRIVE_R) idx++;
+    if (Math.hypot(dxWrap(ship.x, m.x), m.z - ship.z) <= ARRIVE_R) idx++;
     else break;
   }
   const m = route[idx];

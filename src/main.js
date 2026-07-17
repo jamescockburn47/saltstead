@@ -41,7 +41,7 @@ import { canBoard, lootRoll, chestRoll } from './plunder.js';
 import { findDigSite, digDist, DIG_RADIUS, DIG_TIME } from './treasure.js';
 import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
-  encounterGait, ENCOUNTER_FAR, isLand,
+  encounterGait, ENCOUNTER_FAR, isLand, wrapX,
 } from './earth.js';
 import { windProfile, seaStateFor } from './weather.js';
 import { setSeaState, RIVER_STATE } from './waves.js';
@@ -2130,6 +2130,9 @@ class Game {
       ? { vx: 0, vz: 0 } : currentAt(this.ship.x, this.ship.z);
     stepShip(this.ship, windEff, dt, specEff, gait, furled,
       this.oars && !this.anchorDown ? oarSpeed(this.spec, this.crew) : 0, setDrift);
+    // the world wraps east-west: fold the ship back over the seam so her lon
+    // stays in range (geography periodic) and she can sail clean round the globe
+    this.ship.x = wrapX(this.ship.x);
 
     // riding to her anchor (anchor.js): the cable holds her over the
     // ground, snubs her way dead, and weathercocks the bow into the wind

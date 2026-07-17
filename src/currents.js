@@ -7,7 +7,7 @@
 // (lanes.js) makes a favourable current cheap; the physics (shipphysics.js)
 // drifts the player along it, gait-scaled. Append-only, like legends.js.
 
-import { latLonToWorld } from './earth.js';
+import { latLonToWorld, dxWrap, wrapX } from './earth.js';
 
 export const CURRENTS = [
   // North Atlantic gyre — clockwise
@@ -41,10 +41,12 @@ const RIBBONS = CURRENTS.map((c) => ({
 // nearest point on segment a->b to p; returns the point, the segment vector, and
 // the parametric t (clamped to the segment)
 function nearestOnSeg(px, pz, ax, az, bx, bz) {
-  const dx = bx - ax, dz = bz - az;
+  const bxu = ax + dxWrap(ax, bx); // unwrap B and P into A's frame across the seam
+  const pxu = ax + dxWrap(ax, px);
+  const dx = bxu - ax, dz = bz - az;
   const len2 = dx * dx + dz * dz;
-  const t = len2 > 0 ? clamp(((px - ax) * dx + (pz - az) * dz) / len2, 0, 1) : 0;
-  return { x: ax + dx * t, z: az + dz * t, dx, dz };
+  const t = len2 > 0 ? clamp(((pxu - ax) * dx + (pz - az) * dz) / len2, 0, 1) : 0;
+  return { x: wrapX(ax + dx * t), z: az + dz * t, dx, dz };
 }
 
 // current drift at a world point: summed over every ribbon within its width,
@@ -57,7 +59,7 @@ export function currentAt(x, z) {
     for (let i = 0; i < r.pts.length - 1; i++) {
       const a = r.pts[i], b = r.pts[i + 1];
       const n = nearestOnSeg(x, z, a.x, a.z, b.x, b.z);
-      const d = Math.hypot(x - n.x, z - n.z);
+      const d = Math.hypot(dxWrap(x, n.x), z - n.z);
       if (d < nearD) { nearD = d; near = n; }
     }
     if (near && nearD < r.width) {
