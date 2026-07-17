@@ -76,6 +76,16 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
   ok(o.tacking, 'a dead-upwind mark is worked as a beat');
 }
 
+// crew-scaled skill: a master (skill 1) holds the VMG-optimal beat; a green hand
+// (skill 0) pinches off it. At the master's beat heading, dead upwind, a master
+// sits steady while a green hand steers to pinch up.
+{
+  const master = helmOrder(-BEAT, 0, 0, 0, 4000, 0, 5, 1);
+  const green = helmOrder(-BEAT, 0, 0, 0, 4000, 0, 5, 0);
+  ok(Math.abs(master.rudder) < Math.abs(green.rudder),
+    `a master holds the optimal beat, a green hand pinches (${master.rudder.toFixed(2)} vs ${green.rudder.toFixed(2)})`);
+}
+
 // helmRoute follows a waypoint list: advance past a reached leg, arrive only at the last
 {
   const legs = [{ x: 0, z: 500 }, { x: 0, z: 4000 }];

@@ -19,6 +19,7 @@ import { helmOrder, helmRoute } from './helmsman.js';
 import { route as laneRoute } from './lanes.js';
 import { windAt } from './wind.js';
 import { currentAt } from './currents.js';
+import { decide as helmWatch } from './helmwatch.js';
 import { RESCUE_R, GRATITUDE } from './survivors.js';
 import { HULLS, hullById, nextHull, prevHull, buyHull } from './shipyard.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
@@ -317,6 +318,8 @@ class Game {
     this.course = null;
     this.route = null;
     this.routeLeg = 0;
+    this.handbackMode = null; // the helm watch's last verdict (helmwatch.js)
+    this.handbackReason = '';
     this.maps.onCourse = (lat, lon) => {
       if (this.crew < 1) {
         this.say('No hand aboard to take the helm — sign crew at a port, then set your course', 6);
@@ -1673,8 +1676,11 @@ class Game {
       // rudder for the mark, trim for the point of sail, tacking upwind — while
       // the captain walks the deck, works the guns, or goes below. The captain
       // at the wheel (T) always overrides; the anchor and the sand always win.
+      // the hand at the wheel is only as good as the watch you can muster: a
+      // lone hand pinches, a full crew sails near-optimal (helmsman.js skill)
+      const helmSkill = Math.max(0.6, Math.min(1, 0.55 + 0.06 * this.crew));
       const order = helmRoute({ yaw: this.ship.yaw, x: this.ship.x, z: this.ship.z },
-        this.route, this.routeLeg, this.wind.from, t);
+        this.route, this.routeLeg, this.wind.from, t, helmSkill);
       this.routeLeg = order.next;
       if (order.arrived) {
         this.say('THE MARK IS MADE — the helmsman heaves to and hands you the ship', 7);
@@ -1914,6 +1920,34 @@ class Game {
     let gait = encounterGait(gaitFactor(this.overLand ? 0 : this.coastDist), contactDist);
     this.shipSighted = contactDist < ENCOUNTER_FAR;
     this.lastGait = gait; // the crew's brains tell the truth about the current
+
+    // THE HELM WATCH (helmwatch.js): while a hand sails the set course, hail on a
+    // contact (SOFT — she keeps sailing) and heave to for a hazard (HARD — she
+    // hands you the ship). Only acts on a change, so it never spams.
+    if (this.course && this.route && this.crew >= 1) {
+      const hb = helmWatch({
+        kraken: !!this.kraken,
+        inTriangle: !!(this.zone && this.zone.legend.id === 'bermuda-triangle'),
+        aground: this.aground,
+        overLand: this.overLand,
+        coastDist: this.coastDist,
+        nearPort: !!(this.port && this.port.dist < 3000),
+        shoal: this.shoalWater,
+        contactDist,
+      });
+      if (hb.mode !== this.handbackMode || hb.reason !== this.handbackReason) {
+        this.handbackMode = hb.mode; this.handbackReason = hb.reason;
+        if (hb.mode === 'hard') {
+          this.say(`THE HELMSMAN HEAVES TO — ${hb.reason}. Take the helm (T).`, 8);
+          this.logEvent(`The helmsman handed back the ship: ${hb.reason}`);
+          this.course = null; this.route = null; this.maps.course = null; this.ship.trim = 0;
+        } else if (hb.mode === 'soft') {
+          this.say(hb.reason, 6);
+        }
+      }
+    } else {
+      this.handbackMode = null; this.handbackReason = '';
+    }
 
     // ---- the monsters wake (monsters.js) ----
     const zoneId = this.zone && this.zone.legend.id;
