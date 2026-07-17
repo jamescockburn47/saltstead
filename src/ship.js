@@ -4,10 +4,11 @@
 // (shipframe.js frameFor), then dressed by the def — masts, SQUARE courses
 // for the big hulls, a sterncastle for the galleon, and a visible row of
 // CANNON at the gun posts main.js actually fires from. Returns
-// { group, deck, setSail, setLantern, setAnchor } — group carries position +
-// attitude, the captain is parented to `deck` so the whole ship is one moving
-// frame, setLantern lights the masthead after dark, setAnchor lets the
-// ground tackle go (catted anchor swaps for a cable run out the hawse).
+// { group, deck, setSail, setLantern, setAnchor, setHelm } — group carries
+// position + attitude, the captain is parented to `deck` so the whole ship is
+// one moving frame, setLantern lights the masthead after dark, setAnchor lets
+// the ground tackle go (catted anchor swaps for a cable run out the hawse),
+// setHelm(rudder) spins the wheel / sweeps the tiller with the live helm.
 
 import * as THREE from 'three';
 import { SLOOP } from './shipphysics.js';
@@ -49,18 +50,36 @@ function woodMat(opts, texOpts) {
 // honest trade wood by default; a livery (livery.js) paints her side's colours.
 function buildHull(D, s, hullBase = [110, 74, 47]) {
   const L = D.maxZ - D.minZ + 1.6 * s, W = (D.maxX + 0.35 * s) * 2, H = 1.7 * s;
-  const geo = new THREE.BoxGeometry(W, H, L, 1, 1, 6);
+  // 12 z-segments: the old 6 made the bow a stepped snout — the entry needs
+  // enough stations to read as a CURVE
+  const geo = new THREE.BoxGeometry(W, H, L, 1, 1, 12);
   const pos = geo.attributes.position;
   const zMax = L / 2;
   for (let i = 0; i < pos.count; i++) {
     const y = pos.getY(i), z = pos.getZ(i);
     let sx = 1;
     const t = z / zMax;
-    if (t > 0.35) sx *= 1 - 0.92 * ((t - 0.35) / 0.65) ** 1.6; // bow taper
+    // the entry: a long easy taper that sharpens toward the stem — a fine
+    // bow, not a shovel. Below the waterline it hollows further (the
+    // cutwater), so the forefoot knifes instead of ploughing.
+    if (t > 0.15) {
+      const u = (t - 0.15) / 0.85;
+      sx *= 1 - 0.96 * u ** 2.1;
+      if (y < 0) sx *= 1 - 0.5 * u;
+    }
     if (t < -0.7) sx *= 0.82;                                   // stern tuck
     if (y < 0) sx *= 0.55;                                      // keel pinch
     pos.setX(i, pos.getX(i) * sx);
-    if (t > 0.55 && y > 0) pos.setY(i, y + 0.25 * s * (t - 0.55) / 0.45); // sheer line rises at the bow
+    if (y > 0) {
+      // the sheer line: an easy rise forward to the stem head, a small lift
+      // at the quarterdeck — the classic saucer profile, not a flat slab
+      if (t > 0.3) pos.setY(i, y + 0.42 * s * ((t - 0.3) / 0.7) ** 1.5);
+      else if (t < -0.6) pos.setY(i, y + 0.14 * s * ((-t - 0.6) / 0.4));
+    } else if (t > 0.55) {
+      // the forefoot sweeps UP toward the stem — no more square box corner
+      // dragging ahead of the bow
+      pos.setY(i, y + (H * 0.42) * ((t - 0.55) / 0.45) ** 1.7);
+    }
   }
   geo.computeVertexNormals();
   // strakes: 8 plank courses up the topsides, grain running bow to stern
@@ -236,6 +255,31 @@ function buildBelowDecks(D, s, def, spec, railMat, sparMat) {
   return g;
 }
 
+// the ship's wheel — brig and up (shipyard def.wheel): a pedestal, a
+// spoked rim, and it SPINS with the live rudder (setHelm). The small hulls
+// keep their honest tiller.
+function buildWheel(D, s, sparMat, hubMat) {
+  const g = new THREE.Group();
+  const pedestal = new THREE.Mesh(new THREE.BoxGeometry(0.16 * s, 0.62 * s, 0.12 * s), sparMat);
+  pedestal.position.y = 0.31 * s;
+  g.add(pedestal);
+  const wheel = new THREE.Group();
+  wheel.position.y = 0.74 * s;
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.34 * s, 0.035 * s, 5, 10), sparMat);
+  wheel.add(rim);
+  // four spokes through the hub = eight handles proud of the rim
+  for (let i = 0; i < 4; i++) {
+    const spoke = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.024 * s, 0.024 * s, 0.94 * s, 4), sparMat);
+    spoke.rotation.z = (i * Math.PI) / 4;
+    wheel.add(spoke);
+  }
+  const hub = new THREE.Mesh(new THREE.SphereGeometry(0.07 * s, 6, 4), hubMat);
+  wheel.add(hub);
+  g.add(wheel);
+  return { group: g, wheel };
+}
+
 // one SQUARE rig: mast + braced yards + rectangular courses, planted at
 // deck-local z — the big-ship silhouette. The rig group braces (rotates)
 // toward the wind in setSail; kind: 'square'.
@@ -301,6 +345,15 @@ function buildRig(D, s, sparMat, z, mastH, boomL, sailC = SAILC) {
     new THREE.MeshPhongMaterial({ color: sailC, flatShading: true, side: THREE.DoubleSide }));
   rig.add(sail);
 
+  // the mainsheet: boom end down to the deck, riding IN the rig group so it
+  // swings with the boom it controls
+  const sheetGeo = new THREE.BufferGeometry();
+  sheetGeo.setAttribute('position', new THREE.Float32BufferAttribute([
+    0, D.y + 1.52 * s, -(boomL - 0.15 * s),
+    0, D.y + 0.08 * s, -(boomL * 0.8),
+  ], 3));
+  rig.add(new THREE.Line(sheetGeo, new THREE.LineBasicMaterial({ color: 0x241b10 })));
+
   return { mast, rig, sails: [sail], kind: 'foreaft' };
 }
 
@@ -351,20 +404,25 @@ export function buildShip(def = SLOOP, legacyMasts) {
   //   2 masts, square   brig / corvette — braced yards and courses
   //   3 masts, square   frigate / galleon — square fore + main, spanker aft
   const rigs = [];
+  const sticks = []; // { z, h } per mast — the standing rigging reads this
   let mainZ = 1.2 * s, mainH = 7.4 * s;
   if (masts >= 3) {
     mainZ = 0.9 * s; mainH = 8.0 * s;
     rigs.push(buildSquareRig(D, s, sparMat, mainZ, mainH, 3.8 * s, sailC));
     rigs.push(buildSquareRig(D, s, sparMat, D.maxZ * 0.6, 7.0 * s, 3.4 * s, sailC));
     rigs.push(buildRig(D, s, sparMat, D.minZ * 0.55, 5.8 * s, 3.0 * s, sailC)); // the spanker
+    sticks.push({ z: mainZ, h: mainH }, { z: D.maxZ * 0.6, h: 7.0 * s }, { z: D.minZ * 0.55, h: 5.8 * s });
   } else if (masts === 2 && def.square) {
     rigs.push(buildSquareRig(D, s, sparMat, mainZ, mainH, 3.5 * s, sailC));
     rigs.push(buildSquareRig(D, s, sparMat, D.maxZ * 0.55, 6.6 * s, 3.1 * s, sailC));
+    sticks.push({ z: mainZ, h: mainH }, { z: D.maxZ * 0.55, h: 6.6 * s });
   } else if (masts === 2) {
     rigs.push(buildRig(D, s, sparMat, mainZ, mainH, 4.6 * s, sailC));
     rigs.push(buildRig(D, s, sparMat, D.maxZ * 0.55, 6.5 * s, 3.6 * s, sailC));
+    sticks.push({ z: mainZ, h: mainH }, { z: D.maxZ * 0.55, h: 6.5 * s });
   } else {
     rigs.push(buildRig(D, s, sparMat, mainZ, mainH, 4.6 * s, sailC));
+    sticks.push({ z: mainZ, h: mainH });
   }
   for (const r of rigs) { group.add(r.mast); group.add(r.rig); }
 
@@ -372,6 +430,14 @@ export function buildShip(def = SLOOP, legacyMasts) {
   bowsprit.rotation.x = -Math.PI / 2 + 0.25;
   bowsprit.position.set(0, D.y + 0.45 * s, D.maxZ + 1.0 * s);
   group.add(bowsprit);
+
+  // the STEM — a raked cutwater riding the leading edge of the new fine
+  // entry, carrying the sheer up to the bowsprit root. The piece that makes
+  // a bow read as a BOW and not the end of a box.
+  const stem = new THREE.Mesh(new THREE.BoxGeometry(0.11 * s, 1.9 * s, 0.3 * s), railMat);
+  stem.rotation.x = 0.32; // raked forward
+  stem.position.set(0, D.y - 0.35 * s, D.maxZ + 0.78 * s);
+  group.add(stem);
 
   // jib off the bowsprit, tacked to the FOREMOST mast
   const jibMastZ = masts >= 3 ? D.maxZ * 0.6 : masts === 2 ? D.maxZ * 0.55 : 1.2 * s;
@@ -399,11 +465,61 @@ export function buildShip(def = SLOOP, legacyMasts) {
     }
   }
 
-  // the helm: a tiller post so the station reads at a glance
-  const tiller = new THREE.Mesh(new THREE.CylinderGeometry(0.05 * s, 0.07 * s, 1.1 * s, 5), mat(ROPE));
-  tiller.rotation.x = 0.9;
-  tiller.position.set(F.helm.x, D.y + 0.45 * s, F.helm.z - 0.3 * s);
-  group.add(tiller);
+  // the helm: a tiller on the small hulls, a proper WHEEL from the brig up
+  // (def.wheel) — both answer the live rudder through setHelm
+  let wheelHandle = null, tillerGroup = null;
+  if (def.wheel) {
+    const w = buildWheel(D, s, sparMat, mat(0x2a2a31));
+    w.group.position.set(F.helm.x, D.y, F.helm.z + 0.35 * s);
+    group.add(w.group);
+    wheelHandle = w.wheel;
+  } else {
+    tillerGroup = new THREE.Group();
+    tillerGroup.position.set(F.helm.x, D.y, F.helm.z - 0.3 * s);
+    const tiller = new THREE.Mesh(new THREE.CylinderGeometry(0.05 * s, 0.07 * s, 1.1 * s, 5), mat(ROPE));
+    tiller.rotation.x = 0.9;
+    tiller.position.y = 0.45 * s;
+    tillerGroup.add(tiller);
+    group.add(tillerGroup);
+  }
+  // rudder [-1..1] -> the wheel spins, the tiller sweeps (opposite the turn,
+  // the way a real tiller is pushed)
+  function setHelm(rudder) {
+    if (wheelHandle) wheelHandle.rotation.z = -rudder * 2.4;
+    else if (tillerGroup) tillerGroup.rotation.y = -rudder * 0.55;
+  }
+
+  // THE STANDING RIGGING — shrouds to every masthead, forestay to the
+  // bowsprit, backstays to the quarters. One LineSegments per hull: a whole
+  // lane of rigged ships costs one draw call each, and lines fade honestly
+  // with distance at this art scale.
+  {
+    const pts = [];
+    const rope = (x1, y1, z1, x2, y2, z2) => pts.push(x1, y1, z1, x2, y2, z2);
+    for (const st of sticks) {
+      const n = st.h > 7 * s ? 3 : 2; // tall sticks carry a third shroud
+      for (const side of [-1, 1]) {
+        for (let k = 0; k < n; k++) {
+          const footZ = st.z - 0.7 * s + k * (1.4 * s / Math.max(1, n - 1));
+          rope(side * (D.maxX + 0.06 * s), D.y + 0.45 * s, footZ,
+            side * 0.04 * s, D.y + st.h * 0.8, st.z);
+        }
+      }
+    }
+    const fore = sticks.reduce((a, b) => (b.z > a.z ? b : a));
+    const aft = sticks.reduce((a, b) => (b.z < a.z ? b : a));
+    // forestay down to the bowsprit tip (the jib's luff made visible)
+    rope(0, D.y + fore.h * 0.94, fore.z, 0, D.y + 0.77 * s, D.maxZ + 2.2 * s);
+    // backstays to both quarters
+    for (const side of [-1, 1]) {
+      rope(0, D.y + aft.h * 0.9, aft.z,
+        side * (D.maxX * 0.8), D.y + 0.45 * s, D.minZ + 0.2 * s);
+    }
+    const rg = new THREE.BufferGeometry();
+    rg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    group.add(new THREE.LineSegments(rg,
+      new THREE.LineBasicMaterial({ color: 0x241b10 })));
+  }
 
   // the sterncastle — the galleon's crown: a raised aftercastle with a poop
   // above it and an ochre band along the topsides, treasure-fleet style
@@ -539,7 +655,7 @@ export function buildShip(def = SLOOP, legacyMasts) {
     }
   }
 
-  return { group, deck, setSail, setLantern, setAnchor };
+  return { group, deck, setSail, setLantern, setAnchor, setHelm };
 }
 
 // the unit hull, for every caller that just wants "a ship" (the title

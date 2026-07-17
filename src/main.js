@@ -200,6 +200,7 @@ class Game {
     this.setSail = built.setSail;
     this.setLantern = built.setLantern;
     this.setAnchor = built.setAnchor;
+    this.setHelm = built.setHelm;
     this.anchorDown = !!save?.anchorDown; // she rides where you left her
     this.setAnchor(this.anchorDown);
     this.scene.add(this.shipGroup);
@@ -422,6 +423,7 @@ class Game {
     this.setSail = built.setSail;
     this.setLantern = built.setLantern;
     this.setAnchor = built.setAnchor;
+    this.setHelm = built.setHelm;
     this.setAnchor(this.anchorDown); // the cable outlives the hull swap
     this.scene.add(this.shipGroup);
     this.riseMastLight();
@@ -1531,6 +1533,7 @@ class Game {
     this.shipGroup.position.set(this.ship.x, att.y, this.ship.z);
     this.shipGroup.rotation.set(att.pitch, this.ship.yaw, att.roll + heel);
     this.setSail(this.ship.yaw, this.ship.trim, this.wind.from, power);
+    this.setHelm(this.ship.rudder); // the wheel spins / the tiller sweeps
 
     // wake astern + bow-wave foam, world-anchored so the ship leaves them behind
     const stern = localToWorld(this.ship, 0, 0, this.shipFrame.deck.minZ - 0.5);
@@ -1756,7 +1759,10 @@ class Game {
       if (this.boardable.m.type === 'derelict') return 'E \u2014 board the derelict\u2026';
       return 'E \u2014 BOARD HER!';
     };
-    this.hud.hint.textContent = this.mode === 'below'
+    // the hint speaks the hull's own helm: 'tiller' below the brig, 'wheel'
+    // from the brig up \u2014 one substitution beats threading it through thirty
+    // string literals
+    const hintText = this.mode === 'below'
       ? 'THE HOLD \u2014 WASD to walk her \u00b7 E \u2014 up the ladder \u00b7 T \u2014 straight to the tiller'
       : this.mode === 'ashore'
       ? (this.hoardReady
@@ -1820,6 +1826,8 @@ class Game {
                     : this.anchorDown
                       ? 'AT ANCHOR \u2014 Q \u2014 weigh anchor \u00b7 T \u2014 the tiller \u00b7 WASD \u2014 walk the deck'
                     : 'T — take the tiller · WASD — walk the deck · F — fire · Q — anchor · M — chart · N — stars · L — log';
+    this.hud.hint.textContent = this.hullDef.wheel
+      ? hintText.replace(/tiller/g, 'wheel') : hintText;
     // below decks the hold is windowless: the sea and its foam would only
     // ever render as leaks through the planking seams — douse them outright
     // (self-healing every frame, so any path out of 'below' restores them)

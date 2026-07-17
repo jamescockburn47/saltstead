@@ -28,9 +28,9 @@ import { LIVERIES } from './livery.js';
 //   derelict  a schooner gone grey, sails struck
 const NPC_HULLS = {
   trader:   { spec: SCHOONER, masts: 2, guns: 0 },
-  indiaman: { spec: FRIGATE, masts: 3, square: true, guns: 2, castle: true },
-  navy:     { spec: CORVETTE, masts: 2, square: true, guns: 3, livery: LIVERIES.navy },
-  raider:   { spec: CORVETTE, masts: 2, guns: 3, livery: LIVERIES.pirate },
+  indiaman: { spec: FRIGATE, masts: 3, square: true, guns: 2, castle: true, wheel: true },
+  navy:     { spec: CORVETTE, masts: 2, square: true, guns: 3, wheel: true, livery: LIVERIES.navy },
+  raider:   { spec: CORVETTE, masts: 2, guns: 3, wheel: true, livery: LIVERIES.pirate },
   derelict: { spec: SCHOONER, masts: 2, guns: 0 },
 };
 // hands visible about her deck (the derelict's whole point is nobody's home)

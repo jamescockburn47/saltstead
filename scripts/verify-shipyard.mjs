@@ -75,5 +75,11 @@ ok(!canBuyHull(999999, HULLS[HULLS.length - 1].id), 'no rung above the top, howe
   ok(buyHull(cutterPrice - 1, 'sloop') === null, 'the yard refuses short payment');
 }
 
+// the helm ladder: tillers below the brig, a proper wheel from the brig up —
+// the wheel arrives WITH the hold (both mark the move to real ships)
+ok(HULLS.filter((h) => h.wheel).map((h) => h.id).join() === 'brig,corvette,frigate,galleon',
+  'the wheel arrives with the brig and rides every rung above');
+ok(HULLS.every((h) => !!h.wheel === !!h.below), 'wheel and hold arrive together');
+
 if (failed) { console.error(`verify-shipyard: ${failed} FAILED`); process.exit(1); }
 console.log('verify-shipyard: OK — the ladder climbs honestly, every hull briefs its captain, the yard\'s ledger adds up');
