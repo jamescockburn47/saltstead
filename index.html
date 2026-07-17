@@ -39,10 +39,55 @@
       border-radius: 4px; box-shadow: 0 8px 40px rgba(0,0,0,.6); image-rendering: pixelated; }
     #worldmap .cap { position: absolute; bottom: 6vh; width: 100%; text-align: center;
       color: #eef6fb; font-size: 13px; letter-spacing: 1px; opacity: .8; }
+    /* ---- the touch deck: on-screen controls for coarse pointers ----
+       Shown only when body.touch is set (main.js setupTouch). Left thumb is
+       the WASD pad (walk the deck / steer and sheet at the helm — the same
+       dual meaning the keys carry); right thumb is the action cluster. All
+       targets >=52px, clear of the minimap, the hint and each other. */
+    #touchui { display: none; }
+    body.touch #touchui { display: block; }
+    #touchui button { position: fixed; z-index: 5; border-radius: 12px;
+      border: 1.5px solid rgba(255,255,255,.35); background: rgba(10,22,34,.55);
+      color: #eef6fb; font-family: Georgia, serif; font-size: 15px;
+      letter-spacing: 1px; user-select: none; -webkit-user-select: none;
+      touch-action: none; display: flex; align-items: center; justify-content: center; }
+    #touchui button:active { background: rgba(232,196,106,.35); }
+    /* the pad, bottom-left (safe-area aware) */
+    #tkW { left: calc(74px + env(safe-area-inset-left)); bottom: calc(128px + env(safe-area-inset-bottom)); width: 56px; height: 56px; }
+    #tkS { left: calc(74px + env(safe-area-inset-left)); bottom: calc(12px + env(safe-area-inset-bottom)); width: 56px; height: 56px; }
+    #tkA { left: calc(12px + env(safe-area-inset-left)); bottom: calc(70px + env(safe-area-inset-bottom)); width: 56px; height: 56px; }
+    #tkD { left: calc(136px + env(safe-area-inset-left)); bottom: calc(70px + env(safe-area-inset-bottom)); width: 56px; height: 56px; }
+    /* the action cluster, bottom-right */
+    #tkE { right: calc(12px + env(safe-area-inset-right)); bottom: calc(96px + env(safe-area-inset-bottom)); width: 76px; height: 76px; font-size: 17px; border-color: rgba(232,196,106,.6); }
+    #tkF { right: calc(96px + env(safe-area-inset-right)); bottom: calc(96px + env(safe-area-inset-bottom)); width: 60px; height: 60px; }
+    #tkT { right: calc(12px + env(safe-area-inset-right)); bottom: calc(12px + env(safe-area-inset-bottom)); width: 76px; height: 56px; }
+    #tkQ { right: calc(96px + env(safe-area-inset-right)); bottom: calc(12px + env(safe-area-inset-bottom)); width: 56px; height: 56px; }
+    #tkM { right: calc(160px + env(safe-area-inset-right)); bottom: calc(12px + env(safe-area-inset-bottom)); width: 56px; height: 56px; }
+    /* the hint and the toast ride ABOVE the touch deck, never under a thumb */
+    body.touch #hint { bottom: 200px; font-size: 12px; padding: 0 10px; box-sizing: border-box; }
+    body.touch #toast { bottom: 250px !important; font-size: 13px; padding: 0 10px; box-sizing: border-box; }
+    /* the help button leaves the action cluster's corner for the top middle */
+    body.touch #helpbtn { bottom: auto; top: 12px; right: auto; left: 50%; transform: translateX(-50%); }
+    /* compact HUD on small screens: nothing overlaps, everything reads */
+    @media (max-width: 760px) {
+      #panel { font-size: 12px; line-height: 1.5; top: 56px; }
+      #speed { font-size: 18px; }
+      #trimbar { width: 90px; }
+      #title h1 { font-size: 16px; letter-spacing: 2px; }
+      #winddial { width: 58px; height: 58px; }
+      #windarrow { font-size: 22px; }
+      #minimap { width: 104px; height: 104px; top: 104px; }
+      #titlescreen .blurb { font-size: 12px; max-width: 86vw; }
+      #titlescreen h1 { font-size: 32px; letter-spacing: 6px; }
+      #titlescreen .box { width: min(320px, 86vw); }
+      #titlescreen .how { width: min(320px, 86vw); }
+    }
+
     /* the showreel records the bare canvas: hide every overlay while it runs */
-    body.reel .hud, body.reel #minimap, body.reel #port { display: none !important; }
+    body.reel .hud, body.reel #minimap, body.reel #port, body.reel #touchui { display: none !important; }
     /* while the title diorama sails, the game HUD stays below decks */
-    body.titleup .hud, body.titleup #minimap, body.titleup #helpbtn { display: none !important; }
+    body.titleup .hud, body.titleup #minimap, body.titleup #helpbtn,
+    body.titleup #touchui { display: none !important; }
     /* a translucent vignette: the live title diorama (titlescene.js) sails
        behind it. The solid gradient returns as fallback if WebGL fails. */
     #titlescreen { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column;
@@ -216,15 +261,17 @@
   <div id="titlescreen">
     <h1>SALTSTEAD</h1>
     <div class="sub">the sea never signed the treaty</div>
-    <div class="blurb">A pirate sandbox on the <b>real Earth</b>, drawn entirely by code —
-      no assets, nothing to download. Sail a scaled planet under real weather and real
-      stars: run down merchantmen, trade broadsides with the King's corvettes, capture
-      prizes for your fleet, dig up buried treasure — and chase the legends: the Kraken
-      in the Norwegian deeps, dragons over Snowdonia, the Flying Dutchman rounding the
-      Cape in a storm. Money is made at sea; the land just keeps the secrets.
-      Sail under the <b>black flag</b> — faster, hungrier, every sail is prey — or take
-      the <b>King&rsquo;s colours</b> and hunt the pirates with the squadron answering your
-      rockets. Single-ship prototype — multiplayer is coming.</div>
+    <div class="blurb">A sea-rover sandbox on the <b>real Earth</b>, drawn entirely by code —
+      no assets, nothing to download. Choose your colours: fly the <b>black flag</b> —
+      faster, hungrier, every sail is prey — or take the <b>King&rsquo;s commission</b> and
+      hunt the pirates with a squadron answering your rockets. Run down merchantmen,
+      haul survivors from the water (or leave them to the sharks), sign crew, set a
+      course on the chart and let your helmsman work her to windward while you walk
+      the deck. And the sea keeps its legends — <b>two dozen of them, on every
+      ocean</b>: the Kraken and Leviathan, fire-breathing dragons and the Roc, the
+      White Whale that rams, ghost fleets, sirens, selkies, the Fountain of Youth,
+      the Horn. Money is made at sea; the land just keeps the secrets. Single-ship
+      prototype — multiplayer is coming.</div>
     <div class="box" id="loginbox">
       <input id="invitecode" placeholder="invite code" autocomplete="off" spellcheck="false">
       <input id="invitename" placeholder="your name" autocomplete="off" maxlength="24">
@@ -249,6 +296,17 @@
     </div>
     <button id="btnhow" class="quiet how">How to play</button>
     <button id="btnfeedback" class="quiet how">Feedback &amp; bugs</button>
+  </div>
+  <div id="touchui">
+    <button id="tkW" aria-label="forward / sheet in">W ▲</button>
+    <button id="tkA" aria-label="left / port helm">A ◀</button>
+    <button id="tkD" aria-label="right / starboard helm">D ▶</button>
+    <button id="tkS" aria-label="back / sheet out">S ▼</button>
+    <button id="tkE" aria-label="the doing key">E · DO</button>
+    <button id="tkF" aria-label="fire the broadside">F 💥</button>
+    <button id="tkT" aria-label="the helm">T · HELM</button>
+    <button id="tkQ" aria-label="the anchor">Q ⚓</button>
+    <button id="tkM" aria-label="the chart">M 🗺</button>
   </div>
   <canvas id="minimap" width="296" height="296"></canvas>
   <div id="worldmap"><canvas width="1440" height="720"></canvas>

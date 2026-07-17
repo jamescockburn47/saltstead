@@ -268,6 +268,7 @@ class Game {
       // the far stop clears a galleon's truck — the flag must be zoomable-to
       this.cam.targetDist = Math.max(4, Math.min(60, this.cam.targetDist + e.deltaY * 0.01));
     });
+    this.setupTouch();
     addEventListener('resize', () => {
       this.camera.aspect = innerWidth / innerHeight;
       this.camera.updateProjectionMatrix();
@@ -381,6 +382,70 @@ class Game {
         : 'You fly the BLACK FLAG \u2014 faster than your class, richer plunder, and every honest sail is prey. The King hunts you.', 10), 800);
     }
     this.renderer.setAnimationLoop(() => this.frame());
+  }
+
+  // ---- the touch deck (index.html #touchui) ----
+  // On a coarse-pointer machine the on-screen pad and cluster appear: HOLD
+  // buttons feed the same key set the keyboard does (so WASD keeps its dual
+  // walk/helm meaning for free), TAP buttons call the same handlers. One
+  // finger on the sea drags the camera; two fingers pinch the zoom.
+  setupTouch() {
+    const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    if (!coarse) return;
+    document.body.classList.add('touch');
+    const hold = (id, code) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        try { el.setPointerCapture(e.pointerId); } catch { /* already captured */ }
+        this.keys.add(code);
+      });
+      const up = () => this.keys.delete(code);
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+    };
+    hold('tkW', 'KeyW'); hold('tkA', 'KeyA'); hold('tkS', 'KeyS'); hold('tkD', 'KeyD');
+    const tap = (id, fn) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('pointerdown', (e) => { e.preventDefault(); fn(); });
+    };
+    tap('tkE', () => this.onE());
+    tap('tkT', () => this.toggleTiller());
+    tap('tkF', () => this.fireGuns());
+    tap('tkQ', () => this.toggleAnchor());
+    tap('tkM', () => this.maps.toggleWorld());
+
+    // the camera under fingers: one drags the look, two pinch the distance
+    const el = this.renderer.domElement;
+    let drag = null, pinch = null;
+    el.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        drag = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        pinch = null;
+      } else if (e.touches.length === 2) {
+        drag = null;
+        pinch = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY);
+      }
+    }, { passive: true });
+    el.addEventListener('touchmove', (e) => {
+      e.preventDefault(); // the canvas is touch-action:none; no page scroll
+      if (e.touches.length === 1 && drag) {
+        const t0 = e.touches[0];
+        this.cam.yaw -= (t0.clientX - drag.x) * 0.006;
+        this.cam.pitch = Math.max(0.08, Math.min(1.25, this.cam.pitch + (t0.clientY - drag.y) * 0.005));
+        drag = { x: t0.clientX, y: t0.clientY };
+      } else if (e.touches.length === 2 && pinch !== null) {
+        const d = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY);
+        this.cam.targetDist = Math.max(4, Math.min(60, this.cam.targetDist - (d - pinch) * 0.06));
+        pinch = d;
+      }
+    }, { passive: false });
+    el.addEventListener('touchend', () => { drag = null; pinch = null; });
   }
 
   // the one-slot solo save (save.js); fire-and-forget, losses cost seconds
