@@ -12,6 +12,7 @@
 import { latLonToWorld, worldToLatLon, coastDistGame, gaitFactor } from './earth.js';
 import { madeGoodFactor } from './sailing.js';
 import { windAt } from './wind.js';
+import { currentAt } from './currents.js';
 import { PORTS } from './ports.js';
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -72,7 +73,10 @@ export function segmentCost(ax, az, bx, bz) {
     const w = windAt(x, z);
     const made = Math.max(0.12, madeGoodFactor(heading, w.from)); // VMG fraction along the course
     const windFactor = clamp(w.speed / 8, 0.3, 2);
-    cost += (len / n) / (gait * made * windFactor);
+    const cur = currentAt(x, z);
+    const along = cur.vx * Math.sin(heading) + cur.vz * Math.cos(heading); // + = current with us
+    const currentFactor = clamp(1 + along / 6, 0.4, 1.8); // a fair current is cheap, a foul one dear
+    cost += (len / n) / (gait * made * windFactor * currentFactor);
   }
   return cost;
 }

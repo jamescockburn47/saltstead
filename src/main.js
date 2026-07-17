@@ -18,6 +18,7 @@ import { CABLE_DEPTH, canLetGo, snubSpeed, swingToWind } from './anchor.js';
 import { helmOrder, helmRoute } from './helmsman.js';
 import { route as laneRoute } from './lanes.js';
 import { windAt } from './wind.js';
+import { currentAt } from './currents.js';
 import { RESCUE_R, GRATITUDE } from './survivors.js';
 import { HULLS, hullById, nextHull, prevHull, buyHull } from './shipyard.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
@@ -2117,8 +2118,12 @@ class Game {
     const specEff = hullFactor === 1
       ? this.spec
       : { ...this.spec, maxSpeed: this.spec.maxSpeed * hullFactor };
+    // the fair current sets her while she sails the open sea (currents.js) — not
+    // while furled at anchor or in port, aground, or river-sailing inshore
+    const setDrift = (furled || this.aground || this.overLand)
+      ? { vx: 0, vz: 0 } : currentAt(this.ship.x, this.ship.z);
     stepShip(this.ship, windEff, dt, specEff, gait, furled,
-      this.oars && !this.anchorDown ? oarSpeed(this.spec, this.crew) : 0);
+      this.oars && !this.anchorDown ? oarSpeed(this.spec, this.crew) : 0, setDrift);
 
     // riding to her anchor (anchor.js): the cable holds her over the
     // ground, snubs her way dead, and weathercocks the bow into the wind

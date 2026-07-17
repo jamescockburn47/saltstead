@@ -30,7 +30,7 @@ export const SEA_FACTS = [
     keywords: ['current', 'fast', 'crossing', 'ocean', 'blue water', 'gait', 'fair'],
     text: 'The fair current: clear of the coast the sea itself carries her — '
       + 'about 300 m off the beach it builds to five times sailing speed, and '
-      + 'in true blue water by two and a half kilometres it runs TWENTY times, '
+      + 'in true blue water by two and a half kilometres it runs TEN times, '
       + 'so an ocean crossing takes minutes. Inshore, within hailing range of '
       + 'another sail, and on rivers, the current dies and she sails at human '
       + 'pace.',

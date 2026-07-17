@@ -55,7 +55,7 @@ ok(factsBlock('') === '', 'no facts, no block');
 
 // ---- drift guards: the corpus states the LIVE numbers ----
 const all = SEA_FACTS.map((f) => f.text).join(' ');
-ok(all.includes('TWENTY times') && GAIT_MAX === 20, 'gait fact matches GAIT_MAX');
+ok(all.includes('TEN times') && GAIT_MAX === 10, 'gait fact matches GAIT_MAX');
 ok(all.includes('60 doubloons') && HAND_COST === 60, 'hiring fact matches HAND_COST');
 ok(all.includes('400 doubloons') && PRIZE_VALUE === 400, 'prize fact matches PRIZE_VALUE');
 ok(all.includes('THREE hands') && PRIZE_CREW === 3, 'prize-crew fact matches PRIZE_CREW');

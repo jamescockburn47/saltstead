@@ -90,7 +90,7 @@ export function oarSpeed(spec = SLOOP, crew = 0) {
 // oarDrive: sweeps out (oarSpeed above) — a floor under the speed target
 // that ignores the wind entirely, so she can crawl dead to windward or up a
 // walled river. Mutates and returns s.
-export function stepShip(s, wind, dt, spec = SLOOP, gait = 1, furl = false, oarDrive = 0) {
+export function stepShip(s, wind, dt, spec = SLOOP, gait = 1, furl = false, oarDrive = 0, current = { vx: 0, vz: 0 }) {
   const power = furl ? 0 : sailPower(s.yaw, wind.from, s.trim);
   const target = Math.max(speedTarget(power, wind.speed, spec.maxSpeed), oarDrive);
   const rate = target > s.speed ? spec.accel : spec.drag;
@@ -102,8 +102,11 @@ export function stepShip(s, wind, dt, spec = SLOOP, gait = 1, furl = false, oarD
   if (oarDrive > 0) bite = Math.max(bite, 0.5);
   s.yaw += s.rudder * spec.turnRate * bite * dt;
 
-  s.x += Math.sin(s.yaw) * s.speed * gait * dt;
-  s.z += Math.cos(s.yaw) * s.speed * gait * dt;
+  // the fair current carries the water she floats in, so it advances with the
+  // gait exactly as her own way does (currents.js; default zero for every hull
+  // that doesn't sample it — verify-ship stays unchanged)
+  s.x += (Math.sin(s.yaw) * s.speed + current.vx) * gait * dt;
+  s.z += (Math.cos(s.yaw) * s.speed + current.vz) * gait * dt;
   return s;
 }
 

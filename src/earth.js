@@ -290,13 +290,13 @@ export function elevation(lat, lon) {
 }
 
 // open-sea gait, two stages: 1x inshore so harbours and coastlines are sailed
-// at human scale, 5x once clear of the coast, then a second ramp to 20x in
-// true blue water so an ocean crossing is a couple of minutes, not a tea
-// break. The wind ALSO builds offshore (weather.js windProfile), so the two
-// multiply: blue water is fast because the world compresses AND because the
-// ship is genuinely flying along.
+// at human scale, 5x once clear of the coast, then a second ramp to 10x in
+// true blue water. (Halved from 20x — the fair current now makes up part of the
+// difference; see currents.js.) The wind ALSO builds offshore (weather.js
+// windProfile), so the three stack: blue water is fast because the world
+// compresses, the wind fills in, and a favourable current sets you along.
 const smooth01 = (t) => { const c = Math.max(0, Math.min(1, t)); return c * c * (3 - 2 * c); };
-export const GAIT_MAX = 20;
+export const GAIT_MAX = 10;
 // The bands sit CLOSE in (playtest: the old 800/2200 m onsets left five dull
 // minutes between weighing anchor and the sea starting to move): the current
 // picks up 300 m off the beach and runs full blue-water gait by ~2.5 km.

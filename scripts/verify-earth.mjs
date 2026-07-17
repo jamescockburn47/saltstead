@@ -104,7 +104,7 @@ ok(alpsMax > elevation(38.5, -98.4) * 2, 'the Alps tower over Kansas');
 
 // gait: 1x at the beach, moving within 300 m, GAIT_MAX by ~2.5 km — the
 // current lives CLOSE to shore now (playtest fix), smooth and monotonic
-ok(GAIT_MAX === 20, 'blue-water gait is 20x');
+ok(GAIT_MAX === 10, 'blue-water gait is 10x');
 ok(gaitFactor(0) === 1 && gaitFactor(300) === 1, 'no gait right at the beach');
 ok(gaitFactor(700) > 2, `the sea is already moving 700 m off (${gaitFactor(700).toFixed(2)}x)`);
 ok(gaitFactor(2500) === GAIT_MAX && gaitFactor(50000) === GAIT_MAX, 'full blue-water gait by 2.5 km');

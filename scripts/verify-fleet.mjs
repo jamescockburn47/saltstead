@@ -58,7 +58,7 @@ for (let i = 0; i < FLEET_MAX; i++) {
   // full blue-water pace: she must keep up, not fall out of the world
   const flag2 = { x: 0, z: 0, yaw: 0.7 };
   const f2 = { x: stationPoint(0, 0, 0.7, 1).x, z: stationPoint(0, 0, 0.7, 1).z, yaw: 0.7, speed: 0 };
-  const pace2 = 12.5 * 20; // hull 12.5 m/s at 20x gait
+  const pace2 = 12.5 * 20; // a hard stress pace, well over the 10x blue-water gait
   let worst2 = 0;
   for (let i = 0; i < 60 * 60; i++) {
     flag2.x += Math.sin(0.7) * pace2 * dt;
@@ -67,8 +67,8 @@ for (let i = 0; i < FLEET_MAX; i++) {
     followStep(f2, s, 0.7, pace2, dt);
     if (i > 60 * 30) worst2 = Math.max(worst2, Math.hypot(s.x - f2.x, s.z - f2.z));
   }
-  ok(worst2 < 60, `keeps up at 20x blue-water pace (worst error ${worst2.toFixed(0)} m)`);
+  ok(worst2 < 60, `keeps up at a hard blue-water pace (worst error ${worst2.toFixed(0)} m)`);
 }
 
 if (failed) { console.error(`verify-fleet: ${failed} FAILED`); process.exit(1); }
-console.log('verify-fleet: OK — capture caps hold, line astern true, follow converges and keeps 20x pace');
+console.log('verify-fleet: OK — capture caps hold, line astern true, follow converges and keeps a hard pace');
