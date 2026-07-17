@@ -44,5 +44,22 @@ const mag = (v) => Math.hypot(v.vx, v.vz);
 
 ok(CURRENTS.length >= 4, 'the gyres are seeded');
 
+// no ribbon segment may straddle the antimeridian: the map does not wrap
+// (earth.js x=lon*444), so a >180 deg longitude span inverts into a globe-
+// spanning band the wrong way. Guards against re-introducing that class of bug.
+for (const c of CURRENTS) {
+  for (let i = 0; i < c.path.length - 1; i++) {
+    ok(Math.abs(c.path[i].lon - c.path[i + 1].lon) < 180, `${c.id}: no segment straddles +/-180`);
+  }
+}
+
+// the Atlantic equatorial limb reads cleanly westward, not diluted by a stray
+// far-ocean ribbon bleeding across the map
+{
+  const p = latLonToWorld(14, -50);
+  const c = currentAt(p.x, p.z);
+  ok(c.vx < -0.8 && Math.abs(c.vz) < 0.6, `the Atlantic equatorial current runs clean west (${c.vx.toFixed(2)}, ${c.vz.toFixed(2)})`);
+}
+
 if (failed) { console.error(`verify-currents: ${failed} FAILED`); process.exit(1); }
 console.log('verify-currents: OK — ribbons run their axis, gyres flow both ways, taper off-axis, still beyond, deterministic');

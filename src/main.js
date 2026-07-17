@@ -1199,6 +1199,8 @@ class Game {
   belayCourse() {
     if (!this.course) return;
     this.course = null;
+    this.route = null;
+    this.routeLeg = 0;
     this.maps.course = null;
     this.say('BELAY THAT — the course is struck; the helm is lashed on the last heading', 5);
   }
@@ -1882,8 +1884,12 @@ class Game {
       }
     }
 
-    // the ghost of the Cape: the weather decides whether she sails tonight
-    const dutchOn = !this.dutchmanTaken && dutchmanSails(this.weatherState, sol.nightness);
+    // the ghost of the Cape: a filthy night raises her (dutchmanSails) — and with
+    // procedural storms deferred to a later plan, she also haunts her own Cape
+    // waters after dark, so the legend stays reachable until storms drive the sky
+    const inCape = this.zone && this.zone.legend.id === 'flying-dutchman';
+    const dutchOn = !this.dutchmanTaken
+      && (dutchmanSails(this.weatherState, sol.nightness) || (inCape && sol.nightness > 0.4));
     this.legendFx.update(t, this.ship.x, this.ship.z, dutchOn);
 
     // wildlife reads the waters: gulls inshore, dolphins offshore, the

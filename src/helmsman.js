@@ -54,6 +54,7 @@ export function helmOrder(yaw, x, z, tx, tz, windFrom, t = 0) {
 // `arrived` is true ONLY at the final waypoint; `next` is the (possibly advanced)
 // index for the caller to keep.
 export function helmRoute(ship, route, i, windFrom, t = 0) {
+  if (!route || route.length === 0) return { rudder: 0, trim: 0, arrived: true, tacking: false, next: 0 };
   let idx = Math.max(0, Math.min(i, route.length - 1));
   while (idx < route.length - 1) {
     const m = route[idx];

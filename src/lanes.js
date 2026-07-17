@@ -27,12 +27,15 @@ export const LANES = [
     { lat: 37, lon: -12, width: 4000, choke: true },
     { port: 'cadiz' },
   ] },
-  { id: 'manila-galleon', name: 'The Manila Galleon', marks: [
-    { port: 'manila' },
-    { lat: 18, lon: 150, width: 14000 },
-    { lat: 20, lon: -150, width: 15000 },
-    { lat: 18, lon: -110, width: 8000 },
-    { port: 'acapulco' },
+  // NB: no lane may straddle +/-180 — the map does not wrap (earth.js: x=lon*444),
+  // so a dateline-crossing edge inverts into a wrong-way sweep across the whole
+  // world. A trans-Pacific galleon lane needs proper wrap handling (later); for
+  // now the second lane is the North Atlantic packet run, all open ocean.
+  { id: 'north-atlantic', name: 'The North Atlantic Packet', marks: [
+    { port: 'boston' },
+    { lat: 44, lon: -50, width: 14000 },
+    { lat: 49, lon: -22, width: 12000, choke: true },
+    { port: 'bristol' },
   ] },
 ];
 

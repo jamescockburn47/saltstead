@@ -60,6 +60,15 @@ for (const lane of LANES) {
     'route is deterministic');
 }
 
+// no lane edge may straddle the antimeridian: the map does not wrap, so a
+// >180 deg longitude span inverts into a wrong-way sweep across the whole world
+for (const lane of LANES) {
+  const lons = lane.marks.map((m) => worldToLatLon(resolveMark(m).x, resolveMark(m).z).lon);
+  for (let i = 0; i < lons.length - 1; i++) {
+    ok(Math.abs(lons[i] - lons[i + 1]) < 180, `${lane.id}: no edge straddles +/-180`);
+  }
+}
+
 ok(laneNodes().length >= 4, 'the graph has nodes');
 ok(nearestNode(latLonToWorld(23.5, -82).x, latLonToWorld(23.5, -82).z) !== null, 'nearestNode resolves');
 

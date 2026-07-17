@@ -11,6 +11,7 @@
 // makes the cut — the beats join as clean hard cuts.
 
 import { latLonToWorld } from './earth.js';
+import { windAt } from './wind.js';
 import { DAY_LENGTH } from './skymath.js';
 import { hullById } from './shipyard.js';
 
@@ -213,7 +214,7 @@ export async function runShowreel(g, opts = {}) {
       if (b.hull && g.hullId !== b.hull) g.setHull(hullById(b.hull));
       const p = latLonToWorld(b.lat, b.lon);
       g.ship.x = p.x; g.ship.z = p.z;
-      g.ship.yaw = g.windBase.from + 2.1; // a quarter reach: the sail sets full
+      g.ship.yaw = windAt(g.ship.x, g.ship.z).from + 2.1; // a quarter reach: the sail sets full
       g.ship.trim = 0.8; g.ship.speed = 2.5; g.ship.rudder = 0;
       g.geoClock = 0;                     // re-sample coast/zone at once
       g.photoCam = cameraPose(b, 0, g.ship.x, g.ship.z);
