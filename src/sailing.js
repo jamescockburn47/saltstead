@@ -37,6 +37,31 @@ export function pointOfSailPower(rel) {
   return POS_CURVE[POS_CURVE.length - 1][1];
 }
 
+// The VMG-optimal beat: the heading off the eye that maximises progress made
+// good to windward — argmax_rel pointOfSailPower(rel)*cos(rel) ≈ 0.87 rad (~50°).
+// Static (the curve is fixed; wind speed and gait scale every heading alike).
+// The helmsman holds this instead of the old pinch; the router costs a beat by it.
+export const BEAT = (() => {
+  let best = IRONS, bv = -1;
+  for (let a = IRONS; a <= 1.4; a += 0.005) {
+    const v = pointOfSailPower(a) * Math.cos(a);
+    if (v > bv) { bv = v; best = a; }
+  }
+  return best;
+})();
+
+// Speed made good along a desired course, as a fraction of hull power, given
+// where the wind is FROM (both radians, world yaw). A course you can lay (>= BEAT
+// off the eye) makes good its own point-of-sail power; a course inside the beat
+// is worked to windward by tacking at BEAT, making good pointOfSailPower(BEAT)*
+// cos(BEAT - a). The router uses this to make a beat dear and a reach cheap.
+// (Downwind-gybe optimisation: a later plan.)
+export function madeGoodFactor(course, windFrom) {
+  const a = Math.min(Math.abs(wrapAngle(course - windFrom)), PI);
+  if (a >= BEAT) return pointOfSailPower(a);
+  return pointOfSailPower(BEAT) * Math.cos(BEAT - a);
+}
+
 // Optimal sheet trim for a given point of sail: sheeted hard in (0) when
 // close-hauled, fully eased (1) on a dead run. Linear between.
 export function optimalTrim(rel) {

@@ -2,9 +2,9 @@
 // trim honest, never points into the no-go, works upwind on alternating
 // boards, and calls the arrival. Then the whole loop: a simulated voyage
 // under helm orders actually REACHES a mark that needs a beat to windward.
-import { helmOrder, ARRIVE_R, TACK_S } from '../src/helmsman.js';
+import { helmOrder, helmRoute, ARRIVE_R, TACK_S } from '../src/helmsman.js';
 import { newShipState, stepShip, SLOOP } from '../src/shipphysics.js';
-import { IRONS, wrapAngle } from '../src/sailing.js';
+import { IRONS, BEAT, wrapAngle, pointOfSailPower } from '../src/sailing.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -59,5 +59,33 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
   ok(arrived, `the helmsman made the mark (${Math.hypot(s.x - mark.x, s.z - mark.z).toFixed(0)} m off at the end)`);
 }
 
+// THE VMG FIX (audit Gap 1): BEAT is the VMG-optimal angle and makes far more
+// progress to windward than the old pinch (IRONS + 0.12).
+{
+  const oldPinch = IRONS + 0.12;
+  const vmg = (a) => pointOfSailPower(a) * Math.cos(a);
+  ok(BEAT > oldPinch, `the beat opens up from the pinch (${BEAT.toFixed(2)} > ${oldPinch.toFixed(2)})`);
+  ok(vmg(BEAT) > vmg(oldPinch) * 1.4, `the beat makes far more VMG to windward (${vmg(BEAT).toFixed(2)} vs ${vmg(oldPinch).toFixed(2)})`);
+}
+
+// and the helmsman HOLDS the beat: a ship already on the port beat for a dead-
+// upwind mark needs no helm (proves helmOrder steers to BEAT, not the pinch)
+{
+  const o = helmOrder(-BEAT, 0, 0, 0, 4000, 0, 5); // yaw = -BEAT; mark dead upwind; wind from 0; t=5 -> port board
+  ok(Math.abs(o.rudder) < 0.1, `on the beat the helm sits steady (${o.rudder.toFixed(2)})`);
+  ok(o.tacking, 'a dead-upwind mark is worked as a beat');
+}
+
+// helmRoute follows a waypoint list: advance past a reached leg, arrive only at the last
+{
+  const legs = [{ x: 0, z: 500 }, { x: 0, z: 4000 }];
+  const early = helmRoute({ yaw: 0, x: 0, z: 0 }, legs, 0, 2.4, 0);
+  ok(early.next === 0 && !early.arrived, 'far from all marks: steer the first, not arrived');
+  const atFirst = helmRoute({ yaw: 0, x: 0, z: 500 }, legs, 0, 2.4, 0);
+  ok(atFirst.next === 1 && !atFirst.arrived, 'reaching the first leg advances to the second');
+  const atLast = helmRoute({ yaw: 0, x: 0, z: 4000 }, legs, 1, 2.4, 0);
+  ok(atLast.arrived, 'reaching the final leg is arrival');
+}
+
 if (failed) { console.error(`verify-helmsman: ${failed} FAILED`); process.exit(1); }
-console.log('verify-helmsman: OK — steers for the mark, respects the no-go, tacks on the clock, and actually arrives');
+console.log('verify-helmsman: OK — beats at the VMG-optimal angle, follows a route, respects the no-go, and arrives');
