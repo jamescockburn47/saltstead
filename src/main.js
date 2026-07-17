@@ -14,6 +14,8 @@ import { SkyFx } from './skyfx.js';
 import { newShipState, stepShip, shipAttitude, beaches } from './shipphysics.js';
 import { frameFor, clampToDeck, localToWorld, gunPosts, holdFor } from './shipframe.js';
 import { CABLE_DEPTH, canLetGo, snubSpeed, swingToWind } from './anchor.js';
+import { helmOrder } from './helmsman.js';
+import { RESCUE_R, GRATITUDE } from './survivors.js';
 import { HULLS, hullById, nextHull, prevHull, buyHull } from './shipyard.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
 import { waveHeight } from './waves.js';
@@ -247,6 +249,7 @@ class Game {
       if (e.code === 'KeyY' && !e.repeat) this.wardenMaterialise();
       if (e.code === 'KeyG' && !e.repeat) this.signalSquadron();
       if (e.code === 'KeyV' && !e.repeat) this.toggleQuality();
+      if (e.code === 'KeyC' && !e.repeat) this.belayCourse();
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     this.dragging = false;
@@ -291,6 +294,22 @@ class Game {
       `${this.hullDef.name} \u00b7 ${this.hullDef.guns} gun${this.hullDef.guns > 1 ? 's' : ''} a side \u00b7 ${this.fac.tag}`;
 
     this.maps = new MapUI();
+    // the chart SETS the helmsman's course: click the world chart with a
+    // hand aboard and she sails there (helmsman.js) while you work the deck
+    this.course = null;
+    this.maps.onCourse = (lat, lon) => {
+      if (this.crew < 1) {
+        this.say('No hand aboard to take the helm — sign crew at a port, then set your course', 6);
+        return;
+      }
+      const w = latLonToWorld(lat, lon);
+      this.course = { x: w.x, z: w.z };
+      this.maps.course = { lat, lon };
+      const d = Math.hypot(w.x - this.ship.x, w.z - this.ship.z);
+      this.say(`COURSE SET — the helmsman lays her for the ${compassPoint(this.ship.x, this.ship.z, w.x, w.z)}, `
+        + `${Math.max(1, Math.round(d / 1000))} km by the log (C belays it; the wheel overrides)`, 8);
+      this.logEvent('Set a course on the chart — a hand takes the helm');
+    };
     this.starchart = new StarChartUI();
     this.logui = new LogUI();
     this.port = null; // { haven, dist } refreshed with the geography
@@ -716,6 +735,7 @@ class Game {
       return;
     }
     if (this.dutchmanBoardable) { this.boardDutchman(); return; }
+    if (this.rescueReady && this.rescueReady.length) { this.rescueSurvivors(); return; }
     if (this.boardable) { this.boardPrize(); return; }
     if (this.captureable) { this.takePrize(); return; }
     if (this.digReady && this.digTimer <= 0) {
@@ -783,6 +803,14 @@ class Game {
       + `(${def.guns} gun${def.guns > 1 ? 's' : ''} a side, ${def.berths} berths)`, 6);
     this.logEvent(`The warden's writ raised a ${def.name} from the sea`);
     this.persist();
+  }
+
+  // C — belay the set course: the helm is lashed, the captain has the ship
+  belayCourse() {
+    if (!this.course) return;
+    this.course = null;
+    this.maps.course = null;
+    this.say('BELAY THAT — the course is struck; the helm is lashed on the last heading', 5);
   }
 
   // ---- the signal rocket (faction.js) — the NAVY's institutional edge ----
@@ -1075,6 +1103,28 @@ class Game {
     this.persist();
   }
 
+  // haul the swimmers out of the water (survivors.js): each soul made up
+  // their own mind about your flag in the water — joiners sign articles on
+  // the spot (berths allowing); the rest press a grateful purse on you and
+  // work their passage to the next port
+  rescueSurvivors() {
+    const souls = this.merchants.rescue(this.rescueReady);
+    this.rescueReady = [];
+    if (!souls.length) return;
+    let joined = 0, grateful = 0;
+    for (const s of souls) {
+      if (s.join && this.crew < this.hullDef.berths) { this.crew++; joined++; } else { grateful++; }
+    }
+    const purse = grateful * GRATITUDE;
+    this.gold += purse;
+    let msg = `${souls.length} soul${souls.length > 1 ? 's' : ''} hauled from the water`;
+    if (joined) msg += ` — ${joined} sign${joined === 1 ? 's' : ''} articles on the spot`;
+    if (grateful) msg += `${joined ? ';' : ' —'} ${grateful} press${grateful === 1 ? 'es' : ''} a grateful ${purse} doubloons on you and ask${grateful === 1 ? 's' : ''} for the next port`;
+    this.say(msg, 8);
+    this.logEvent(msg);
+    this.persist();
+  }
+
   // the Flying Dutchman struck no colours in three hundred years — but on a
   // matched course in a screaming storm, a bold crew can step across
   boardDutchman() {
@@ -1177,6 +1227,24 @@ class Game {
       this.ship.rudder += (rt - this.ship.rudder) * Math.min(1, dt * 5);
       if (k.has('KeyW')) this.ship.trim = Math.max(0, this.ship.trim - dt * 0.45);
       if (k.has('KeyS')) this.ship.trim = Math.min(1, this.ship.trim + dt * 0.45);
+    } else if (this.course && this.crew >= 1 && !this.anchorDown && !this.aground) {
+      // THE HELMSMAN (helmsman.js, verify-gated): a hand steers the course
+      // set on the chart — rudder for the mark, trim for the point of sail,
+      // tacking on the watch clock upwind — while the captain walks the
+      // deck, works the guns, or goes below. The captain at the wheel (T)
+      // always overrides; the anchor and the sand always win.
+      const order = helmOrder(this.ship.yaw, this.ship.x, this.ship.z,
+        this.course.x, this.course.z, this.wind.from, t);
+      if (order.arrived) {
+        this.say('THE MARK IS MADE — the helmsman heaves to and hands you the ship', 7);
+        this.logEvent('The helmsman made the set course');
+        this.course = null;
+        this.maps.course = null;
+        this.ship.trim = 0;
+      } else {
+        this.ship.rudder += (order.rudder - this.ship.rudder) * Math.min(1, dt * 4);
+        this.ship.trim += (order.trim - this.ship.trim) * Math.min(1, dt * 0.8);
+      }
     } else if (this.aground) {
       // beached with nobody at the tiller: she STAYS beached — no lashed
       // tiller quietly walking her off the sand while the captain's forward
@@ -1226,7 +1294,8 @@ class Game {
     // contacts — each sail reading the player's FLAG (faction.js), and any
     // corvette under signal orders hunting her handed quarry instead
     this.merchants.update(t, dt, this.ship.x, this.ship.z, this.wind.from,
-      this.shoalWater, lanternsUp, this.faction, (id) => {
+      this.shoalWater, lanternsUp, this.faction,
+      /* latAbs for the swimmers' clock rides after quarryOf */ (id) => {
         const rid = this.assist.get(id);
         if (!rid) return null;
         const target = this.merchants.live.get(rid);
@@ -1235,7 +1304,19 @@ class Game {
           return null;
         }
         return { x: target.m.x, z: target.m.z };
-      });
+      }, Math.abs(worldToLatLon(this.ship.x, this.ship.z).lat));
+
+    // the sea keeps its account of the ignored: swimmers the fins found
+    {
+      const taken = this.merchants.consumeTaken();
+      if (taken > 0) {
+        const warm = Math.abs(worldToLatLon(this.ship.x, this.ship.z).lat) < 42;
+        this.say(warm
+          ? `The fins closed in — ${taken > 1 ? 'the swimmers are' : 'the swimmer is'} gone`
+          : 'The cold sea took the swimmers', 6);
+        this.logEvent(warm ? 'The sharks took the swimmers' : 'The sea took the swimmers');
+      }
+    }
 
     // the squadron works its guns: an assisting corvette in range of her
     // raider throws real broadsides (the same dice the corvette rolls at a
@@ -1441,6 +1522,11 @@ class Game {
     // your own prizes sail in your wake, sharing your current
     this.fleet.update(t, dt, this.ship.x, this.ship.z, this.ship.yaw,
       this.ship.speed * gait, this.wind.from, lanternsUp);
+
+    // the rescue window: souls in the water within reach, way nearly off —
+    // hauling swimmers out ranks above every other use of E (their clock runs)
+    this.rescueReady = this.ship.speed < 2.5
+      ? this.merchants.survivorsNear(this.ship.x, this.ship.z, RESCUE_R) : [];
 
     // boarding window: alongside a prize with speed matched — the boarding
     // law is your flag's (faction.js): the navy never plunders the trade
@@ -1864,6 +1950,8 @@ class Game {
           : `Y DDRAIG GOCH circles above \u2014 F only tells when she STOOPS (${this.dragon.hp} wounds will do it)`)
       : this.dutchmanBoardable
         ? 'E \u2014 BOARD THE FLYING DUTCHMAN!'
+      : this.rescueReady && this.rescueReady.length
+        ? `E \u2014 HAUL ${this.rescueReady.length > 1 ? 'THE SURVIVORS' : 'THE SURVIVOR'} FROM THE WATER`
       : boardHint()
         ? boardHint()
         : this.captureable

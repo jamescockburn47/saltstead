@@ -108,9 +108,13 @@ export function shipAttitude(s, t, spec = SLOOP, ground = null) {
   const stern = surf(s.x - sy * hl, s.z - cy * hl);
   const star = surf(s.x + cy * hb, s.z - sy * hb);
   const port = surf(s.x - cy * hb, s.z + sy * hb);
+  // a heavy hull stands STIFF in a seaway: her inertia refuses the chop a
+  // dinghy answers. Scaled against the unit sloop — the galleon rides the
+  // same sea at well under half the sloop's rock.
+  const steadiness = Math.min(1, (9 / spec.length) ** 0.7);
   return {
     y: (bow + stern + star + port) / 4 - spec.draft,
-    pitch: Math.atan2(stern - bow, hl * 2),
-    roll: Math.atan2(port - star, hb * 2),
+    pitch: Math.atan2(stern - bow, hl * 2) * steadiness,
+    roll: Math.atan2(port - star, hb * 2) * steadiness,
   };
 }

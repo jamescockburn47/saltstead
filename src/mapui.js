@@ -77,6 +77,41 @@ export class MapUI {
       if (e.code === 'KeyM' && !e.repeat) this.toggleWorld();
       if (e.code === 'Escape' && this.worldOpen) this.toggleWorld();
     });
+
+    // click the chart, set a course: the world chart is a plain
+    // equirectangular sheet, so the inversion is the projection backwards.
+    // main.js owns what a course MEANS (the helmsman); the chart only
+    // reports where the captain's finger landed.
+    this.course = null;   // { lat, lon } while a course is set
+    this.onCourse = null; // main.js hangs the handler here
+    this.worldCanvas.addEventListener('click', (e) => {
+      if (!this.onCourse) return;
+      const r = this.worldCanvas.getBoundingClientRect();
+      const px = ((e.clientX - r.left) / r.width) * this.worldCanvas.width;
+      const py = ((e.clientY - r.top) / r.height) * this.worldCanvas.height;
+      const lon = (px / this.worldCanvas.width) * 360 - 180;
+      const lat = 90 - (py / this.worldCanvas.height) * 180;
+      this.onCourse(lat, lon);
+    });
+  }
+
+  // the course on a chart: a dashed rhumb from the ship and a pennant at
+  // the mark (both charts carry it — that is what a chart is FOR)
+  drawCourse(ctx, s, view, boundsN = null) {
+    if (!this.course) return;
+    const c = chartXY(this.course.lat, this.course.lon, view);
+    if (boundsN !== null && (c.x < 0 || c.x >= boundsN || c.y < 0 || c.y >= boundsN)) return;
+    const k = boundsN !== null ? this.mini.width / boundsN : 1;
+    ctx.strokeStyle = BLOOD;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(s.x * k, s.y * k); ctx.lineTo(c.x * k, c.y * k); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = BLOOD;
+    ctx.beginPath();
+    ctx.moveTo(c.x * k, c.y * k); ctx.lineTo(c.x * k, c.y * k - 11);
+    ctx.lineTo(c.x * k + 8, c.y * k - 8); ctx.closePath();
+    ctx.fill();
   }
 
   toggleWorld() {
@@ -129,6 +164,7 @@ export class MapUI {
         drawShip(ctx, p.x * k, p.y * k, o.yaw, 0.65, SAIL_TINT[o.type] || INK);
     }
     const s = chartXY(lat, lon, this.localView);
+    this.drawCourse(ctx, s, this.localView, LOCAL_N);
     drawShip(ctx, s.x * k, s.y * k, yaw);
   }
 
@@ -155,6 +191,7 @@ export class MapUI {
       ctx.fillText('the dig', p.x + 8, p.y + 3);
     }
     const s = chartXY(lat, lon, view);
+    this.drawCourse(ctx, s, view);
     drawShip(ctx, s.x, s.y, yaw, 1.4);
   }
 }

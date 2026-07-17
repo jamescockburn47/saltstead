@@ -15,6 +15,7 @@ import { newHullState, applyShot, speedFactor, isSinking, salvageValue, SINK_TIM
 import { zoneOf } from './legendfx.js';
 import { attitude } from './faction.js';
 import { LIVERIES } from './livery.js';
+import { spawnSurvivors, stepSurvivor, survivorFate } from './survivors.js';
 
 // what each trade SAILS — real rungs of the same ladder the player climbs,
 // so a lane full of ships is a lane full of different silhouettes, and the
@@ -61,7 +62,25 @@ export class MerchantLayer {
     this.sunk = new Set();     // ids on the bottom (their berths stay empty)
     this.flotsam = [];         // { x, z, gold, mesh } — what floats off a sinking
     this.escortN = 0;          // signal-rocket corvettes minted this session
+    this.swimmers = [];        // { s, group, arm } — souls in the water (survivors.js)
+    this.takenCount = 0;       // swimmers the sea took since last asked (main toasts)
     this.bermuda = zoneOf('bermuda-triangle');
+  }
+
+  // a soul in the water: a head, shoulders awash, one arm waving for the sail
+  buildSwimmer() {
+    const g = new THREE.Group();
+    const skin = new THREE.MeshPhongMaterial({ color: 0xd9a56f, flatShading: true });
+    const shirt = new THREE.MeshPhongMaterial({ color: 0x4a5a6b, flatShading: true });
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 6, 5), skin);
+    head.position.y = 0.28;
+    const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.24), shirt);
+    shoulders.position.y = 0.06;
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.5, 0.09), skin);
+    arm.geometry.translate(0, 0.25, 0); // hinge at the shoulder
+    arm.position.set(0.2, 0.12, 0);
+    g.add(head, shoulders, arm);
+    return { group: g, arm };
   }
 
   spawnable(px, pz) {
@@ -83,7 +102,8 @@ export class MerchantLayer {
   // quarryOf(id): main.js hands an assisting corvette her target — returns
   // { x, z } to hunt instead of the player, or null.
   update(t, dt, px, pz, windFrom, shoal = false, night = false,
-    factionId = 'pirate', quarryOf = null) {
+    factionId = 'pirate', quarryOf = null, latAbs = 30) {
+    this.latAbs = latAbs;
     // stream in
     for (const spec of this.spawnable(px, pz)) {
       if (this.live.has(spec.id) || this.sunk.has(spec.id)) continue;
@@ -150,6 +170,29 @@ export class MerchantLayer {
     for (const w of wrecks) w.age += dt;
     if (wrecks.length && wrecks[0].age > 240) wrecks.shift();
 
+    // the souls in the water: bob, wave, strike out for your sail — and the
+    // sea's clock runs on the ignored (survivors.js survivorFate; the warm
+    // latitudes' sharks find them first). latAbs arrives from main.js.
+    this.swimmers = this.swimmers.filter((w) => {
+      if (w.sinkT !== undefined) { // being taken: a second under, then gone
+        w.sinkT += dt;
+        w.group.position.y -= dt * 1.6;
+        if (w.sinkT > 1.2) { this.scene.remove(w.group); return false; }
+        return true;
+      }
+      stepSurvivor(w.s, px, pz, dt);
+      if (survivorFate(w.s.age, this.latAbs ?? 30) === 'taken') {
+        w.sinkT = 0; // the fin was quicker
+        this.takenCount++;
+        return true;
+      }
+      const y = waveHeight(w.s.x, w.s.z, t);
+      w.group.position.set(w.s.x, y - 0.12 + Math.sin(t * 1.8 + w.s.phase) * 0.08, w.s.z);
+      w.group.rotation.y = Math.atan2(px - w.s.x, pz - w.s.z); // face the sail
+      w.arm.rotation.z = 0.6 + Math.sin(t * 5 + w.s.phase) * 0.7; // the wave for help
+      return true;
+    });
+
     // flotsam bobs where its ship went down
     for (const f of this.flotsam) {
       f.mesh.position.set(f.x, waveHeight(f.x, f.z, t) + 0.1, f.z);
@@ -161,6 +204,31 @@ export class MerchantLayer {
     const out = [];
     for (const e of this.live.values()) out.push({ x: e.m.x, z: e.m.z });
     return out;
+  }
+
+  // swimmers within reach of the rail (not already being taken)
+  survivorsNear(px, pz, r) {
+    return this.swimmers.filter((w) => w.sinkT === undefined
+      && Math.hypot(w.s.x - px, w.s.z - pz) <= r);
+  }
+
+  // haul them out: remove the bodies, hand back the souls (main.js decides
+  // who signs articles and who pays the grateful purse)
+  rescue(list) {
+    const souls = [];
+    for (const w of list) {
+      this.scene.remove(w.group);
+      this.swimmers = this.swimmers.filter((x) => x !== w);
+      souls.push(w.s);
+    }
+    return souls;
+  }
+
+  // how many the sea took since last asked (main.js toasts the news)
+  consumeTaken() {
+    const n = this.takenCount;
+    this.takenCount = 0;
+    return n;
   }
 
   // every live hull with her papers — the lookout and the charts read this
@@ -230,10 +298,19 @@ export class MerchantLayer {
   // update and the sea forgets after FRENZY_S seconds (wildlife.js).
   wrecks() { return this._wrecks || (this._wrecks = []); }
 
-  // she's holed through: the sinking starts, salvage floats off
+  // she's holed through: the sinking starts, salvage floats off — and a
+  // CREWED ship spills her people into the water (survivors.js; a derelict
+  // has nobody left to swim)
   startSinking(id, e) {
     e.sinkT = 0;
     this.wrecks().push({ x: e.m.x, z: e.m.z, age: 0 });
+    if (e.m.type !== 'derelict') {
+      for (const s of spawnSurvivors(idHash(id), e.m.x, e.m.z)) {
+        const body = this.buildSwimmer();
+        this.scene.add(body.group);
+        this.swimmers.push({ s, group: body.group, arm: body.arm });
+      }
+    }
     this.looted.add(id); // her berth in the spawn table stays empty
     if (!e.m.looted) {
       // most of the cargo goes down with her; a fraction floats

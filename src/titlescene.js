@@ -1,27 +1,46 @@
-// The title diorama — a live golden-hour sea behind the login box, so the
-// first thing a new sailor sees is the game itself, not a gradient. Own
-// renderer, own scene, own clock: the Game boots fresh when the title hands
-// off, and stop() disposes every GL resource this screen touched.
+// The title diorama — the first thing a new sailor sees is the game at its
+// most dramatic: a running BATTLE in dirty weather. A black-flagged galleon
+// and her raider consort trade broadsides with two King's corvettes on a
+// heavy sea under a storm-dark sky, muzzle flashes lighting the gloom and
+// lightning throwing the whole fight into silhouette. Own renderer, own
+// scene, own clock: the Game boots fresh when the title hands off, and
+// stop() disposes every GL resource this screen touched.
 //
-// Deliberately worldless: no terrain, no NPCs, no HUD — one sloop running
-// before the wind at sunset, foam astern, the real sky machinery overhead.
-// Cheap enough for any laptop; if WebGL itself fails the caller catches and
-// the title stays legible on its vignette alone.
+// Still deliberately worldless — no terrain, no HUD; the four hulls, the
+// sea, and the weather ARE the pitch. Cheap enough for any laptop; if
+// WebGL itself fails the caller catches and the title stays legible on its
+// vignette alone.
 
 import * as THREE from 'three';
 import { Sky } from './sky.js';
 import { Ocean } from './ocean.js';
 import { FoamLayer } from './foamlayer.js';
-import { buildSloop } from './ship.js';
-import { newShipState, shipAttitude, SLOOP } from './shipphysics.js';
+import { CombatLayer } from './combatlayer.js';
+import { buildShip } from './ship.js';
+import { newShipState, shipAttitude, SPECS } from './shipphysics.js';
+import { setSeaState } from './waves.js';
 import { DAY_LENGTH, solarState, lunarState, moonPhase } from './skymath.js';
 import { glitterSource, moonBrightness, EXPOSURE_BASE } from './lightrig.js';
+import { LIVERIES } from './livery.js';
 
-// sunset's golden band: sun low in the west on the way down (skymath's golden
-// curve), still enough dayness to light the sails
-const TITLE_FRAC = 0.742;
-const SHIP_SPEED = 4.2;          // m/s — enough way for a living wake
-const CAM_DIST = 20, CAM_HEIGHT = 5.2;
+// late golden hour under storm gloom: enough light to read the fight, dark
+// enough that every muzzle flash and lightning stroke OWNS the frame
+const TITLE_FRAC = 0.695; // the sun still up, low and gold — the storm eats half of it
+const GLOOM = 0.22;
+const SEA_STATE = 1.9;      // a heavy, living swell
+const FLEET_SPEED = 4.6;    // the whole battle runs north in company
+const CAM_DIST = 82, CAM_HEIGHT = 14;
+const BROADSIDE_EVERY = 1.4; // seconds between guns somewhere in the line
+const WIND_FROM = 2.1;
+
+// the two battle lines, ship-local to the fleet anchor: the pirates to
+// windward, the King's ships to leeward, close enough to smell the powder
+const LINE = [
+  { def: { spec: SPECS.GALLEON, masts: 3, square: true, guns: 6, castle: true, livery: LIVERIES.pirate }, x: -16, z: 0 },
+  { def: { spec: SPECS.CORVETTE, masts: 2, guns: 3, livery: LIVERIES.pirate }, x: -24, z: 34 },
+  { def: { spec: SPECS.CORVETTE, masts: 2, square: true, guns: 3, livery: LIVERIES.navy }, x: 18, z: 12 },
+  { def: { spec: SPECS.CORVETTE, masts: 2, square: true, guns: 3, livery: LIVERIES.navy }, x: 26, z: -26 },
+];
 
 export class TitleScene {
   constructor(mount) {
@@ -42,19 +61,31 @@ export class TitleScene {
     this.ocean = new Ocean(this.scene);
     this.ocean.uniforms.uFresnel.value = 0.45;
     this.foam = new FoamLayer(this.scene);
+    this.combat = new CombatLayer(this.scene);
+    setSeaState(SEA_STATE); // the storm sea (Game re-drives this on boot)
 
-    this.ship = newShipState(0, 0);
-    this.ship.speed = SHIP_SPEED;
-    const built = buildSloop();
-    this.shipGroup = built.group;
-    this.setSail = built.setSail;
-    this.scene.add(this.shipGroup);
-    // running before a quartering breeze: boom out, sail full
-    this.setSail(0, 0.85, 0 - 2.4, 0.9);
+    // the lightning: a cold flash that lives two frames — sky.update owns
+    // the ambient every frame, so the stroke rides a dedicated light
+    this.bolt = new THREE.DirectionalLight(0xcfe0ff, 0);
+    this.scene.add(this.bolt, this.bolt.target);
+    this.boltT = -3; // first stroke a few seconds in
+
+    // the four combatants, in two lines
+    this.fleet = [];
+    for (const row of LINE) {
+      const built = buildShip(row.def);
+      this.scene.add(built.group);
+      const state = newShipState(row.x, row.z);
+      state.speed = FLEET_SPEED;
+      built.setSail(0, 0.6, WIND_FROM, 0.75);
+      this.fleet.push({ row, built, state });
+    }
 
     this.t = 0;
     this.last = performance.now();
     this.raf = 0;
+    this.gunT = 1.2;
+    this.gunN = 0;
     this.onResize = () => {
       this.camera.aspect = innerWidth / innerHeight;
       this.camera.updateProjectionMatrix();
@@ -76,39 +107,80 @@ export class TitleScene {
     this.t += dt;
     const t = this.t;
 
-    // the sloop runs due north for ever; the sea is endless, nobody grounds
-    this.ship.z += SHIP_SPEED * dt;
-    const att = shipAttitude(this.ship, t, SLOOP);
-    this.shipGroup.position.set(this.ship.x, att.y, this.ship.z);
-    this.shipGroup.rotation.set(att.pitch, 0, att.roll + 0.06);
+    // the battle runs north for ever, line abreast of line
+    const emitters = [];
+    for (const f of this.fleet) {
+      f.state.z += FLEET_SPEED * dt;
+      // each hull works its own water: a slow weave holds the lines apart
+      const wob = Math.sin(t * 0.11 + f.row.x) * 3;
+      const att = shipAttitude(f.state, t, f.row.def.spec);
+      f.built.group.position.set(f.state.x + wob, att.y, f.state.z);
+      f.built.group.rotation.set(att.pitch, Math.sin(t * 0.05 + f.row.z) * 0.06, att.roll);
+      emitters.push({ x: f.state.x + wob, z: f.state.z - f.row.def.spec.length * 0.55, size: 1.6 });
+    }
 
-    this.foam.update(t, dt, this.ship.x, this.ship.z, SHIP_SPEED, [
-      { x: this.ship.x, z: this.ship.z - 5.5, size: 1.7 },
-      { x: this.ship.x, z: this.ship.z + 5.5, size: 0.8 },
-    ]);
+    // the guns: every BROADSIDE_EVERY seconds another ship in the line
+    // fires on the nearest hull of the other flag — hits and misses both,
+    // the misses raising sea-spray between the lines
+    this.gunT -= dt;
+    if (this.gunT <= 0) {
+      this.gunT = BROADSIDE_EVERY * (0.7 + 0.6 * Math.abs(Math.sin(t * 0.37)));
+      const s = this.fleet[this.gunN++ % this.fleet.length];
+      const foes = this.fleet.filter((o) => o.row.def.livery !== s.row.def.livery);
+      const foe = foes[this.gunN % foes.length];
+      const miss = (this.gunN % 3) === 0;
+      const fx = s.built.group.position, tx = foe.built.group.position;
+      this.combat.fire(
+        { x: fx.x, y: fx.y + 2.2, z: fx.z },
+        {
+          x: tx.x + (miss ? (this.gunN % 2 ? 14 : -11) : 0),
+          z: tx.z + (miss ? -8 : 0),
+        },
+        miss);
+    }
+    this.combat.update(t, dt);
 
-    // camera east of the hull, gazing WEST into the setting sun (skymath puts
-    // it at -x): the sloop rides in silhouette against the gold, and a slow
-    // drift keeps the shot alive without ever swinging off the sunset
-    const az = 1.4 + 0.35 * Math.sin(t * 0.05);
+    // the lightning: a stroke every 6–11 s, two frames of cold daylight
+    this.boltT += dt;
+    const strokeAt = 6 + 5 * Math.abs(Math.sin(this.gunN * 2.7));
+    if (this.boltT > strokeAt) this.boltT = -0.12; // the stroke runs while boltT < 0
+    if (this.boltT < 0) {
+      this.bolt.intensity = 2.6 * (1 - Math.abs(this.boltT) / 0.12);
+      this.bolt.position.set(this.fleet[0].state.x - 120, 140, this.fleet[0].state.z + 80);
+      this.bolt.target.position.set(this.fleet[0].state.x, 0, this.fleet[0].state.z);
+    } else {
+      this.bolt.intensity = 0;
+    }
+
+    this.foam.update(t, dt, this.fleet[0].state.x, this.fleet[0].state.z, FLEET_SPEED, emitters);
+
+    // the camera stands OFF the fight, high enough to read both lines,
+    // drifting slowly — the battle fills the left of the frame, the login
+    // box keeps the right
+    const anchor = this.fleet[0];
+    const mid = {
+      x: (this.fleet[0].state.x + this.fleet[2].state.x) / 2,
+      z: (this.fleet[0].state.z + this.fleet[2].state.z) / 2,
+    };
+    const az = 2.35 + 0.22 * Math.sin(t * 0.037);
     this.camera.position.set(
-      this.ship.x + Math.sin(az) * CAM_DIST,
-      att.y + CAM_HEIGHT + 0.5 * Math.sin(t * 0.031),
-      this.ship.z + Math.cos(az) * CAM_DIST);
-    // gaze a few metres to the camera's right of the hull, so the sloop rides
-    // the LEFT third of the frame instead of hiding behind the login box
+      mid.x + Math.sin(az) * CAM_DIST,
+      CAM_HEIGHT + 1.2 * Math.sin(t * 0.03),
+      mid.z + Math.cos(az) * CAM_DIST);
+    // aim RIGHT of the fleet so the fight rides the LEFT third of the
+    // frame, clear of the login box (camera right = (cos az, -sin az))
     const rx = Math.cos(az), rz = -Math.sin(az);
-    this.camera.lookAt(this.ship.x + rx * 5, att.y + 2.6, this.ship.z + rz * 5);
+    this.camera.lookAt(mid.x + rx * 34, 4, mid.z + rz * 34);
 
-    // the sky holds golden hour; the sea still moves under it
+    // storm light: the golden hour buried under gloom; the sea still moves
     const skyT = TITLE_FRAC * DAY_LENGTH;
     const sol = solarState(skyT);
     const lun = lunarState(skyT);
     const glit = glitterSource(sol, lun, moonBrightness(moonPhase(skyT)));
-    this.sky.update(skyT, 18, this.camera.position, 0);
-    this.ocean.update(t, this.ship.x, this.ship.z, this.camera.position, glit,
-      this.sky.domeUniforms.uHor.value, 1);
-    this.foam.setLight(sol.dayness);
+    this.sky.update(skyT, 32, this.camera.position, GLOOM);
+    this.ocean.update(t, anchor.state.x, anchor.state.z, this.camera.position, glit,
+      this.sky.domeUniforms.uHor.value, SEA_STATE);
+    this.foam.setLight(sol.dayness * (1 - GLOOM * 0.5));
 
     this.renderer.render(this.scene, this.camera);
   }
@@ -116,6 +188,7 @@ export class TitleScene {
   stop() {
     cancelAnimationFrame(this.raf);
     removeEventListener('resize', this.onResize);
+    setSeaState(1); // hand the wave field back calm; the Game re-drives it
     this.scene.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
       const m = o.material;

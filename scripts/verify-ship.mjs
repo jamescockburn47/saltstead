@@ -75,6 +75,24 @@ const DT = 1 / 30;
   ok(sawMotion, 'the hull rises and falls');
 }
 
+// a heavy hull stands stiffer than a dinghy: over the same sea the galleon
+// rocks at well under half the sloop's angles (the playtest verdict was
+// big ships rocking like rowboats)
+{
+  const GALLEON = SPECS.GALLEON || BRIG;
+  const s = newShipState(0, 0);
+  let sloopR = 0, bigR = 0, sloopP = 0, bigP = 0;
+  for (let t = 0; t < 90; t += 0.31) {
+    s.x = t * 11; s.z = -t * 5; s.yaw = t * 0.13;
+    const a = shipAttitude(s, t, SLOOP), b = shipAttitude(s, t, GALLEON);
+    sloopR = Math.max(sloopR, Math.abs(a.roll)); bigR = Math.max(bigR, Math.abs(b.roll));
+    sloopP = Math.max(sloopP, Math.abs(a.pitch)); bigP = Math.max(bigP, Math.abs(b.pitch));
+  }
+  ok(bigR < sloopR * 0.6, `the big hull rolls stiffer (${bigR.toFixed(3)} vs sloop ${sloopR.toFixed(3)})`);
+  ok(bigP < sloopP * 0.75, `and pitches easier (${bigP.toFixed(3)} vs sloop ${sloopP.toFixed(3)})`);
+  ok(bigR > 0.001, 'but she is still a ship on a sea, not a building');
+}
+
 // grounding attitude: where the floor shoals past the keel the hull RIDES it
 {
   const s = newShipState(0, 0);
