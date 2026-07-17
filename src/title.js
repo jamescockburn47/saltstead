@@ -68,11 +68,20 @@ export function bootTitle({ onStart }) {
     setLoggedIn(null);
   });
 
-  $('btnnew').addEventListener('click', async () => {
-    await clearSave();
-    screen.style.display = 'none';
-    onStart(null, auth);
+  // a new voyage begins with a CHOICE OF COLOURS (faction.js): the black
+  // flag or the King's. The choice is stored in the save, not the account —
+  // every fresh voyage asks again.
+  $('btnnew').addEventListener('click', () => {
+    const sc = $('sidechoice');
+    sc.style.display = sc.style.display === 'flex' ? 'none' : 'flex';
   });
+  for (const [btn, side] of [['btnpirate', 'pirate'], ['btnnavy', 'navy']]) {
+    $(btn).addEventListener('click', async () => {
+      await clearSave();
+      screen.style.display = 'none';
+      onStart(null, auth, side);
+    });
+  }
 
   $('btncontinue').addEventListener('click', () => {
     screen.style.display = 'none';

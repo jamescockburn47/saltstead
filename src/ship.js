@@ -14,6 +14,7 @@ import { SLOOP } from './shipphysics.js';
 import { frameFor, gunPosts, holdFor } from './shipframe.js';
 import { tackSign } from './sailing.js';
 import { woodPixels } from './woodgrain.js';
+import { flagPixels } from './livery.js';
 
 // wood tones now live as RGB bases in the woodMat calls below
 const SAILC = 0xe8e0cc, ROPE = 0x3a2c1c;
@@ -44,8 +45,9 @@ function woodMat(opts, texOpts) {
 
 // hull: a box tapered toward the bow and pinched at the keel — five minutes
 // of vertex pushing beats any asset file. D is the walkable deck frame, s
-// the hull's scale against the unit sloop.
-function buildHull(D, s) {
+// the hull's scale against the unit sloop. hullBase: the strake palette —
+// honest trade wood by default; a livery (livery.js) paints her side's colours.
+function buildHull(D, s, hullBase = [110, 74, 47]) {
   const L = D.maxZ - D.minZ + 1.6 * s, W = (D.maxX + 0.35 * s) * 2, H = 1.7 * s;
   const geo = new THREE.BoxGeometry(W, H, L, 1, 1, 6);
   const pos = geo.attributes.position;
@@ -62,7 +64,7 @@ function buildHull(D, s) {
   }
   geo.computeVertexNormals();
   // strakes: 8 plank courses up the topsides, grain running bow to stern
-  return new THREE.Mesh(geo, woodMat({ base: [110, 74, 47], nPlanks: 8, seed: 7 }));
+  return new THREE.Mesh(geo, woodMat({ base: hullBase, nPlanks: 8, seed: 7 }));
 }
 
 // THE HOLD — a whole environment below the weather deck for hulls that
@@ -237,7 +239,7 @@ function buildBelowDecks(D, s, def, spec, railMat, sparMat) {
 // one SQUARE rig: mast + braced yards + rectangular courses, planted at
 // deck-local z — the big-ship silhouette. The rig group braces (rotates)
 // toward the wind in setSail; kind: 'square'.
-function buildSquareRig(D, s, sparMat, z, mastH, yardW) {
+function buildSquareRig(D, s, sparMat, z, mastH, yardW, sailC = SAILC) {
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.1 * s, 0.15 * s, mastH, 6), sparMat);
   mast.position.set(0, D.y + mastH / 2, z);
 
@@ -245,7 +247,7 @@ function buildSquareRig(D, s, sparMat, z, mastH, yardW) {
   rig.position.set(0, 0, z);
 
   const sails = [];
-  const sailMat = new THREE.MeshPhongMaterial({ color: SAILC, flatShading: true, side: THREE.DoubleSide });
+  const sailMat = new THREE.MeshPhongMaterial({ color: sailC, flatShading: true, side: THREE.DoubleSide });
   // course low and broad, topsail high and narrow
   for (const [hFrac, wFrac, drop] of [[0.62, 1, 0.34], [0.9, 0.7, 0.2]]) {
     const yH = D.y + mastH * hFrac;
@@ -276,7 +278,7 @@ function buildSquareRig(D, s, sparMat, z, mastH, yardW) {
 
 // one fore-and-aft rig: mast + swinging boom + triangular sail, planted at
 // deck-local z. Returns { mast, rig, sail } — the rig group swings in setSail.
-function buildRig(D, s, sparMat, z, mastH, boomL) {
+function buildRig(D, s, sparMat, z, mastH, boomL, sailC = SAILC) {
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.09 * s, 0.13 * s, mastH, 6), sparMat);
   mast.position.set(0, D.y + mastH / 2, z);
 
@@ -296,23 +298,27 @@ function buildRig(D, s, sparMat, z, mastH, boomL) {
   ], 3));
   sailGeo.computeVertexNormals();
   const sail = new THREE.Mesh(sailGeo,
-    new THREE.MeshPhongMaterial({ color: SAILC, flatShading: true, side: THREE.DoubleSide }));
+    new THREE.MeshPhongMaterial({ color: sailC, flatShading: true, side: THREE.DoubleSide }));
   rig.add(sail);
 
   return { mast, rig, sails: [sail], kind: 'foreaft' };
 }
 
-// def: a shipyard.js HULLS row, or any { spec, masts, guns, square, castle }.
-// The legacy call buildShip(spec, masts) still works — old savours of the
-// sloop years call it that way.
+// def: a shipyard.js HULLS row, or any { spec, masts, guns, square, castle,
+// livery }. livery (livery.js LIVERIES row) paints her side's colours and
+// flies her flag — absent, she wears honest trade wood. The legacy call
+// buildShip(spec, masts) still works — old savours of the sloop years call
+// it that way.
 export function buildShip(def = SLOOP, legacyMasts) {
   if (def && def.maxSpeed !== undefined) def = { spec: def, masts: legacyMasts || 1, guns: 1 };
   const spec = def.spec || SLOOP;
   const masts = def.masts || 1;
+  const liv = def.livery || null;
+  const sailC = liv ? liv.sails : SAILC;
   const F = frameFor(spec), D = F.deck, s = F.scale;
   const group = new THREE.Group();
 
-  const hull = buildHull(D, s);
+  const hull = buildHull(D, s, liv ? liv.hullBase : undefined);
   hull.position.y = D.y - 0.95 * s;
   group.add(hull);
 
@@ -328,7 +334,7 @@ export function buildShip(def = SLOOP, legacyMasts) {
   group.add(deckPlank);
 
   // gunwale rails
-  const railMat = woodMat({ base: [83, 54, 31], nPlanks: 2, seed: 3, vary: 0.12 });
+  const railMat = woodMat({ base: liv ? liv.trimBase : [83, 54, 31], nPlanks: 2, seed: 3, vary: 0.12 });
   for (const side of [-1, 1]) {
     const rail = new THREE.Mesh(
       new THREE.BoxGeometry(0.14 * s, 0.5 * s, D.maxZ - D.minZ), railMat);
@@ -348,17 +354,17 @@ export function buildShip(def = SLOOP, legacyMasts) {
   let mainZ = 1.2 * s, mainH = 7.4 * s;
   if (masts >= 3) {
     mainZ = 0.9 * s; mainH = 8.0 * s;
-    rigs.push(buildSquareRig(D, s, sparMat, mainZ, mainH, 3.8 * s));
-    rigs.push(buildSquareRig(D, s, sparMat, D.maxZ * 0.6, 7.0 * s, 3.4 * s));
-    rigs.push(buildRig(D, s, sparMat, D.minZ * 0.55, 5.8 * s, 3.0 * s)); // the spanker
+    rigs.push(buildSquareRig(D, s, sparMat, mainZ, mainH, 3.8 * s, sailC));
+    rigs.push(buildSquareRig(D, s, sparMat, D.maxZ * 0.6, 7.0 * s, 3.4 * s, sailC));
+    rigs.push(buildRig(D, s, sparMat, D.minZ * 0.55, 5.8 * s, 3.0 * s, sailC)); // the spanker
   } else if (masts === 2 && def.square) {
-    rigs.push(buildSquareRig(D, s, sparMat, mainZ, mainH, 3.5 * s));
-    rigs.push(buildSquareRig(D, s, sparMat, D.maxZ * 0.55, 6.6 * s, 3.1 * s));
+    rigs.push(buildSquareRig(D, s, sparMat, mainZ, mainH, 3.5 * s, sailC));
+    rigs.push(buildSquareRig(D, s, sparMat, D.maxZ * 0.55, 6.6 * s, 3.1 * s, sailC));
   } else if (masts === 2) {
-    rigs.push(buildRig(D, s, sparMat, mainZ, mainH, 4.6 * s));
-    rigs.push(buildRig(D, s, sparMat, D.maxZ * 0.55, 6.5 * s, 3.6 * s));
+    rigs.push(buildRig(D, s, sparMat, mainZ, mainH, 4.6 * s, sailC));
+    rigs.push(buildRig(D, s, sparMat, D.maxZ * 0.55, 6.5 * s, 3.6 * s, sailC));
   } else {
-    rigs.push(buildRig(D, s, sparMat, mainZ, mainH, 4.6 * s));
+    rigs.push(buildRig(D, s, sparMat, mainZ, mainH, 4.6 * s, sailC));
   }
   for (const r of rigs) { group.add(r.mast); group.add(r.rig); }
 
@@ -377,8 +383,21 @@ export function buildShip(def = SLOOP, legacyMasts) {
   ], 3));
   jibGeo.computeVertexNormals();
   const jib = new THREE.Mesh(jibGeo,
-    new THREE.MeshPhongMaterial({ color: SAILC, flatShading: true, side: THREE.DoubleSide }));
+    new THREE.MeshPhongMaterial({ color: sailC, flatShading: true, side: THREE.DoubleSide }));
   group.add(jib);
+
+  // THE SIDE'S COLOURS — a sheer band down both topsides (blood red for the
+  // black flag, the navy's buff chequer) and her flag at the main truck.
+  // This is what tells the two services apart hull-down on the horizon.
+  if (liv) {
+    const bandMat = mat(liv.stripe);
+    for (const side of [-1, 1]) {
+      const band = new THREE.Mesh(
+        new THREE.BoxGeometry(0.07 * s, 0.24 * s, (D.maxZ - D.minZ) * 0.94), bandMat);
+      band.position.set(side * (D.maxX + 0.3 * s), D.y - 0.32 * s, (D.maxZ + D.minZ) / 2 + 0.2 * s);
+      group.add(band);
+    }
+  }
 
   // the helm: a tiller post so the station reads at a glance
   const tiller = new THREE.Mesh(new THREE.CylinderGeometry(0.05 * s, 0.07 * s, 1.1 * s, 5), mat(ROPE));
@@ -430,6 +449,31 @@ export function buildShip(def = SLOOP, legacyMasts) {
   // 'below' mode). Only hulls that declare one — NPC traffic never shows
   // its bilges to anybody, so it never pays for them.
   if (def.below) group.add(buildBelowDecks(D, s, def, spec, railMat, sparMat));
+
+  // her flag flies from the main truck: a pixel-cloth plane (livery.js
+  // flagPixels), doubled so it reads from either beam. It streams AFT of
+  // the masthead — a following flutter is faked with a slow scale-wobble
+  // in setSail, which is all a 16x10 cloth deserves.
+  let flag = null;
+  if (liv && liv.flag) {
+    const fp = flagPixels(liv.flag);
+    const ftex = new THREE.DataTexture(fp.data, fp.w, fp.h, THREE.RGBAFormat);
+    ftex.colorSpace = THREE.SRGBColorSpace;
+    ftex.magFilter = THREE.NearestFilter;
+    ftex.minFilter = THREE.NearestFilter;
+    ftex.needsUpdate = true;
+    const fgeo = new THREE.PlaneGeometry(1.5 * s, 0.95 * s);
+    fgeo.translate(0, 0, 0); // hoist at the mast: shift so the left edge sits at the truck
+    const fmesh = new THREE.Mesh(fgeo, new THREE.MeshBasicMaterial({
+      map: ftex, side: THREE.DoubleSide, fog: false,
+    }));
+    // plane faces +z by default; turn it fore-and-aft so it shows a-beam,
+    // trailing aft from the truck
+    fmesh.rotation.y = Math.PI / 2;
+    fmesh.position.set(0, D.y + mainH + 0.55 * s, mainZ - 0.8 * s);
+    group.add(fmesh);
+    flag = fmesh;
+  }
 
   // the masthead lantern: a warm point at the MAIN top (the tallest stick),
   // lit after dark by setLantern. fog:false — a ship's light carries beyond
@@ -488,6 +532,11 @@ export function buildShip(def = SLOOP, legacyMasts) {
       for (const sail of r.sails) sail.scale.set(1, belly * 0.25 + 0.75, 1);
     }
     jib.rotation.y = side * (0.15 + trim * 0.5);
+    // the flag streams to leeward, and breathes a little with the wind
+    if (flag) {
+      flag.rotation.y = Math.PI / 2 + side * 0.35;
+      flag.scale.x = 0.85 + 0.15 * power;
+    }
   }
 
   return { group, deck, setSail, setLantern, setAnchor };

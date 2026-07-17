@@ -45,6 +45,8 @@ import { canSight, takeSight, sightText } from './navigation.js';
 import { StarChartUI } from './starchartui.js';
 import { LogUI } from './logui.js';
 import { TYPES, NAVY_SHOAL, LOOKOUT_R, compassPoint } from './merchants.js';
+import { factionOf, canBoardType, signalAnswer, escortBerth } from './faction.js';
+import { LIVERIES } from './livery.js';
 import { collideShips, ramSeverity } from './collide.js';
 import {
   GUN_RANGE, reloadTime, beamBearing, inArc, rollHit, newHullState, applyShot,
@@ -83,9 +85,18 @@ const POS_NAMES = [
 ];
 
 class Game {
-  // save: an acceptSave()-vetted meta or null; auth: the identity blob
-  constructor(save = null, auth = null) {
+  // save: an acceptSave()-vetted meta or null; auth: the identity blob;
+  // newFaction: the side chosen at the title for a FRESH voyage (a continue
+  // reads its flag from the save; old saves read as pirates)
+  constructor(save = null, auth = null, newFaction = null) {
     this.auth = auth;
+    // the flag you sail under (faction.js): the pirate's edge is her own
+    // hull — speed and plunder; the navy's is the squadron — the G signal
+    this.faction = save?.faction || (newFaction === 'navy' ? 'navy' : 'pirate');
+    this.fac = factionOf(this.faction);
+    this.assist = new Map();   // corvette id -> raider id (the signal's orders)
+    this.assistCool = new Map(); // corvette id -> seconds to her next broadside
+    this.signalCool = 0;       // one rocket at a time
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setSize(innerWidth, innerHeight);
@@ -181,7 +192,9 @@ class Game {
     this.hullId = this.hullDef.id;
     this.spec = this.hullDef.spec;
     this.shipFrame = frameFor(this.spec);
-    const built = buildShip(this.hullDef);
+    // the player's hull wears her SIDE's colours (livery.js) — black and
+    // blood-red under the skull, or blue-black and buff under the ensign
+    const built = buildShip({ ...this.hullDef, livery: LIVERIES[this.faction] });
     this.shipGroup = built.group;
     this.shipGroup.rotation.order = 'YXZ';
     this.setSail = built.setSail;
@@ -228,6 +241,7 @@ class Game {
       if (e.code === 'KeyR' && !e.repeat) this.toggleShot();
       if (e.code === 'KeyQ' && !e.repeat) this.toggleAnchor();
       if (e.code === 'KeyY' && !e.repeat) this.wardenMaterialise();
+      if (e.code === 'KeyG' && !e.repeat) this.signalSquadron();
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     this.dragging = false;
@@ -268,7 +282,7 @@ class Game {
       shipname: document.getElementById('shipname'),
     };
     this.hud.shipname.textContent =
-      `${this.hullDef.name} \u00b7 ${this.hullDef.guns} gun${this.hullDef.guns > 1 ? 's' : ''} a side`;
+      `${this.hullDef.name} \u00b7 ${this.hullDef.guns} gun${this.hullDef.guns > 1 ? 's' : ''} a side \u00b7 ${this.fac.tag}`;
 
     this.maps = new MapUI();
     this.starchart = new StarChartUI();
@@ -296,9 +310,13 @@ class Game {
     this.t = 0;
     this.last = performance.now();
     if (!save) {
-      this.logEvent('Weighed anchor off Port Royal \u2014 the voyage begins');
+      this.logEvent(`Weighed anchor off Port Royal under ${this.fac.tag} \u2014 the voyage begins`);
       // a fresh captain gets the survival doctrine before the sea does
       showBriefingFor(this.hullDef);
+      // ...and the doctrine of the flag overhead
+      setTimeout(() => this.say(this.faction === 'navy'
+        ? 'You sail under the KING\u2019S COLOURS \u2014 hunt the raiders off the lanes; G sends up a rocket and the squadron answers'
+        : 'You fly the BLACK FLAG \u2014 faster than your class, richer plunder, and every honest sail is prey. The King hunts you.', 10), 800);
     }
     this.renderer.setAnimationLoop(() => this.frame());
   }
@@ -309,6 +327,7 @@ class Game {
       gold: this.gold, map: this.treasureMap, lootSeed: this.lootSeed,
       crew: this.crew, fleet: this.fleet.size(), log: this.log,
       banked: this.banked, won: this.won, hull: this.hullId,
+      faction: this.faction,
       dmgRig: this.hull.rig, dmgHull: this.hull.hull, crippled: this.crippled,
       anchorDown: this.anchorDown,
     })).catch(() => {});
@@ -396,7 +415,7 @@ class Game {
     this.spec = def.spec;
     this.shipFrame = frameFor(def.spec);
     this.scene.remove(this.shipGroup);
-    const built = buildShip(def);
+    const built = buildShip({ ...def, livery: LIVERIES[this.faction] });
     this.shipGroup = built.group;
     this.shipGroup.rotation.order = 'YXZ';
     this.setSail = built.setSail;
@@ -410,7 +429,7 @@ class Game {
     const p = clampToDeck(this.cap.x, this.cap.z, 0.2, this.shipFrame.deck);
     this.cap.x = p.x; this.cap.z = p.z;
     this.hud.shipname.textContent =
-      `${def.name} \u00b7 ${def.guns} gun${def.guns > 1 ? 's' : ''} a side`;
+      `${def.name} \u00b7 ${def.guns} gun${def.guns > 1 ? 's' : ''} a side \u00b7 ${this.fac.tag}`;
     this.applyQuality(this.gfxQuality); // shadows onto the new meshes
   }
 
@@ -682,6 +701,36 @@ class Game {
     this.persist();
   }
 
+  // ---- the signal rocket (faction.js) — the NAVY's institutional edge ----
+  // G, with a raider in sight: corvettes within signalRange are given her
+  // as their quarry and converge; if fewer than signalMax answer, the
+  // Admiralty sends one over the horizon (merchantlayer.spawnEscort). The
+  // pirate has no rocket — nobody comes when the black flag whistles.
+  signalSquadron() {
+    if (this.faction !== 'navy') return; // the key does nothing for a pirate
+    if (this.t < this.signalCool) { this.say('The signal locker is bare — give the rocket a minute', 3); return; }
+    const raider = this.merchants.nearestHostile(this.ship.x, this.ship.z, 'raider');
+    if (!raider || raider.dist > LOOKOUT_R) {
+      this.say('No pirate in sight to signal about — the rocket keeps for a real chase', 4);
+      return;
+    }
+    this.signalCool = this.t + 45;
+    const plan = signalAnswer(this.merchants.sails(), this.ship.x, this.ship.z,
+      this.fac.signalRange, this.fac.signalMax);
+    for (const id of plan.converge) this.assist.set(id, raider.id);
+    let answered = plan.converge.length;
+    if (plan.spawn) {
+      const b = escortBerth(this.ship.x, this.ship.z, this.lootSeed + this.shotSeed);
+      const id = this.merchants.spawnEscort(b.x, b.z,
+        Math.atan2(raider.m.x - b.x, raider.m.z - b.z));
+      this.assist.set(id, raider.id);
+      answered++;
+    }
+    this.say(`THE ROCKET GOES UP — ${answered} of the squadron answer${answered === 1 ? 's' : ''}, `
+      + `converging on the pirate to the ${compassPoint(this.ship.x, this.ship.z, raider.m.x, raider.m.z)}`, 7);
+    this.logEvent(`Signalled the squadron — ${answered} sail answered against a raider`);
+  }
+
   // ---- the ground tackle (anchor.js) ----
   // Q lets go or weighs. The cable needs bottom it can find (CABLE_DEPTH)
   // and not too much way on her; riding to it she stops dead over the
@@ -897,10 +946,11 @@ class Game {
       if (battle.losses > 0) this.crew -= battle.losses;
       if (!battle.won) {
         this.merchants.rout(prize.id);
+        const crew = prize.m.type === 'raider' ? 'her cut-throats' : 'her marines';
         this.say(battle.losses > 0
-          ? `REPELLED \u2014 her marines hold the rail; ${battle.losses} of your hands lost. She breaks off.`
-          : 'REPELLED \u2014 her marines hold the rail. She breaks off the fight.', 7);
-        this.logEvent('Boarded a navy corvette and was repelled');
+          ? `REPELLED \u2014 ${crew} hold the rail; ${battle.losses} of your hands lost. She breaks off.`
+          : `REPELLED \u2014 ${crew} hold the rail. She breaks off the fight.`, 7);
+        this.logEvent(`Boarded ${prize.m.type === 'raider' ? 'a pirate raider' : 'a navy corvette'} and was repelled`);
         this.persist();
         return;
       }
@@ -911,9 +961,14 @@ class Game {
 
     this.merchants.strip(prize.id);
     this.lastPrizeId = prize.id; // the capture window opens
+    // the pirate's edge: a lawless crew strips a prize to her bones
     const roll = lootRoll(this.lootSeed, type.goldMult);
+    roll.gold = Math.round(roll.gold * this.fac.plunderMult);
     this.gold += roll.gold;
-    const name = { trader: 'a merchantman', indiaman: 'an INDIAMAN', navy: 'a navy corvette', derelict: 'a derelict' }[prize.m.type] || 'a merchantman';
+    const name = {
+      trader: 'a merchantman', indiaman: 'an INDIAMAN', navy: 'a navy corvette',
+      raider: 'a PIRATE RAIDER', derelict: 'a derelict',
+    }[prize.m.type] || 'a merchantman';
     let msg = `Boarded ${name}! ${roll.gold} doubloons in her hold`;
     if (roll.hands && prize.m.type !== 'derelict') {
       this.crew++;
@@ -1081,9 +1136,48 @@ class Game {
         this.windBase.from += dFrom * 0.012;
       }
     }
-    // the trade lanes live: merchants stream, sail, flee, and count as contacts
+    // the trade lanes live: merchants stream, sail, flee, and count as
+    // contacts — each sail reading the player's FLAG (faction.js), and any
+    // corvette under signal orders hunting her handed quarry instead
     this.merchants.update(t, dt, this.ship.x, this.ship.z, this.wind.from,
-      this.shoalWater, lanternsUp);
+      this.shoalWater, lanternsUp, this.faction, (id) => {
+        const rid = this.assist.get(id);
+        if (!rid) return null;
+        const target = this.merchants.live.get(rid);
+        if (!target || target.sinkT !== null || target.m.routed || target.m.looted) {
+          this.assist.delete(id); // the chase is over, resume the patrol
+          return null;
+        }
+        return { x: target.m.x, z: target.m.z };
+      });
+
+    // the squadron works its guns: an assisting corvette in range of her
+    // raider throws real broadsides (the same dice the corvette rolls at a
+    // pirate player) — the navy's edge is OTHER SHIPS fighting your fight
+    for (const [aid, rid] of this.assist) {
+      const cor = this.merchants.live.get(aid);
+      const rdr = this.merchants.live.get(rid);
+      if (!cor || cor.sinkT !== null) { this.assist.delete(aid); continue; }
+      if (!rdr || rdr.sinkT !== null) { this.assist.delete(aid); continue; }
+      const d = Math.hypot(cor.m.x - rdr.m.x, cor.m.z - rdr.m.z);
+      this.assistCool.set(aid, (this.assistCool.get(aid) ?? 2) - dt);
+      if (d < GUN_RANGE && (this.assistCool.get(aid) ?? 0) <= 0) {
+        this.assistCool.set(aid, NAVY_RELOAD);
+        this.shotSeed++;
+        const hit = rollHit(this.shotSeed, d);
+        const from = { x: cor.m.x, y: this.shipGroup.position.y + 1.6, z: cor.m.z };
+        const aim = hit ? { x: rdr.m.x, z: rdr.m.z }
+          : { x: rdr.m.x + (this.shotSeed % 2 ? 18 : -15), z: rdr.m.z + (this.shotSeed % 3 ? -12 : 16) };
+        this.combatFx.fire(from, aim, !hit);
+        if (hit) {
+          const r = this.merchants.applyShotTo(rid, unit2(this.shotSeed * 1.3, 7.7) < 0.5 ? 'chain' : 'round');
+          if (r && r.sinking) {
+            this.say('The squadron’s guns tell — the raider is GOING DOWN', 6);
+            this.logEvent('A signalled corvette sank a raider');
+          }
+        }
+      }
+    }
 
     // the lookout sings out each sail ONCE as she comes in view from the
     // tops (LOOKOUT_R reaches far past the deck fog — that's the tops'
@@ -1096,19 +1190,25 @@ class Game {
         this.hailCool = this.t + 8;
         const what = {
           trader: 'merchant sail', indiaman: 'an INDIAMAN, deep-laden',
-          navy: 'a NAVY corvette', derelict: 'a dead ship adrift',
+          navy: 'a NAVY corvette', raider: 'a PIRATE \u2014 she flies the black',
+          derelict: 'a dead ship adrift',
         }[s.type] || 'a sail';
-        const tail = s.type === 'navy' ? ' \u2014 mind her guns'
-          : s.type === 'derelict' ? ' \u2014 salvage for the taking' : '';
+        const hunter = this.fac.hostileType;
+        const tail = s.type === hunter ? ' \u2014 mind her guns'
+          : s.type === 'raider' && this.faction === 'navy' ? '' // covered by the hunter line
+            : s.type === 'derelict' ? ' \u2014 salvage for the taking'
+              : (s.type === 'trader' || s.type === 'indiaman') && this.faction === 'navy'
+                ? ' \u2014 she dips her colours to the King' : '';
         this.say(`SAIL HO! ${what} to the `
           + `${compassPoint(this.ship.x, this.ship.z, s.x, s.z)}${tail}`, 6);
         break;
       }
     }
 
-    // corvettes in range work their guns: the King's navy shoots FIRST
+    // your side's hunter works her guns: the King's corvettes at a pirate,
+    // the raiders at a King's ship — whoever she is, she shoots FIRST
     {
-      const hostile = this.merchants.nearestHostile(this.ship.x, this.ship.z);
+      const hostile = this.merchants.nearestHostile(this.ship.x, this.ship.z, this.fac.hostileType);
       for (const [id, cool] of this.navyCool) {
         this.navyCool.set(id, cool - dt);
       }
@@ -1127,8 +1227,9 @@ class Game {
           this.combatFx.fire(from, aim, !hit);
           if (hit) {
             applyShot(this.hull, kind);
+            const her = this.fac.hostileType === 'raider' ? 'a raider' : 'a corvette';
             if (isSinking(this.hull)) {
-              this.sufferHoling('a corvette\u2019s broadside');
+              this.sufferHoling(`${her}\u2019s broadside`);
             } else {
               this.say(kind === 'chain'
                 ? `CHAIN SHOT rips your rig (${(this.hull.rig * 100).toFixed(0)}%) \u2014 R for chain, F to answer her`
@@ -1255,8 +1356,10 @@ class Game {
     this.fleet.update(t, dt, this.ship.x, this.ship.z, this.ship.yaw,
       this.ship.speed * gait, this.wind.from, lanternsUp);
 
-    // boarding window: alongside a prize with speed matched
-    const prize = this.merchants.nearestPrize(this.ship.x, this.ship.z);
+    // boarding window: alongside a prize with speed matched — the boarding
+    // law is your flag's (faction.js): the navy never plunders the trade
+    const prize = this.merchants.nearestPrize(this.ship.x, this.ship.z,
+      (type) => canBoardType(type, this.faction));
     this.boardable = (prize && canBoard(prize.dist, this.ship.speed * gait - prize.m.speed))
       ? prize : null;
 
@@ -1352,16 +1455,18 @@ class Game {
     const furled = this.portui.open || this.anchorDown;
 
     // what the hull can actually DO this frame: battle damage caps her,
-    // the Kraken's grip drags her, and over the trench the wind itself dies
-    let hullFactor = speedFactor(this.hull);
+    // the Kraken's grip drags her, and over the trench the wind itself dies.
+    // The black flag's individual edge rides here too (faction.js): a
+    // lawless hull sails faster than her rated class.
+    let hullFactor = speedFactor(this.hull) * this.fac.speedMult;
     if (this.kraken) hullFactor *= krakenDrag(this.kraken);
     let windEff = this.wind;
     if (zoneId === 'davy-jones') {
       windEff = { from: this.wind.from, speed: this.wind.speed * deadAir(this.zone.dist, this.zone.r) };
     }
-    const specEff = hullFactor < 0.999
-      ? { ...this.spec, maxSpeed: this.spec.maxSpeed * hullFactor }
-      : this.spec;
+    const specEff = hullFactor === 1
+      ? this.spec
+      : { ...this.spec, maxSpeed: this.spec.maxSpeed * hullFactor };
     stepShip(this.ship, windEff, dt, specEff, gait, furled);
 
     // riding to her anchor (anchor.js): the cable holds her over the
@@ -1829,10 +1934,10 @@ try {
   document.getElementById('titlescreen').classList.add('solid');
 }
 bootTitle({
-  onStart: async (mode, auth) => {
+  onStart: async (mode, auth, side = null) => {
     if (titleScene) { titleScene.stop(); titleScene = null; }
     document.body.classList.remove('titleup');
     const save = mode === 'continue' ? await loadGame() : null;
-    window.saltstead = new Game(save, auth); // the live handle, moorstead-style
+    window.saltstead = new Game(save, auth, side); // the live handle, moorstead-style
   },
 });

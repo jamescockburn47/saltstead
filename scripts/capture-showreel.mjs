@@ -45,6 +45,9 @@ try {
   await page.click('#btnguest');
   await page.waitForSelector('#btnnew', { visible: true });
   await page.click('#btnnew');
+  // the choice of colours: the reel sails the black flag
+  await page.waitForSelector('#btnpirate', { visible: true });
+  await page.click('#btnpirate');
   await page.waitForFunction('!!window.saltstead', { timeout: 30000 });
   await sleep(8000); // spawn terrain streams in before the first warp
 

@@ -39,6 +39,9 @@ try {
   await page.click('#btnguest');
   await page.waitForSelector('#btnnew', { visible: true });
   await page.click('#btnnew');
+  // the choice of colours: these tests sail the historical default
+  await page.waitForSelector('#btnpirate', { visible: true });
+  await page.click('#btnpirate');
   await page.waitForFunction('!!window.saltstead', { timeout: 30000 });
   await sleep(6000);
   // the fresh-spawn captain's briefing sits over everything: to the sea

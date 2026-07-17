@@ -9,8 +9,14 @@
 //   indiaman — rich, slow, stubborn; the payday worth chasing
 //   navy     — a corvette that HUNTS pirates and fires back (combat.js);
 //              boarding her is an autobattle, not a surrender
+//   raider   — a pirate brigantine working the same lanes: the NAVY
+//              player's quarry (faction.js), a rival flag to everyone else
 //   derelict — Bermuda Triangle only: dead ships adrift, full of cargo
 //              nobody came back for — the best salvage in the Atlantic
+//
+// WHAT each ship does about the player depends on the player's FLAG: the
+// attitude matrix lives in faction.js and arrives here as stepMerchant's
+// `att` override — this module stays pure and faction-blind.
 //
 // They sail HULL speed only — no fair current — so at 12x you run them down
 // like a hawk on a pigeon, and the encounter gait (earth.js) guarantees the
@@ -32,6 +38,7 @@ export const TYPES = {
   trader:   { cruise: 3.6, panic: 5.4, scale: 1.12, goldMult: 1,   crew: 0, armed: false },
   indiaman: { cruise: 2.9, panic: 4.4, scale: 1.45, goldMult: 3,   crew: 0, armed: false },
   navy:     { cruise: 4.2, panic: 6.0, scale: 1.28, goldMult: 0.6, crew: 6, armed: true  },
+  raider:   { cruise: 4.0, panic: 5.8, scale: 1.24, goldMult: 1.6, crew: 4, armed: true  },
   derelict: { cruise: 0,   panic: 0,   scale: 1.12, goldMult: 2.5, crew: 0, armed: false },
 };
 export const CRUISE = TYPES.trader.cruise; // the old names still mean the old ship
@@ -67,7 +74,7 @@ export function cellMerchants(cx, cz) {
       type = 'derelict'; // nobody TRADES through the triangle any more
     } else {
       const tr = unit2(cx * 7.7 + i * 13, cz * 5.3 + i * 7);
-      type = tr < 0.72 ? 'trader' : tr < 0.88 ? 'indiaman' : 'navy';
+      type = tr < 0.56 ? 'trader' : tr < 0.72 ? 'indiaman' : tr < 0.86 ? 'navy' : 'raider';
     }
     out.push({
       id: `m-${cx}-${cz}-${i}`,
@@ -139,19 +146,27 @@ export const NAVY_SHOAL = -1.0;
 // bearing — the duel happens at cannon range, not at the fenders
 export const NAVY_STANDOFF = 130;
 
-// mutates and returns m. px/pz: the pirate. speedMult: battle damage
-// (combat.js speedFactor) — torn sails slow her whatever her orders are.
-// shoal: the PIRATE sits in water too thin for a warship (caller samples the
-// terrain against NAVY_SHOAL) — a hunting corvette stands off rather than
-// ground herself. Deterministic given inputs.
-export function stepMerchant(m, px, pz, dt, speedMult = 1, shoal = false) {
+// mutates and returns m. px/pz: the QUARRY (usually the player; an
+// assisting corvette is handed her target instead — faction.js). speedMult:
+// battle damage (combat.js speedFactor) — torn sails slow her whatever her
+// orders are. shoal: the quarry sits in water too thin for a warship
+// (caller samples the terrain against NAVY_SHOAL) — a hunting corvette
+// stands off rather than ground herself. att overrides what she DOES about
+// the quarry ('hunt' | 'flee' | 'neutral', faction.js attitude); absent,
+// the legacy doctrine holds: armed hulls hunt, honest hulls flee.
+// Deterministic given inputs.
+export function stepMerchant(m, px, pz, dt, speedMult = 1, shoal = false, att = null) {
   const spec = TYPES[m.type] || TYPES.trader;
+  const wants = att || (spec.armed ? 'hunt' : 'flee');
   if (m.looted || m.type === 'derelict') {
     m.speed += (0 - m.speed) * Math.min(1, dt * 0.8); // strike sail, heave to
+  } else if (wants === 'neutral' && !m.routed) {
+    // she keeps her own counsel: cruise on, whoever you are
+    m.speed += (spec.cruise * speedMult - m.speed) * Math.min(1, dt * 0.3);
   } else {
     const d = Math.hypot(px - m.x, pz - m.z);
-    const hunts = spec.armed && !m.routed && !shoal;
-    if (spec.armed && !m.routed && shoal && d < HUNT_R) {
+    const hunts = wants === 'hunt' && spec.armed && !m.routed && !shoal;
+    if (wants === 'hunt' && spec.armed && !m.routed && shoal && d < HUNT_R) {
       // the chase ends at the shoal line: she bears away and stands off
       const away = Math.atan2(m.x - px, m.z - pz);
       const err = wrapPi(away - m.yaw);
@@ -169,7 +184,7 @@ export function stepMerchant(m, px, pz, dt, speedMult = 1, shoal = false) {
       m.yaw += Math.max(-TURN * dt, Math.min(TURN * dt, err));
       const want = close ? spec.cruise : spec.panic;
       m.speed += (want * speedMult - m.speed) * Math.min(1, dt * 0.5);
-    } else if (!spec.armed && d < FLEE_R) {
+    } else if (wants === 'flee' && !m.routed && d < FLEE_R) {
       const away = Math.atan2(m.x - px, m.z - pz);
       const err = wrapPi(away - m.yaw);
       m.yaw += Math.max(-TURN * dt, Math.min(TURN * dt, err));

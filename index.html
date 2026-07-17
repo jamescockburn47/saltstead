@@ -66,6 +66,14 @@
     #titlescreen button:hover { background: rgba(232,196,106,.22); }
     #titlescreen button:disabled { opacity: .35; cursor: default; }
     #titlescreen .quiet { background: none; border-color: rgba(255,255,255,.25); color: #bcd0dc; }
+    #titlescreen #sidechoice { display: none; flex-direction: column; gap: 10px; }
+    #titlescreen #sidechoice .sidehead { text-align: center; font-size: 13px; letter-spacing: 2px; opacity: .8; }
+    #titlescreen button.side { text-align: left; line-height: 1.35; padding: 10px 14px; }
+    #titlescreen button.side span { display: block; font-size: 11px; opacity: .7; letter-spacing: 0; margin-top: 3px; }
+    #titlescreen button.side.pirate { border-color: rgba(216,122,106,.65); color: #e8c0b4; background: rgba(90,30,26,.25); }
+    #titlescreen button.side.pirate:hover { background: rgba(120,40,34,.35); }
+    #titlescreen button.side.navy { border-color: rgba(122,167,216,.65); color: #bcd6ee; background: rgba(24,44,80,.3); }
+    #titlescreen button.side.navy:hover { background: rgba(34,60,104,.42); }
     #titlescreen #loginmsg { min-height: 18px; font-size: 12px; color: #d4a06a; text-align: center; }
     #titlescreen #welcome { text-align: center; font-size: 14px; opacity: .85; margin-bottom: 4px; }
     #starchart { position: fixed; inset: 0; display: none; align-items: center;
@@ -214,7 +222,9 @@
       prizes for your fleet, dig up buried treasure — and chase the legends: the Kraken
       in the Norwegian deeps, dragons over Snowdonia, the Flying Dutchman rounding the
       Cape in a storm. Money is made at sea; the land just keeps the secrets.
-      Single-ship prototype — multiplayer is coming.</div>
+      Sail under the <b>black flag</b> — faster, hungrier, every sail is prey — or take
+      the <b>King&rsquo;s colours</b> and hunt the pirates with the squadron answering your
+      rockets. Single-ship prototype — multiplayer is coming.</div>
     <div class="box" id="loginbox">
       <input id="invitecode" placeholder="invite code" autocomplete="off" spellcheck="false">
       <input id="invitename" placeholder="your name" autocomplete="off" maxlength="24">
@@ -226,6 +236,15 @@
       <div id="welcome"></div>
       <button id="btncontinue">Continue the Voyage</button>
       <button id="btnnew">New Voyage</button>
+      <div id="sidechoice">
+        <div class="sidehead">UNDER WHICH COLOURS?</div>
+        <button id="btnpirate" class="side pirate">THE BLACK FLAG
+          <span>Answer to nobody. Faster than her class, plunder bleeds richer —
+          every honest sail is prey, and the King&rsquo;s corvettes hunt you.</span></button>
+        <button id="btnnavy" class="side navy">THE KING&rsquo;S COLOURS
+          <span>Hunt the pirates off the lanes. The trade sails easy under your
+          guns — and a signal rocket (G) brings the squadron to your side.</span></button>
+      </div>
       <button id="btnlogout" class="quiet">Sign out</button>
     </div>
     <button id="btnhow" class="quiet how">How to play</button>
@@ -411,6 +430,7 @@
         <tr><td><kbd>F</kbd></td><td>fire the broadside (turn the ship until she bears)</td></tr>
         <tr><td><kbd>R</kbd></td><td>swap the load — round shot / chain shot</td></tr>
         <tr><td><kbd>Q</kbd></td><td>the anchor — let go in soundings / weigh and sail on</td></tr>
+        <tr><td><kbd>G</kbd></td><td>the signal rocket (King&rsquo;s colours only) — the squadron converges on the pirate in sight</td></tr>
         <tr><td><kbd>M</kbd></td><td>world chart</td></tr>
         <tr><td><kbd>N</kbd></td><td>star chart (and a sight, on a clear night)</td></tr>
         <tr><td><kbd>L</kbd></td><td>ship&rsquo;s log</td></tr>

@@ -62,6 +62,28 @@ where money is *spent* — taverns (recruit crew, buy rumours/treasure maps), sh
 (upgrades/repairs), hideouts (stash loot). On-foot exploration supports the sea game;
 it never pays directly.
 
+## The two flags (BUILT — faction.js + livery.js, verify-faction / verify-livery)
+
+A fresh voyage begins with a **choice of colours**, and the two advantages differ
+in KIND, not degree:
+
+- **The Black Flag** — the individual edge. +12% hull speed over her rated class,
+  +30% plunder off every prize, every honest sail is prey — and the King's
+  corvettes hunt her on sight. Tarred-black hull, blood-red sheer band, tanned
+  storm-dark canvas, the skull at the main truck.
+- **The King's Colours** — the institutional edge. Rated speed, prize-court
+  accounting, the trade is protected (the boarding law forbids plundering it) —
+  but **G sends up a signal rocket**: corvettes in range converge on the raider
+  in sight, and if the sea is empty the Admiralty sends one over the horizon.
+  Blue-black topsides, the buff Nelson-chequer band, admiralty-white sails, the
+  ensign at the truck.
+
+The lanes carry a fourth armed type, the **raider** — a black-hulled fore-and-aft
+brigantine: the navy player's quarry, a rival flag to a pirate. Every NPC's
+attitude to the player (hunt / flee / neutral) follows the attitude matrix in
+faction.js; merchants.js stays faction-blind and takes the attitude as an input.
+The flag rides the save; every pre-faction save reads as a pirate.
+
 ## Sea battles (BUILT — combat.js, verify-combat)
 
 Broadsides on F (R swaps round/chain shot), damage-as-states on both sides,

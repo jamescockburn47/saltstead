@@ -74,7 +74,7 @@ ok(compassPoint(0, 0, -100, -100) === 'nor\u2019west', 'quarters split true');
 
 // the wider ocean carries every honest type at roughly the design mix
 {
-  const seen = { trader: 0, indiaman: 0, navy: 0, derelict: 0 };
+  const seen = { trader: 0, indiaman: 0, navy: 0, raider: 0, derelict: 0 };
   let total = 0;
   for (let cx = -20; cx < 10; cx++) {
     for (let cz = -12; cz < 6; cz++) {
@@ -83,6 +83,7 @@ ok(compassPoint(0, 0, -100, -100) === 'nor\u2019west', 'quarters split true');
   }
   ok(seen.trader > seen.indiaman && seen.indiaman > 0, `indiamen are the rarer prize (${seen.indiaman}/${total})`);
   ok(seen.navy > 0 && seen.navy < total * 0.25, `the navy patrols but does not own the sea (${seen.navy}/${total})`);
+  ok(seen.raider > 0 && seen.raider < total * 0.25, `raiders work the lanes but do not own them (${seen.raider}/${total})`);
 }
 
 // inside the Bermuda Triangle the lanes go quiet and the derelicts drift
@@ -181,6 +182,38 @@ ok(compassPoint(0, 0, -100, -100) === 'nor\u2019west', 'quarters split true');
   ok(minD > 30, `the corvette holds off the fenders (closest ${minD.toFixed(0)} m)`);
   ok(minD < NAVY_STANDOFF + 60, `but keeps her guns in range (closest ${minD.toFixed(0)} m)`);
 }
+
+// the attitude override (faction.js feeds it): 'neutral' sails PAST a close
+// player where doctrine would have her hunt or flee; 'hunt' turns a raider
+// into the corvette's mirror; the routed still run whatever the order says
+{
+  // a corvette told 'neutral' (navy player) cruises her course, guns quiet
+  const calm = { id: 'nn', type: 'navy', x: 0, z: 0, yaw: 0, speed: TYPES.navy.cruise, looted: false, routed: false };
+  for (let i = 0; i < 60 * 30; i++) stepMerchant(calm, 0, 100, 1 / 30, 1, false, 'neutral');
+  ok(Math.abs(calm.yaw) < 1e-9 && Math.abs(calm.speed - TYPES.navy.cruise) < 0.2,
+    'a neutral corvette sails past the King’s own ship');
+
+  // a trader told 'neutral' no longer panics at a close hull
+  const easy = { id: 'tn', type: 'trader', x: 0, z: 0, yaw: 0, speed: CRUISE, looted: false, routed: false };
+  for (let i = 0; i < 60 * 30; i++) stepMerchant(easy, 0, 100, 1 / 30, 1, false, 'neutral');
+  ok(Math.abs(easy.speed - CRUISE) < 0.2, 'the trade sails easy under protection');
+
+  // a raider told 'hunt' closes on the King's ship like the corvette closes
+  // on the black flag
+  const rd = { id: 'rh', type: 'raider', x: 0, z: 0, yaw: Math.PI, speed: TYPES.raider.cruise, looted: false, routed: false };
+  const rd0 = Math.hypot(rd.x - 0, rd.z - HUNT_R * 0.6);
+  for (let i = 0; i < 60 * 30; i++) stepMerchant(rd, 0, HUNT_R * 0.6, 1 / 30, 1, false, 'hunt');
+  ok(Math.hypot(rd.x - 0, rd.z - HUNT_R * 0.6) < rd0, 'the black flag hunts the King');
+
+  // routed overrides everything: even under 'hunt' orders a beaten hull runs
+  const beat = { id: 'rb', type: 'raider', x: 0, z: 0, yaw: 0, speed: 2, looted: false, routed: true };
+  for (let i = 0; i < 30 * 30; i++) stepMerchant(beat, 0, -200, 1 / 30, 1, false, 'hunt');
+  ok(Math.hypot(beat.x, beat.z + 200) > 200, 'routed, she runs whatever her orders say');
+}
+
+// the raider's ledger row holds shape: armed, crewed, worth taking
+ok(TYPES.raider.armed && TYPES.raider.crew > 0, 'boarding a raider meets a crew');
+ok(TYPES.raider.goldMult > TYPES.navy.goldMult, 'a pirate hold pays better than a King’s ship');
 
 // the early-game doctrine holds in the numbers: a well-sailed sloop OUTRUNS
 // the hunt (speed is her armour — the sloop briefing in shipyard.js is a

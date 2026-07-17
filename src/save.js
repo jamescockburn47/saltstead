@@ -10,16 +10,18 @@ import { acceptLog } from './shiplog.js';
 const clamp01 = (v, dflt) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : dflt);
 
 // ---- pure ----
-// loot: { gold, map, lootSeed, crew, fleet, log, banked, won, hull } —
-// additive fields, version stays 1 (older saves simply read as a poor pirate
-// with no map, no hands — the sloop sails solo — no prizes, a blank log,
-// nothing in Davy Jones' vault, no legends won, and the starting sloop)
+// loot: { gold, map, lootSeed, crew, fleet, log, banked, won, hull, faction }
+// — additive fields, version stays 1 (older saves simply read as a poor
+// pirate with no map, no hands — the sloop sails solo — no prizes, a blank
+// log, nothing in Davy Jones' vault, no legends won, the starting sloop,
+// and the black flag: every save before the two services WAS a pirate)
 export function snapshotSave(ship, skyT, loot = {}) {
   return {
     version: SAVE_VERSION,
     ship: { x: ship.x, z: ship.z, yaw: ship.yaw, trim: ship.trim },
     skyT,
     hull: typeof loot.hull === 'string' ? loot.hull : 'sloop',
+    faction: loot.faction === 'navy' ? 'navy' : 'pirate',
     // battle damage rides the save: a refresh must never repair her (the
     // two-stage wreck rule in combat.js has teeth only if crippled persists)
     dmgRig: clamp01(loot.dmgRig, 1),
@@ -53,6 +55,7 @@ export function acceptSave(meta) {
     // the hull id is vetted by the shipyard on load (hullById falls back to
     // the sloop) — the save only promises a short string
     hull: typeof meta.hull === 'string' ? meta.hull.slice(0, 16) : 'sloop',
+    faction: meta.faction === 'navy' ? 'navy' : 'pirate',
     dmgRig: clamp01(meta.dmgRig, 1),
     dmgHull: clamp01(meta.dmgHull, 1),
     crippled: !!meta.crippled,

@@ -115,6 +115,14 @@ const fakeStorage = () => {
   const longHull = acceptSave({ ...snapshotSave(ship, 0), hull: 'x'.repeat(400) });
   ok(longHull.hull.length <= 16, 'a bloated hull string is trimmed');
 
+  // the flag rides the save; every save from before the two services reads
+  // as the black flag (they WERE all pirates), and a mangled flag does too
+  const kings = acceptSave(snapshotSave(ship, 0, { faction: 'navy' }));
+  ok(kings.faction === 'navy', "the King's colours survive the round-trip");
+  ok(bare.faction === 'pirate', 'an old save reads as the black flag');
+  const falseFlag = acceptSave({ ...snapshotSave(ship, 0), faction: 'kraken' });
+  ok(falseFlag.faction === 'pirate', 'a false flag reads as the black');
+
   // battle damage and the crippled flag ride the save — a refresh never
   // repairs her, so the two-stage wreck rule keeps its teeth
   const hurtS = acceptSave(snapshotSave(ship, 0, { dmgRig: 0.4, dmgHull: 0.3, crippled: true }));

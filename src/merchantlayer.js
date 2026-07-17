@@ -9,34 +9,40 @@ import { waveHeight } from './waves.js';
 import { SCHOONER, CORVETTE, FRIGATE } from './shipphysics.js';
 import { frameFor, crewPosts } from './shipframe.js';
 import {
-  cellMerchants, stepMerchant, activeCells, zoneDerelicts, ACTIVE_R,
+  cellMerchants, stepMerchant, activeCells, zoneDerelicts, ACTIVE_R, TYPES,
 } from './merchants.js';
 import { newHullState, applyShot, speedFactor, isSinking, salvageValue, SINK_TIME } from './combat.js';
 import { zoneOf } from './legendfx.js';
+import { attitude } from './faction.js';
+import { LIVERIES } from './livery.js';
 
 // what each trade SAILS — real rungs of the same ladder the player climbs,
-// so a lane full of ships is a lane full of different silhouettes:
+// so a lane full of ships is a lane full of different silhouettes, and the
+// two SERVICES wear their colours (livery.js): the navy blue-black and buff
+// under the ensign, the raider tarred black under the skull. Honest trade
+// stays honest wood — the liveries read against it.
 //   trader    a schooner, quick and unarmed
 //   indiaman  a three-masted square-rigger with a castle — the payday LOOKS it
 //   navy      a corvette with a visible broadside — the threat LOOKS it
+//   raider    a fore-and-aft brigantine, black to the waterline — fast and lawless
 //   derelict  a schooner gone grey, sails struck
 const NPC_HULLS = {
   trader:   { spec: SCHOONER, masts: 2, guns: 0 },
   indiaman: { spec: FRIGATE, masts: 3, square: true, guns: 2, castle: true },
-  navy:     { spec: CORVETTE, masts: 2, square: true, guns: 3 },
+  navy:     { spec: CORVETTE, masts: 2, square: true, guns: 3, livery: LIVERIES.navy },
+  raider:   { spec: CORVETTE, masts: 2, guns: 3, livery: LIVERIES.pirate },
   derelict: { spec: SCHOONER, masts: 2, guns: 0 },
 };
 // hands visible about her deck (the derelict's whole point is nobody's home)
-const NPC_HANDS = { trader: 2, indiaman: 4, navy: 5, derelict: 0 };
+const NPC_HANDS = { trader: 2, indiaman: 4, navy: 5, raider: 5, derelict: 0 };
 
-// tint a freshly built hull for its trade: the navy paints, the dead fade
+// the dead fade to weathered grey (the liveried services paint at BUILD time)
 function tintShip(group, type) {
-  if (type !== 'navy' && type !== 'derelict') return;
+  if (type !== 'derelict') return;
   group.traverse((o) => {
     if (!o.isMesh || !o.material || !o.material.color) return;
     if (o.material.isMeshBasicMaterial) return; // the lantern keeps her flame
-    if (type === 'navy') o.material.color.multiply(new THREE.Color(0.55, 0.62, 0.85));
-    else o.material.color.lerp(new THREE.Color(0x6a6f72), 0.55); // weathered grey
+    o.material.color.lerp(new THREE.Color(0x6a6f72), 0.55); // weathered grey
   });
 }
 
@@ -54,6 +60,7 @@ export class MerchantLayer {
     this.looted = new Set();   // ids stripped this session (they stay stripped)
     this.sunk = new Set();     // ids on the bottom (their berths stay empty)
     this.flotsam = [];         // { x, z, gold, mesh } — what floats off a sinking
+    this.escortN = 0;          // signal-rocket corvettes minted this session
     this.bermuda = zoneOf('bermuda-triangle');
   }
 
@@ -71,8 +78,12 @@ export class MerchantLayer {
   // shoal: the player floats where a warship's keel dare not go (main.js
   // samples the terrain against merchants.js NAVY_SHOAL). night: living
   // crews hang masthead lanterns after dark (derelicts stay dark — nobody's
-  // aboard to light one, which is its own warning).
-  update(t, dt, px, pz, windFrom, shoal = false, night = false) {
+  // aboard to light one, which is its own warning). factionId: the player's
+  // flag — each sail's ATTITUDE to the player follows from it (faction.js).
+  // quarryOf(id): main.js hands an assisting corvette her target — returns
+  // { x, z } to hunt instead of the player, or null.
+  update(t, dt, px, pz, windFrom, shoal = false, night = false,
+    factionId = 'pirate', quarryOf = null) {
     // stream in
     for (const spec of this.spawnable(px, pz)) {
       if (this.live.has(spec.id) || this.sunk.has(spec.id)) continue;
@@ -122,7 +133,11 @@ export class MerchantLayer {
         }
         continue;
       }
-      stepMerchant(e.m, px, pz, dt, speedFactor(e.dmg), shoal);
+      // an assisting corvette is handed her quarry; everyone else minds the
+      // player, with the attitude their type owes the player's flag
+      const q = quarryOf ? quarryOf(e.m.id) : null;
+      if (q) stepMerchant(e.m, q.x, q.z, dt, speedFactor(e.dmg), false, 'hunt');
+      else stepMerchant(e.m, px, pz, dt, speedFactor(e.dmg), shoal, attitude(e.m.type, factionId));
       const y = waveHeight(e.m.x, e.m.z, t) - e.draft;
       e.group.position.set(e.m.x, y, e.m.z);
       e.group.rotation.set(0, e.m.yaw, (1 - e.dmg.hull) * 0.12); // holed, she lists
@@ -153,26 +168,56 @@ export class MerchantLayer {
     return out;
   }
 
-  // nearest un-stripped, un-sinking ship: { id, dist, m } or null
-  nearestPrize(px, pz) {
+  // nearest un-stripped, un-sinking ship the player MAY board (the boarding
+  // law is faction.js canBoardType, passed as a filter): { id, dist, m } or null
+  nearestPrize(px, pz, mayBoard = null) {
     let best = null;
     for (const [id, e] of this.live) {
       if (e.m.looted || e.sinkT !== null) continue;
+      if (mayBoard && !mayBoard(e.m.type)) continue;
       const dist = Math.hypot(e.m.x - px, e.m.z - pz);
       if (!best || dist < best.dist) best = { id, dist, m: e.m };
     }
     return best;
   }
 
-  // nearest corvette still spoiling for a fight: { id, dist, m } or null
-  nearestHostile(px, pz) {
+  // nearest hull of the given type still spoiling for a fight — the
+  // corvette hunting a pirate player, the raider hunting a King's ship
+  // (faction.js hostileType): { id, dist, m } or null
+  nearestHostile(px, pz, type = 'navy') {
     let best = null;
     for (const [id, e] of this.live) {
-      if (e.m.type !== 'navy' || e.m.looted || e.m.routed || e.sinkT !== null) continue;
+      if (e.m.type !== type || e.m.looted || e.m.routed || e.sinkT !== null) continue;
       const dist = Math.hypot(e.m.x - px, e.m.z - pz);
       if (!best || dist < best.dist) best = { id, dist, m: e.m };
     }
     return best;
+  }
+
+  // the Admiralty answers a signal from an empty sea: a corvette joins the
+  // lanes at (x, z) — session-local, like any battle outcome; the spawn
+  // table's world trade is untouched. Returns her id.
+  spawnEscort(x, z, yaw = 0) {
+    const id = `esc-${++this.escortN}`;
+    const def = NPC_HULLS.navy;
+    const built = buildShip(def);
+    const seed = idHash(id);
+    const F = frameFor(def.spec);
+    for (const [i, p] of crewPosts(F.deck, NPC_HANDS.navy, seed).entries()) {
+      const hand = buildHand(seed + i);
+      hand.position.set(p.x, F.deck.y, p.z);
+      built.group.add(hand);
+    }
+    this.scene.add(built.group);
+    this.live.set(id, {
+      m: {
+        id, type: 'navy', x, z, yaw, speed: TYPES.navy.cruise,
+        looted: false, routed: false, purse: 0,
+      },
+      group: built.group, setSail: built.setSail, setLantern: built.setLantern,
+      dmg: newHullState(), sinkT: null, draft: def.spec.draft, spec: def.spec,
+    });
+    return id;
   }
 
   // she's holed through: the sinking starts, salvage floats off
