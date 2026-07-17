@@ -20,9 +20,9 @@ export const CURRENTS = [
   // North Pacific gyre — clockwise
   { id: 'kuroshio', name: 'Kuroshio', speed: 2.0, width: 6000,
     path: [{ lat: 25, lon: 130 }, { lat: 35, lon: 145 }, { lat: 40, lon: 170 }] },
-  // NB: the world map does NOT wrap at +/-180 (earth.js: x = lon*444, unbounded),
-  // so a ribbon MUST NOT straddle the antimeridian or it inverts into a globe-
-  // spanning band the wrong way. Keep the Pacific limb east of the dateline.
+  // NB: the world wraps east-west now (earth.js dxWrap/wrapX) and currentAt is
+  // seam-aware, so a ribbon MAY cross +/-180; this one is kept east of the
+  // dateline only by choice.
   { id: 'n-equatorial-pac', name: 'North Equatorial (Pacific)', speed: 1.3, width: 8000,
     path: [{ lat: 12, lon: -95 }, { lat: 10, lon: -140 }, { lat: 10, lon: -175 }] },
   // Southern Ocean — the Antarctic Circumpolar, eastbound right round

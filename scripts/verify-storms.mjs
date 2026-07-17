@@ -20,7 +20,7 @@ ok(vortexToward(100, 0, -1).z > 0, 'south storms spin CW (mirrored)');
 
 // around a real storm: calm eye, gale eyewall, fair water well beyond
 {
-  const s = stormsAt(0)[0];
+  const s = stormsAt(0).reduce((a, b) => (b.intensity > a.intensity ? b : a));
   const far = latLonToWorld(58, -30); // no belt near here, no storm drifts this far
   const eye = stormWindAt(s.x, s.z, 0);
   const wall = stormWindAt(s.x + s.r * 0.5, s.z, 0);

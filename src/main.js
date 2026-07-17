@@ -20,7 +20,7 @@ import { route as laneRoute } from './lanes.js';
 import { windAt } from './wind.js';
 import { currentAt } from './currents.js';
 import { stormWindAt, stormFieldAt } from './storms.js';
-import { decide as helmWatch } from './helmwatch.js';
+import { decide as helmWatch, PILOT_R } from './helmwatch.js';
 import { RESCUE_R, GRATITUDE } from './survivors.js';
 import { HULLS, hullById, nextHull, prevHull, buyHull } from './shipyard.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
@@ -43,7 +43,7 @@ import { canBoard, lootRoll, chestRoll } from './plunder.js';
 import { findDigSite, digDist, DIG_RADIUS, DIG_TIME } from './treasure.js';
 import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
-  encounterGait, ENCOUNTER_FAR, isLand, wrapX,
+  encounterGait, ENCOUNTER_FAR, isLand, wrapX, dxWrap,
 } from './earth.js';
 import { windProfile, seaStateFor } from './weather.js';
 import { setSeaState, RIVER_STATE } from './waves.js';
@@ -322,6 +322,7 @@ class Game {
     this.routeLeg = 0;
     this.handbackMode = null; // the helm watch's last verdict (helmwatch.js)
     this.handbackReason = '';
+    this.courseFromPilotage = false; // course set from harbour/shoal water — don't belay it there
     this.maps.onCourse = (lat, lon) => {
       if (this.crew < 1) {
         this.say('No hand aboard to take the helm — sign crew at a port, then set your course', 6);
@@ -331,9 +332,14 @@ class Game {
       this.course = { x: w.x, z: w.z };
       this.route = laneRoute(this.ship.x, this.ship.z, w.x, w.z);
       this.routeLeg = 0;
+      // if the course is set from within pilotage water, don't let the helm
+      // watch belay it on the spot — she may take the ship OUT (rearms once she
+      // reaches open water; a coast met later still hands back)
+      this.courseFromPilotage = this.coastDist < PILOT_R;
       this.maps.course = { lat, lon };
-      const d = Math.hypot(w.x - this.ship.x, w.z - this.ship.z);
-      this.say(`COURSE SET — the helmsman lays her for the ${compassPoint(this.ship.x, this.ship.z, w.x, w.z)}, `
+      const dxw = dxWrap(this.ship.x, w.x); // the short way across the world seam
+      const d = Math.hypot(dxw, w.z - this.ship.z);
+      this.say(`COURSE SET — the helmsman lays her for the ${compassPoint(this.ship.x, this.ship.z, this.ship.x + dxw, w.z)}, `
         + `${Math.max(1, Math.round(d / 1000))} km by the log (C belays it; the wheel overrides)`, 8);
       this.logEvent('Set a course on the chart — a hand takes the helm');
     };
@@ -1648,7 +1654,7 @@ class Game {
     // in blue water — stacked with the gait, a crossing genuinely flies.
     // the wind field (wind.js): trades, westerlies, doldrums by latitude — but a
     // storm's vortex (storms.js) overrides it wherever a cyclone has the ship
-    const storm = stormWindAt(this.ship.x, this.ship.z, t);
+    const storm = stormWindAt(this.ship.x, this.ship.z, skyT); // skyT: storms persist across reload
     const wf = storm || windAt(this.ship.x, this.ship.z);
     this.wind.from = wf.from + 0.3 * Math.sin(t * 0.011) + 0.12 * Math.sin(t * 0.037);
     const gusts = 0.3 * Math.sin(t * 0.07) + 0.15 * Math.sin(t * 0.21);
@@ -1667,7 +1673,8 @@ class Game {
     // land the water is a RIVER: sheltered to near-flat whatever the wind,
     // and it settles quickly — a mouth crossed at gait should calm in a few
     // boat-lengths, not half the estuary
-    const swellWant = this.overLand ? RIVER_STATE : seaStateFor(this.wind.speed);
+    const swellWant = this.overLand ? RIVER_STATE
+      : seaStateFor(this.wind.speed) * (this.stormField ? this.stormField.seaScale : 1);
     this.swell += (swellWant - this.swell) * Math.min(1, dt * (this.overLand ? 0.35 : 0.05));
     setSeaState(this.swell);
 
@@ -1737,10 +1744,12 @@ class Game {
       if (!this.zone && this.diveN > 0) this.diveN = 0; // a fresh visit, fresh wrecks
       // the storm sky (storms.js): a cyclone greys the heavens and lifts the
       // sea; fair otherwise. weatherLock lets the showreel force its own beat.
-      this.stormField = stormFieldAt(this.ship.x, this.ship.z, t);
+      // Gloom EASES in so crossing a storm edge never snaps the sky (skyT so
+      // storms track the persistent season clock, not the session).
+      this.stormField = stormFieldAt(this.ship.x, this.ship.z, skyT);
       if (!this.weatherLock) {
         this.weatherState = this.stormField.weatherState;
-        this.gloom = this.stormField.gloom;
+        this.gloom += (this.stormField.gloom - this.gloom) * 0.12;
       }
     }
     // the trade lanes live: merchants stream, sail, flee, and count as
@@ -1926,7 +1935,7 @@ class Game {
     // meeting another ship kills the fair current — you slow to hailing speed
     let contactDist = Infinity;
     for (const c of allContacts) {
-      contactDist = Math.min(contactDist, Math.hypot(c.x - this.ship.x, c.z - this.ship.z));
+      contactDist = Math.min(contactDist, Math.hypot(dxWrap(this.ship.x, c.x), c.z - this.ship.z));
     }
     // river-sailing is inshore sailing wherever the sea coast is: over land
     // the fair current dies and she moves at human scale
@@ -1938,15 +1947,24 @@ class Game {
     // contact (SOFT — she keeps sailing) and heave to for a hazard (HARD — she
     // hands you the ship). Only acts on a change, so it never spams.
     if (this.course && this.route && this.crew >= 1) {
+      // once she has worked out to open water, the pilotage handback rearms —
+      // so a course set FROM a harbour lets her sail out, but a coast met later
+      // still hands the ship back
+      if (this.courseFromPilotage && this.coastDist >= PILOT_R) this.courseFromPilotage = false;
+      // look AHEAD for a storm so she rounds up before the eyewall, not deep in it
+      const ax = this.ship.x + Math.sin(this.ship.yaw) * 3500;
+      const az = this.ship.z + Math.cos(this.ship.yaw) * 3500;
+      const stormNear = Math.max(this.stormField ? this.stormField.danger : 0,
+        stormFieldAt(ax, az, skyT).danger);
       const hb = helmWatch({
         kraken: !!this.kraken,
         inTriangle: !!(this.zone && this.zone.legend.id === 'bermuda-triangle'),
         aground: this.aground,
         overLand: this.overLand,
         coastDist: this.coastDist,
-        nearPort: !!(this.port && this.port.dist < 3000),
-        shoal: this.shoalWater,
-        stormAhead: !!(this.stormField && this.stormField.danger > 0.3),
+        nearPort: !this.courseFromPilotage && !!(this.port && this.port.dist < 3000),
+        shoal: !this.courseFromPilotage && this.shoalWater,
+        stormAhead: stormNear > 0.15,
         contactDist,
       });
       if (hb.mode !== this.handbackMode || hb.reason !== this.handbackReason) {

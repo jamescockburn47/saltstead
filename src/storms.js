@@ -87,10 +87,11 @@ export function stormFieldAt(x, z, t) {
   for (const s of stormsAt(t)) {
     const d = Math.hypot(dxWrap(s.x, x), z - s.z);
     if (d >= s.r) continue;
-    inStorm = true;
     const near = s.intensity * (1 - d / s.r);
-    gloom = Math.max(gloom, 0.4 + 0.5 * near);
-    seaScale = Math.max(seaScale, 1 + 1.2 * near);
+    if (near < 0.06) continue; // a newborn/dying/rim storm doesn't yet grey the sky
+    inStorm = true;
+    gloom = Math.max(gloom, 0.75 * near);          // rises from ~0 at the rim, no snap
+    seaScale = Math.max(seaScale, 1 + 1.4 * near);
     if (d < STORM_DANGER_R) danger = Math.max(danger, s.intensity * (1 - d / STORM_DANGER_R));
   }
   return { weatherState: inStorm ? 'storm' : 'clear', gloom, seaScale, danger };

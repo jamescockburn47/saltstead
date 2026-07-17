@@ -14,6 +14,7 @@ import {
 import { newHullState, applyShot, speedFactor, isSinking, salvageValue, SINK_TIME } from './combat.js';
 import { zoneOf, DERELICT_ZONES } from './legendfx.js';
 import { nearestLanePoint } from './lanes.js';
+import { dxWrap } from './earth.js';
 import { attitude } from './faction.js';
 import { LIVERIES } from './livery.js';
 import { spawnSurvivors, stepSurvivor, survivorFate } from './survivors.js';
@@ -112,7 +113,7 @@ export class MerchantLayer {
     // stream in
     for (const spec of this.spawnable(px, pz)) {
       if (this.live.has(spec.id) || this.sunk.has(spec.id)) continue;
-      if (Math.hypot(spec.x - px, spec.z - pz) > ACTIVE_R) continue;
+      if (Math.hypot(dxWrap(px, spec.x), spec.z - pz) > ACTIVE_R) continue;
       const m = { ...spec, looted: this.looted.has(spec.id) };
       const def = NPC_HULLS[m.type] || NPC_HULLS.trader;
       const built = buildShip(def);
@@ -137,7 +138,7 @@ export class MerchantLayer {
     }
     // step + stream out
     for (const [id, e] of this.live) {
-      if (Math.hypot(e.m.x - px, e.m.z - pz) > ACTIVE_R * 1.2) {
+      if (Math.hypot(dxWrap(px, e.m.x), e.m.z - pz) > ACTIVE_R * 1.2) {
         this.scene.remove(e.group);
         this.live.delete(id);
         continue;
@@ -259,7 +260,7 @@ export class MerchantLayer {
     for (const [id, e] of this.live) {
       if (e.m.looted || e.sinkT !== null) continue;
       if (mayBoard && !mayBoard(e.m.type)) continue;
-      const dist = Math.hypot(e.m.x - px, e.m.z - pz);
+      const dist = Math.hypot(dxWrap(px, e.m.x), e.m.z - pz);
       if (!best || dist < best.dist) best = { id, dist, m: e.m };
     }
     return best;
@@ -272,7 +273,7 @@ export class MerchantLayer {
     let best = null;
     for (const [id, e] of this.live) {
       if (e.m.type !== type || e.m.looted || e.m.routed || e.sinkT !== null) continue;
-      const dist = Math.hypot(e.m.x - px, e.m.z - pz);
+      const dist = Math.hypot(dxWrap(px, e.m.x), e.m.z - pz);
       if (!best || dist < best.dist) best = { id, dist, m: e.m };
     }
     return best;
