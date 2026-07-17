@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "node scripts/deploy.mjs",
-    "verify": "node scripts/verify-waves.mjs && node scripts/verify-sailing.mjs && node scripts/verify-shipframe.mjs && node scripts/verify-ship.mjs && node scripts/verify-foam.mjs && node scripts/verify-wood.mjs && node scripts/verify-legends.mjs && node scripts/verify-earth.mjs && node scripts/verify-chart.mjs && node scripts/verify-terraingen.mjs && node scripts/verify-sky.mjs && node scripts/verify-light.mjs && node scripts/verify-login.mjs && node scripts/verify-plunder.mjs && node scripts/verify-treasure.mjs && node scripts/verify-merchants.mjs && node scripts/verify-weather.mjs && node scripts/verify-wildlife.mjs && node scripts/verify-fleet.mjs && node scripts/verify-shiplog.mjs && node scripts/verify-navigation.mjs && node scripts/verify-port.mjs && node scripts/verify-combat.mjs && node scripts/verify-legendfx.mjs && node scripts/verify-monsters.mjs && node scripts/verify-feedback.mjs && node scripts/verify-shipyard.mjs && node scripts/verify-ports.mjs && node scripts/verify-showreel.mjs && node scripts/verify-collide.mjs && node scripts/verify-anchor.mjs && node scripts/verify-faction.mjs && node scripts/verify-livery.mjs",
+    "verify": "node scripts/verify-waves.mjs && node scripts/verify-sailing.mjs && node scripts/verify-shipframe.mjs && node scripts/verify-ship.mjs && node scripts/verify-foam.mjs && node scripts/verify-wood.mjs && node scripts/verify-legends.mjs && node scripts/verify-earth.mjs && node scripts/verify-chart.mjs && node scripts/verify-terraingen.mjs && node scripts/verify-sky.mjs && node scripts/verify-light.mjs && node scripts/verify-login.mjs && node scripts/verify-plunder.mjs && node scripts/verify-treasure.mjs && node scripts/verify-merchants.mjs && node scripts/verify-weather.mjs && node scripts/verify-wildlife.mjs && node scripts/verify-fleet.mjs && node scripts/verify-shiplog.mjs && node scripts/verify-navigation.mjs && node scripts/verify-port.mjs && node scripts/verify-combat.mjs && node scripts/verify-legendfx.mjs && node scripts/verify-monsters.mjs && node scripts/verify-feedback.mjs && node scripts/verify-shipyard.mjs && node scripts/verify-ports.mjs && node scripts/verify-showreel.mjs && node scripts/verify-collide.mjs && node scripts/verify-anchor.mjs && node scripts/verify-faction.mjs && node scripts/verify-livery.mjs && node scripts/verify-gfxprobe.mjs",
     "verify:waves": "node scripts/verify-waves.mjs",
     "verify:sailing": "node scripts/verify-sailing.mjs",
     "verify:shipframe": "node scripts/verify-shipframe.mjs",
@@ -42,7 +42,8 @@
     "verify:collide": "node scripts/verify-collide.mjs",
     "verify:anchor": "node scripts/verify-anchor.mjs",
     "verify:faction": "node scripts/verify-faction.mjs",
-    "verify:livery": "node scripts/verify-livery.mjs"
+    "verify:livery": "node scripts/verify-livery.mjs",
+    "verify:gfxprobe": "node scripts/verify-gfxprobe.mjs"
   },
   "dependencies": {
     "three": "^0.166.0"

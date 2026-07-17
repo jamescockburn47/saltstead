@@ -21,6 +21,7 @@ import { TerrainLayer } from './terrain.js';
 import { Sky } from './sky.js';
 import { DAY_LENGTH, solarState, lunarState, moonPhase } from './skymath.js';
 import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness } from './lightrig.js';
+import { decideTier, fpsVerdict, median, SETTLE_S, WINDOW_S } from './gfxprobe.js';
 import { MapUI } from './mapui.js';
 import { bootTitle } from './title.js';
 import { loadGame, saveGame, snapshotSave } from './save.js';
@@ -245,6 +246,7 @@ class Game {
       if (e.code === 'KeyQ' && !e.repeat) this.toggleAnchor();
       if (e.code === 'KeyY' && !e.repeat) this.wardenMaterialise();
       if (e.code === 'KeyG' && !e.repeat) this.signalSquadron();
+      if (e.code === 'KeyV' && !e.repeat) this.toggleQuality();
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     this.dragging = false;
@@ -309,7 +311,41 @@ class Game {
       }
     });
 
-    this.applyQuality(localStorage['saltstead-gfx'] === 'plain' ? 'plain' : 'fine');
+    // THE GRAPHICS PROBE (gfxprobe.js — the Spire's tier method): open at
+    // the tier this machine can honestly carry. Key 'saltstead-gfx2' holds
+    // the tri-state (fine / plain chosen by hand, auto-plain remembered by
+    // the watchdog); the legacy always-written 'saltstead-gfx' key is
+    // ignored — it recorded the old default, not a choice.
+    this.gfxWatch = { t: 0, frames: [], span: 0, manual: false, pixelDropped: false };
+    const gfxSig = {
+      stored: ['fine', 'plain', 'auto-plain'].includes(localStorage['saltstead-gfx2'])
+        ? localStorage['saltstead-gfx2'] : null,
+      touchPrimary: typeof matchMedia === 'function'
+        ? matchMedia('(pointer: coarse)').matches : false,
+      webgpu: null,
+      rendererStr: (() => {
+        try {
+          const gl = this.renderer.getContext();
+          const ext = gl.getExtension('WEBGL_debug_renderer_info');
+          return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null;
+        } catch { return null; }
+      })(),
+      deviceMemory: navigator.deviceMemory ?? null,
+      cores: navigator.hardwareConcurrency ?? null,
+    };
+    const opening = decideTier(gfxSig);
+    this.applyQuality(opening.tier);
+    // the WebGPU adapter answers async — refine ONLY the optimistic default
+    // (a stored choice or a hard signal already settled it)
+    if (opening.why === 'unprobed' && navigator.gpu?.requestAdapter) {
+      Promise.race([
+        navigator.gpu.requestAdapter(),
+        new Promise((r) => setTimeout(() => r(null), 1500)),
+      ]).then((adapter) => {
+        const v = decideTier({ ...gfxSig, webgpu: !!adapter });
+        if (v.tier !== this.gfxQuality) this.applyQuality(v.tier);
+      }).catch(() => {});
+    }
 
     this.t = 0;
     this.last = performance.now();
@@ -604,7 +640,46 @@ class Game {
       if (!m) return;
       for (const mm of Array.isArray(m) ? m : [m]) mm.needsUpdate = true;
     });
-    try { localStorage['saltstead-gfx'] = q; } catch { /* private mode */ }
+    // NOTE: applyQuality never persists — the old always-write here is what
+    // turned a default into a false "choice". Only the V key (a real choice)
+    // and the watchdog (auto-plain) write saltstead-gfx2.
+  }
+
+  // V — the player's own hand on the graphics: toggles fine/plain, stores
+  // the choice, and stands the tier watchdog down (a chosen tier is never
+  // second-guessed; the pixel-shed stays armed either way)
+  toggleQuality() {
+    const next = this.gfxQuality === 'fine' ? 'plain' : 'fine';
+    this.applyQuality(next);
+    this.gfxWatch.manual = true;
+    this.gfxWatch.frames.length = 0; this.gfxWatch.span = 0;
+    try { localStorage['saltstead-gfx2'] = next; } catch { /* private mode */ }
+    this.say(`Graphics: ${next.toUpperCase()} — your choice, remembered (V to change back)`, 5);
+  }
+
+  // the fps watchdog (gfxprobe.js): after the opening settle, judge each
+  // window's median frame rate and ease DOWN if the timbers can't carry it —
+  // to plain first (remembered as auto-plain), then to fewer pixels. Never
+  // up: upgrades are the player's (V).
+  watchFrame(rawDt) {
+    const gw = this.gfxWatch;
+    gw.t += rawDt;
+    if (gw.t < SETTLE_S || this.photoCam || rawDt <= 0 || rawDt > 0.5) return;
+    gw.frames.push(1 / rawDt);
+    gw.span += rawDt;
+    if (gw.span < WINDOW_S) return;
+    const verdict = fpsVerdict(this.gfxQuality, median(gw.frames));
+    gw.frames.length = 0; gw.span = 0;
+    if (verdict === 'drop-plain' && !gw.manual) {
+      this.applyQuality('plain');
+      try { localStorage['saltstead-gfx2'] = 'auto-plain'; } catch { /* private mode */ }
+      this.say('The sea eases off for this ship’s timbers — graphics dropped to PLAIN (V to override)', 8);
+      this.logEvent('Graphics eased to plain — the frame could not hold');
+    } else if (verdict === 'drop-pixels' && !gw.pixelDropped) {
+      gw.pixelDropped = true;
+      this.renderer.setPixelRatio(1);
+      this.say('Fewer pixels, truer wind — resolution eased for smooth sailing', 6);
+    }
   }
 
   // T is the tiller, from anywhere on deck — the captain runs aft. T again
@@ -1065,8 +1140,10 @@ class Game {
 
   frame() {
     const now = performance.now();
-    const dt = Math.min(0.05, (now - this.last) / 1000);
+    const rawDt = (now - this.last) / 1000; // unclamped — the watchdog's truth
+    const dt = Math.min(0.05, rawDt);
     this.last = now;
+    this.watchFrame(rawDt);
     this.t += dt;
     const t = this.t, k = this.keys;
     const skyT = t + this.dayStart;
