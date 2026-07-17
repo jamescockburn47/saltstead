@@ -61,6 +61,9 @@ import {
   legendAt, triangleDepth, compassJitter, TRIANGLE_GLOOM, whirlpoolPull,
   WHIRL_RIG_RATE, deadAir, DIVE_TIME, diveRoll, EXPEDITION_TIME, ELDORADO_GOLD,
   dutchmanSails, dutchmanCargo, DUTCHMAN_SPEED, zoneOf,
+  WHIRL_ZONES, DEADAIR_ZONES, KRAKEN_ZONES, DRAGON_ZONES, DIVE_ZONES,
+  STORM_ZONES, STORM_GLOOM, STORM_WIND_MULT,
+  ROC_GOLD, WHALE_RAM_S, WHALE_RAM_HULL, SELKIE_DWELL_S,
 } from './legendfx.js';
 import {
   newKraken, stepKraken, shootKrakenArm, krakenDrag, krakenOver, KRAKEN_LOOT,
@@ -753,6 +756,7 @@ class Game {
       this.say('The expedition hacks into the jungle, upriver\u2026');
       return;
     }
+    if (this.fountainReady) { this.drinkFountain(); return; }
     if (this.bankReady) { this.bankTreasure(); return; }
     if (this.port && inAnchorage(this.port.dist, this.ship.speed)) { this.putIn(); return; }
     if (this.canGoBelow()) { this.goBelow(); return; }
@@ -919,10 +923,20 @@ class Game {
         this.shotSeed++;
         if (hit) {
           const w = woundDragon(this.dragon);
-          this.say(w.fled
-            ? 'A TELLING HIT \u2014 she shrieks and breaks for her crag in Snowdonia!'
-            : `A hit! The dragon staggers in the air (${this.dragon.hp} more will do it)`, 5);
-          if (w.fled) this.logEvent('Wounded Y Ddraig Goch \u2014 she fled to her crag');
+          if (w.fled && this.dragonZone === 'roc') {
+            // no crag hoard for the Roc: driven off, she drops what her
+            // talons tore from the last ship that fought back
+            this.gold += ROC_GOLD;
+            this.won.push('roc');
+            this.say(`A TELLING HIT \u2014 THE ROC screams and drops her plunder: ${ROC_GOLD} doubloons rain into the sea beside you!`, 8);
+            this.logEvent(`Drove off the Roc \u2014 ${ROC_GOLD} doubloons of dropped plunder`);
+            this.persist();
+          } else {
+            this.say(w.fled
+              ? 'A TELLING HIT \u2014 she shrieks and breaks for her crag in Snowdonia!'
+              : `A hit! The ${this.dragonZone === 'roc' ? 'Roc' : 'dragon'} staggers in the air (${this.dragon.hp} more will do it)`, 5);
+            if (w.fled) this.logEvent('Wounded Y Ddraig Goch \u2014 she fled to her crag');
+          }
         } else {
           this.say('The ball sails past her wing', 3);
         }
@@ -1138,6 +1152,18 @@ class Game {
     this.persist();
   }
 
+  // the Fountain of Youth: the sweet water mends hull, rig, and the
+  // crippled flag — once a visit; the fountain remembers greedy captains
+  drinkFountain() {
+    this.hull.rig = 1;
+    this.hull.hull = 1;
+    this.crippled = false;
+    this.fountainUsed = true;
+    this.say('The crew hauls casks of the SWEET WATER aboard — seams close, canvas mends, the ship is YOUNG again', 9);
+    this.logEvent('Drank of the Fountain of Youth at Bimini — the ship made whole');
+    this.persist();
+  }
+
   // Davy Jones' Locker: treasure sunk over the trench is banked FOREVER
   bankTreasure() {
     if (this.gold <= 0) return;
@@ -1182,6 +1208,18 @@ class Game {
       'dragons-wales': 'The Irish Sea, under Snowdonia \u2014 keep a man watching the SKY',
       'flying-dutchman': 'The Cape of Good Hope \u2014 in every storm, they say, SHE rounds it still',
       'davy-jones': 'DAVY JONES\u2019 LOCKER \u2014 the deepest water on earth. The sails hang dead\u2026 treasure sunk here is banked forever (E to consign)',
+      'maelstrom': 'THE MAELSTROM \u2014 the one the word comes from. Ride the rim; the core takes rigs',
+      'charybdis': 'CHARYBDIS \u2014 she swallowed six of Odysseus\u2019s men. The rim is the fastest water in the Mediterranean',
+      'sirens': 'THE SIRENS\u2019 water \u2014 the wind itself forgets to blow. Keep way on her if you can',
+      'umibozu': 'The UMIB\u014cZU\u2019s sea \u2014 say nothing, touch nothing, sail through. The wind dies where it watches',
+      'roc': 'The Roc\u2019s sky, north of Madagascar \u2014 a wingspan that shadows the DECK. Watch above',
+      'leviathan': 'The Red Sea. Scripture wrote a monster here and the scripture was RIGHT',
+      'white-whale': 'Mocha Island \u2014 the White Whale\u2019s water. She RAMS trespassers. You are trespassing',
+      'mary-celeste': 'The GHOST FLEET \u2014 sails set, cargo whole, crews gone. The salvage nobody dares',
+      'fountain-of-youth': 'Bimini \u2014 the sweet water. Heave to over the spring and E mends the ship',
+      'selkie-skerries': 'The SELKIE SKERRIES \u2014 ride to anchor through a night; one may sign your articles',
+      'cape-horn': 'CAPE HORN \u2014 no myth, which is the horror of it. The williwaws never stop',
+      'ryugu': 'RY\u016aG\u016a-J\u014c \u2014 the Dragon Palace under the sea. Heave to and E dives for the tribute',
       'plate-fleet': 'The 1715 PLATE FLEET \u2014 Spanish silver on the seabed below. Heave to and E sends the divers down',
       'el-dorado': 'The Amazon\u2026 upriver, they say, a city of GOLD. Anchor and E mounts the expedition',
     };
@@ -1217,6 +1255,10 @@ class Game {
     this.wind.from = this.windBase.from + 0.3 * Math.sin(t * 0.011) + 0.12 * Math.sin(t * 0.037);
     const gusts = 0.3 * Math.sin(t * 0.07) + 0.15 * Math.sin(t * 0.21);
     this.wind.speed = windProfile(this.coastDist, this.windBase.speed * (1 + gusts));
+    // the Horn: the williwaws never stop — whatever the forecast says
+    if (this.zone && STORM_ZONES.includes(this.zone.legend.id)) {
+      this.wind.speed *= STORM_WIND_MULT;
+    }
 
     // the sea takes the wind's shape, eased so the swell never pops
     this.swell += (seaStateFor(this.wind.speed) - this.swell) * Math.min(1, dt * 0.05);
@@ -1460,7 +1502,8 @@ class Game {
       const wll = worldToLatLon(this.ship.x, this.ship.z);
       this.wildlife.update(t, dt, this.ship.x, this.ship.z,
         this.shipGroup.position.y + 11, this.ship.speed, this.coastDist, Math.abs(wll.lat),
-        this.ship.yaw, this.shipFrame.scale, this.merchants.wrecks());
+        this.ship.yaw, this.shipFrame.scale, this.merchants.wrecks(),
+        !!(this.zone && this.zone.legend.id === 'white-whale'));
     }
     const allContacts = this.contacts.concat(this.merchants.contacts())
       .concat(this.legendFx.contacts());
@@ -1475,7 +1518,7 @@ class Game {
 
     // ---- the monsters wake (monsters.js) ----
     const zoneId = this.zone && this.zone.legend.id;
-    if (zoneId === 'kraken-deep' && !this.kraken && !this.krakenDone && this.coastDist > 600) {
+    if (KRAKEN_ZONES.includes(zoneId) && !this.kraken && !this.krakenDone && this.coastDist > 600) {
       this.kraken = newKraken();
       this.say('The sea begins to BOIL around the hull\u2026', 6);
     }
@@ -1502,13 +1545,18 @@ class Game {
       if (this.kraken.state === 'gripping') gait = 1; // no current saves you
       else if (krakenOver(this.kraken)) this.kraken = null; // the fight is done
     }
-    if (zoneId === 'dragons-wales' && !this.dragon && !this.won.includes('dragons-wales')) {
+    if (DRAGON_ZONES.includes(zoneId) && !this.dragon && !this.won.includes(zoneId)) {
       this.dragon = newDragon();
-      this.say('A shadow crosses the deck \u2014 Y DDRAIG GOCH circles above! She\u2019s only in gunshot when she STOOPS \u2014 F when she dives!', 9);
-      this.logEvent('A dragon rose from Snowdonia and circled the masthead');
+      this.dragonZone = zoneId; // which sky-boss this is (wales dragon / the Roc)
+      this.say(zoneId === 'roc'
+        ? 'A shadow the size of a MAINSAIL crosses the deck \u2014 THE ROC is over you! F when she stoops \u2014 and mind your rig!'
+        : 'A shadow crosses the deck \u2014 Y DDRAIG GOCH circles above! She\u2019s only in gunshot when she STOOPS \u2014 F when she dives!', 9);
+      this.logEvent(zoneId === 'roc'
+        ? 'The Roc rose off Madagascar and circled the masthead'
+        : 'A dragon rose from Snowdonia and circled the masthead');
     }
     if (this.dragon && !dragonGone(this.dragon)) {
-      if (zoneId !== 'dragons-wales') {
+      if (!DRAGON_ZONES.includes(zoneId)) {
         this.dragon = null; // she loses interest at her borders
       } else {
         const ev = stepDragon(this.dragon, dt);
@@ -1585,7 +1633,7 @@ class Game {
 
     // ---- the legends' own E-verbs: dive, expedition, the vault, the hoard ----
     const heaveTo = this.ship.speed < 1 && this.mode !== 'ashore';
-    this.diveReady = zoneId === 'plate-fleet' && heaveTo;
+    this.diveReady = DIVE_ZONES.includes(zoneId) && heaveTo;
     if (this.diveTimer > 0) {
       this.diveTimer -= dt;
       if (this.diveTimer <= 0) {
@@ -1612,6 +1660,42 @@ class Game {
       }
     }
     this.bankReady = zoneId === 'davy-jones' && heaveTo && this.gold > 0;
+    // the Fountain of Youth: heave to over the spring and the sea mends her
+    // — once a visit (the flag resets when you leave the zone)
+    if (zoneId !== this.lastZoneId) { this.fountainUsed = false; this.lastZoneId = zoneId; }
+    this.fountainReady = zoneId === 'fountain-of-youth' && heaveTo && !this.fountainUsed
+      && (this.hull.rig < 1 || this.hull.hull < 1 || this.crippled);
+    // the Selkie Skerries: ride to anchor through the night and one comes
+    if (zoneId === 'selkie-skerries' && this.anchorDown && sol.nightness > 0.5
+      && !this.selkieJoined && this.crew < this.hullDef.berths) {
+      this.selkieDwell = (this.selkieDwell || 0) + dt;
+      if (this.selkieDwell > SELKIE_DWELL_S) {
+        this.selkieJoined = true;
+        this.crew++;
+        this.say('A dark head watches from the skerries… a SELKIE sheds her sealskin and signs your articles — the finest hand on any water', 10);
+        this.logEvent('A selkie of the Orkney skerries signed articles by night');
+        this.persist();
+      }
+    } else {
+      this.selkieDwell = 0;
+    }
+    // the White Whale: trespass in her water and she charges on her clock
+    if (zoneId === 'white-whale') {
+      this.whaleRamT = (this.whaleRamT || 0) + dt;
+      if (this.whaleRamT > WHALE_RAM_S && this.coastDist > 200) {
+        this.whaleRamT = 0;
+        this.hull.hull = Math.max(0, this.hull.hull - WHALE_RAM_HULL);
+        this.ship.speed *= 0.5;
+        if (isSinking(this.hull)) {
+          this.sufferHoling('the White Whale’s ram');
+        } else {
+          this.say(`THE WHITE WHALE — she STOVE the bow! (hull ${(this.hull.hull * 100).toFixed(0)}%) — leave her water or feed her more planking`, 8);
+          this.logEvent('The White Whale rammed the ship off Mocha Island');
+        }
+      }
+    } else {
+      this.whaleRamT = 0;
+    }
     // the dragon's crag: she fled there wounded; step ashore under Snowdon
     this.hoardReady = false;
     if (this.mode === 'ashore' && this.dragon && dragonGone(this.dragon)
@@ -1633,7 +1717,9 @@ class Game {
     let hullFactor = speedFactor(this.hull) * this.fac.speedMult;
     if (this.kraken) hullFactor *= krakenDrag(this.kraken);
     let windEff = this.wind;
-    if (zoneId === 'davy-jones') {
+    if (DEADAIR_ZONES.includes(zoneId)) {
+      // the trench, the sirens' song, the umibōzu's dread — three waters,
+      // one becalming: the sails hang dead toward the heart of the zone
       windEff = { from: this.wind.from, speed: this.wind.speed * deadAir(this.zone.dist, this.zone.r) };
     }
     const specEff = hullFactor === 1
@@ -1649,9 +1735,10 @@ class Game {
       this.ship.yaw = swingToWind(this.ship.yaw, this.wind.from, dt);
     }
 
-    // the Corryvreckan takes the helm: rim slings, core swallows and shreds
-    if (zoneId === 'corryvreckan') {
-      const wz = zoneOf('corryvreckan');
+    // the whirl zones take the helm: rim slings, core swallows and shreds —
+    // Corryvreckan, the original Maelstrom, Charybdis: one field, three seas
+    if (WHIRL_ZONES.includes(zoneId)) {
+      const wz = zoneOf(zoneId);
       const pull = whirlpoolPull(this.ship.x - wz.x, this.ship.z - wz.z, wz.r);
       this.ship.x += pull.ax * dt;
       this.ship.z += pull.az * dt;
@@ -1810,7 +1897,10 @@ class Game {
     const skyLL = worldToLatLon(this.ship.x, this.ship.z);
     // in the Triangle the fog closes in whatever the forecast says
     const gloomEff = zoneId === 'bermuda-triangle'
-      ? Math.max(this.gloom, TRIANGLE_GLOOM) : this.gloom;
+      ? Math.max(this.gloom, TRIANGLE_GLOOM)
+      : STORM_ZONES.includes(zoneId)
+        ? Math.max(this.gloom, STORM_GLOOM) // the Horn is never kind
+        : this.gloom;
     this.sky.update(skyT, skyLL.lat, this.camera.position, gloomEff);
     // the weather made visible: cumulus drifting downwind, rain on the lens
     this.skyfx.update(t, dt, this.ship.x, this.ship.z, this.camera.position,
@@ -1971,6 +2061,8 @@ class Game {
           ? 'The expedition is upriver\u2026'
           : this.expReady
             ? 'E \u2014 mount the expedition to El Dorado'
+          : this.fountainReady
+            ? 'E \u2014 haul casks of the SWEET WATER: the fountain mends hull and rig'
           : this.bankReady
             ? `E \u2014 consign ${this.gold} doubloons to the Locker (banked FOREVER)`
             : this.mode === 'helm'

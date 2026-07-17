@@ -17,20 +17,36 @@ export const KRAKEN_ARMS = 6;
 
 // THE ARM'S LIVING CURVE — per-segment bend angles (radians) the scene
 // layer skins cylinders onto (monsterlayer). t: seconds; i: which arm;
-// grip [0..1]: how hard she holds (the fight loosens it). Root stands
-// near-straight out of the sea; the curl gathers toward the tip — a rising
-// wave travels DOWN the arm so every arm writhes on its own clock. Bounded:
-// no joint ever folds back through the last (|angle| < 0.8 rad).
+// grip [0..1]: how hard she holds (the fight loosens it); slam [0..1]: the
+// STRIKE — at 0 the arm writhes its grip, rising toward 1 it REARS back
+// off the hull, and the layer drives it 1 -> 0 fast so the whip-down reads
+// as a blow. Root stands near-straight out of the sea; the curl gathers
+// toward the tip — a wave travels DOWN the arm so every arm writhes on its
+// own clock. Bounded: no joint ever folds back through the last
+// (|angle| < 0.9 rad at any grip/slam).
 export const ARM_SEGS = 8;
-export function tentacleSpine(t, i, grip = 0.7) {
+export function tentacleSpine(t, i, grip = 0.7, slam = 0) {
   const out = [];
   for (let s = 0; s < ARM_SEGS; s++) {
     const u = s / (ARM_SEGS - 1);
-    const wave = Math.sin(t * 1.7 + i * 1.9 - u * 3.6) * 0.16 * (0.35 + u);
+    const wave = Math.sin(t * 1.9 + i * 1.9 - u * 3.6) * 0.22 * (0.35 + u);
     const curl = -(0.06 + 0.46 * grip * u * u);
-    out.push(curl + wave);
+    // the rear-back: root throws OUT, tip straightens — the arm stands off
+    // the hull at full slam, cocked; easing back to 0 whips it down
+    const rear = slam * (0.45 * (1 - u) - curl * 0.9);
+    out.push(Math.max(-0.9, Math.min(0.9, curl + wave * (1 - slam * 0.6) + rear)));
   }
   return out;
+}
+
+// the slam clock — pure so both the layer and the verify read the same
+// strike: each arm rears over ~1.2 s and whips down in ~0.4 s, staggered
+// around the pod so at most one or two arms strike at once
+export function slamPhase(t, i) {
+  const cycle = (t * 0.14 + i / KRAKEN_ARMS) % 1; // one strike per arm per ~7 s
+  if (cycle < 0.82) return 0;
+  const u = (cycle - 0.82) / 0.18;
+  return u < 0.72 ? u / 0.72 : (1 - u) / 0.28; // slow rear, fast whip-down
 }
 export const KRAKEN_WARN = 8;     // s of boiling sea before the arms come up
 export const KRAKEN_HOLD = 60;    // s before it tires and lets go on its own

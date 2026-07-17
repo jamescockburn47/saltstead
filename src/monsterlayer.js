@@ -8,7 +8,7 @@
 
 import * as THREE from 'three';
 import { waveHeight } from './waves.js';
-import { KRAKEN_ARMS, ARM_SEGS, tentacleSpine, dragonAlt, DRAGON_STOOP } from './monsters.js';
+import { KRAKEN_ARMS, ARM_SEGS, tentacleSpine, slamPhase, dragonAlt, DRAGON_STOOP } from './monsters.js';
 
 const KRAKEN_SKIN = new THREE.MeshPhongMaterial({ color: 0x4a3a4e, flatShading: true });
 const KRAKEN_UNDER = new THREE.MeshPhongMaterial({ color: 0x8a6a72, flatShading: true });
@@ -22,12 +22,12 @@ const DRAGON_WING = new THREE.MeshPhongMaterial({
 function buildTentacle() {
   const g = new THREE.Group();
   const segs = [];
-  const segLen = 1.75; // ~14 m of arm: it must LOOM over a galleon's rail
+  const segLen = 2.2; // ~17 m of arm: it must TOWER over a galleon's rail
   let carrier = g;
   for (let s = 0; s < ARM_SEGS; s++) {
     const u = s / (ARM_SEGS - 1);
-    const rBot = 0.62 * (1 - 0.86 * u) + 0.05;
-    const rTop = 0.62 * (1 - 0.86 * Math.min(1, u + 1 / (ARM_SEGS - 1))) + 0.05;
+    const rBot = 0.85 * (1 - 0.86 * u) + 0.06;
+    const rTop = 0.85 * (1 - 0.86 * Math.min(1, u + 1 / (ARM_SEGS - 1))) + 0.06;
     const pivot = new THREE.Group();
     const seg = new THREE.Mesh(
       new THREE.CylinderGeometry(rTop, rBot, segLen, 5),
@@ -94,7 +94,26 @@ function buildDragon() {
   tail.rotation.x = -Math.PI / 2;
   tail.position.z = -5.2;
   g.add(tail);
-  return { group: g, wl, wr };
+  // THE FIRE: a cone of flame from the jaws, lit only in the stoop — two
+  // nested cones (white-hot core inside orange) and a real light, so a
+  // strafing dragon LIGHTS the deck she rakes
+  const fire = new THREE.Group();
+  const outer = new THREE.Mesh(new THREE.ConeGeometry(1.1, 7, 7),
+    new THREE.MeshBasicMaterial({ color: 0xff7a26, transparent: true, opacity: 0.75, fog: false, depthWrite: false }));
+  const core = new THREE.Mesh(new THREE.ConeGeometry(0.5, 5.4, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.9, fog: false, depthWrite: false }));
+  outer.rotation.x = Math.PI / 2; core.rotation.x = Math.PI / 2; // point along +z (the nose)
+  outer.position.z = 3.5; core.position.z = 2.8;
+  fire.add(outer, core);
+  const fireLight = new THREE.PointLight(0xff8a30, 0, 60, 1.8);
+  fire.add(fireLight);
+  fire.position.set(0, -0.4, 5.2); // from the jaws, angled at the prey below
+  fire.rotation.x = 0.5;
+  fire.visible = false;
+  g.add(fire);
+  // the whole animal at NIGHTMARE scale — she must dwarf the masts she rakes
+  g.scale.setScalar(1.8);
+  return { group: g, wl, wr, fire, fireLight, fireOuter: outer, fireCore: core };
 }
 
 export class MonsterLayer {
@@ -167,12 +186,16 @@ export class MonsterLayer {
       }
       if (!alive) continue;
       const rise = Math.sin(t * 1.1 + i * 1.7);
-      arm.group.position.set(ax, wy - 2.6 + rise * 0.6, az);
+      arm.group.position.set(ax, wy - 2.9 + rise * 0.8, az);
       arm.group.rotation.set(0, ang, 0);
       // the living curve (monsters.js tentacleSpine, verify-gated): the
-      // grip's curl gathers toward the tip, a wave travels down the arm
-      const spine = tentacleSpine(t, i, grip);
+      // grip's curl gathers toward the tip, a wave travels down the arm —
+      // and on the slam clock an arm REARS off the hull and whips down
+      const slam = slamPhase(t, i);
+      const spine = tentacleSpine(t, i, grip, slam);
       for (let s = 0; s < ARM_SEGS; s++) arm.segs[s].rotation.x = spine[s];
+      // a slow whole-arm sway keeps even the gripping arms alive
+      arm.group.rotation.z = Math.sin(t * 0.7 + i * 2.6) * 0.08;
       // lean the whole arm in over the rail
       const lean = Math.atan2(sx - ax, sz - az) - ang;
       arm.group.rotateOnAxis(new THREE.Vector3(Math.cos(lean), 0, -Math.sin(lean)), 0.3);
@@ -229,6 +252,21 @@ export class MonsterLayer {
     const flap = dragon.state === 'stoop' ? 0.1 : Math.sin(t * 2.6) * 0.5;
     this.dragon.wl.rotation.z = flap;
     this.dragon.wr.rotation.z = -flap;
+    // THE FIRE rides the heart of the stoop: she opens her jaws on the way
+    // in, rakes the deck with flame at the bottom of the pass, and shuts
+    // off climbing out — flickering the whole way
+    const stoopU = dragon.state === 'stoop' ? Math.min(1, dragon.t / DRAGON_STOOP) : 0;
+    const firing = stoopU > 0.25 && stoopU < 0.75;
+    this.dragon.fire.visible = firing;
+    if (firing) {
+      const flick = 0.8 + 0.2 * Math.sin(t * 31) * Math.sin(t * 17);
+      this.dragon.fireOuter.material.opacity = 0.75 * flick;
+      this.dragon.fireCore.material.opacity = 0.9 * flick;
+      this.dragon.fireOuter.scale.set(flick, 1 + 0.2 * Math.sin(t * 23), flick);
+      this.dragon.fireLight.intensity = 90 * flick;
+    } else {
+      this.dragon.fireLight.intensity = 0;
+    }
   }
 
   // where the dragon is for gunnery: {x, z, alt} or null

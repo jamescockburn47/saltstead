@@ -12,7 +12,7 @@ import {
   cellMerchants, stepMerchant, activeCells, zoneDerelicts, ACTIVE_R, TYPES,
 } from './merchants.js';
 import { newHullState, applyShot, speedFactor, isSinking, salvageValue, SINK_TIME } from './combat.js';
-import { zoneOf } from './legendfx.js';
+import { zoneOf, DERELICT_ZONES } from './legendfx.js';
 import { attitude } from './faction.js';
 import { LIVERIES } from './livery.js';
 import { spawnSurvivors, stepSurvivor, survivorFate } from './survivors.js';
@@ -64,7 +64,10 @@ export class MerchantLayer {
     this.escortN = 0;          // signal-rocket corvettes minted this session
     this.swimmers = [];        // { s, group, arm } — souls in the water (survivors.js)
     this.takenCount = 0;       // swimmers the sea took since last asked (main toasts)
-    this.bermuda = zoneOf('bermuda-triangle');
+    // every dead water carries its own drifting fleet (bermuda, ghost fleet…)
+    this.deadWaters = DERELICT_ZONES
+      .map((id) => ({ id, zone: zoneOf(id) }))
+      .filter((d) => d.zone);
   }
 
   // a soul in the water: a head, shoulders awash, one arm waving for the sail
@@ -86,10 +89,11 @@ export class MerchantLayer {
   spawnable(px, pz) {
     const out = [];
     for (const [cx, cz] of activeCells(px, pz)) out.push(...cellMerchants(cx, cz));
-    // the triangle's dead fleet streams like any other ship
-    if (this.bermuda
-      && Math.hypot(this.bermuda.x - px, this.bermuda.z - pz) < this.bermuda.r + ACTIVE_R) {
-      out.push(...zoneDerelicts());
+    // the dead waters' fleets stream like any other ship
+    for (const d of this.deadWaters) {
+      if (Math.hypot(d.zone.x - px, d.zone.z - pz) < d.zone.r + ACTIVE_R) {
+        out.push(...zoneDerelicts(d.id));
+      }
     }
     return out;
   }

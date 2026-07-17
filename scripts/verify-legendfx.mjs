@@ -8,6 +8,9 @@ import {
   whirlpoolPull, WHIRL_RIM, WHIRL_CORE, deadAir, bankable,
   diveRoll, DIVE_DECAY, DIVE_FLOOR, ELDORADO_GOLD,
   dutchmanSails, dutchmanCargo, dutchmanPos, DUTCHMAN_SPEED,
+  WHIRL_ZONES, DEADAIR_ZONES, KRAKEN_ZONES, DRAGON_ZONES, DIVE_ZONES,
+  DERELICT_ZONES, STORM_ZONES, STORM_GLOOM, STORM_WIND_MULT,
+  ROC_GOLD, WHALE_RAM_S, WHALE_RAM_HULL, SELKIE_DWELL_S,
 } from '../src/legendfx.js';
 
 let failed = 0;
@@ -102,6 +105,33 @@ ok(ELDORADO_GOLD > 1500, 'the gilded city out-pays any chest');
   ok(d > 30 && d < DUTCHMAN_SPEED * 10 * 1.2, `she makes way on her circuit (${d.toFixed(0)} m in 10 s)`);
   const r1 = Math.hypot(p1.x - 1000, p1.z - 2000);
   ok(Math.abs(r1 - 1200 * 0.7) < 1, 'she keeps her orbit inside the zone');
+}
+
+// the second dozen: the mythology is GLOBAL now — every zone family's
+// members exist in the table with real zones, every family id resolves,
+// and the new constants hold their design shape
+{
+  const families = [WHIRL_ZONES, DEADAIR_ZONES, KRAKEN_ZONES, DRAGON_ZONES,
+    DIVE_ZONES, DERELICT_ZONES, STORM_ZONES];
+  for (const fam of families) {
+    for (const id of fam) {
+      ok(LEGENDS.some((l) => l.id === id), `family member ${id} is a real legend row`);
+      ok(ZONE_R[id] > 0, `${id} has a working zone`);
+      ok(inZone(LEGENDS.find((l) => l.id === id).lat, LEGENDS.find((l) => l.id === id).lon, id),
+        `${id}'s own geography is inside its zone`);
+    }
+  }
+  ok(WHIRL_ZONES.length >= 3 && KRAKEN_ZONES.length >= 2 && DRAGON_ZONES.length >= 2,
+    'the families genuinely grew');
+  const zoned = Object.keys(ZONE_R).length;
+  ok(zoned >= 20, `the mythology doubled (${zoned} zones)`);
+  // the globe is covered: zones in both hemispheres, and spread east-west
+  const zl = LEGENDS.filter((l) => ZONE_R[l.id]);
+  ok(zl.some((l) => l.lat > 30) && zl.some((l) => l.lat < -30), 'both hemispheres carry legend');
+  ok(zl.some((l) => l.lon > 100) && zl.some((l) => l.lon < -60), 'and both ends of the earth');
+  ok(ROC_GOLD > 0 && WHALE_RAM_S > 10 && WHALE_RAM_HULL > 0 && WHALE_RAM_HULL < 0.5
+    && SELKIE_DWELL_S > 5 && STORM_GLOOM > 0 && STORM_WIND_MULT > 1,
+    'the new constants hold their shape');
 }
 
 if (failed) { console.error(`verify-legendfx: ${failed} FAILED`); process.exit(1); }

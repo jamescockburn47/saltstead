@@ -24,7 +24,7 @@
 
 import { unit2 } from './noise.js';
 import { isLand, coastDistGame, worldToLatLon } from './earth.js';
-import { inZone, zoneOf } from './legendfx.js';
+import { inZone, zoneOf, DERELICT_ZONES } from './legendfx.js';
 
 export const CELL = 6000;        // spawn-table cell, game metres
 export const ACTIVE_R = 9000;    // simulate merchants within this of the player
@@ -70,8 +70,8 @@ export function cellMerchants(cx, cz) {
     if (!afloat) continue; // a genuinely landlocked cell trades nothing
     const ll = worldToLatLon(x, z);
     let type;
-    if (inZone(ll.lat, ll.lon, 'bermuda-triangle')) {
-      type = 'derelict'; // nobody TRADES through the triangle any more
+    if (DERELICT_ZONES.some((zid) => inZone(ll.lat, ll.lon, zid))) {
+      type = 'derelict'; // nobody TRADES through the dead waters any more
     } else {
       const tr = unit2(cx * 7.7 + i * 13, cz * 5.3 + i * 7);
       type = tr < 0.56 ? 'trader' : tr < 0.72 ? 'indiaman' : tr < 0.86 ? 'navy' : 'raider';
@@ -92,30 +92,32 @@ export function cellMerchants(cx, cz) {
   return out;
 }
 
-// The Triangle's own fleet: a deterministic scatter of dead ships inside the
-// zone (the spawn cells are far coarser than the zone, so the derelicts get
-// their own table). Same waters, same wrecks, every client.
+// A dead water's own fleet: a deterministic scatter of dead ships inside a
+// DERELICT zone (the spawn cells are far coarser than the zones, so the
+// derelicts get their own table). Same waters, same wrecks, every client.
+// zid picks the zone — the Triangle and the Ghost Fleet share the machinery.
 export const DERELICT_N = 7;
-export function zoneDerelicts() {
-  const zone = zoneOf('bermuda-triangle');
+export function zoneDerelicts(zid = 'bermuda-triangle') {
+  const zone = zoneOf(zid);
   if (!zone) return [];
+  const salt = zid === 'bermuda-triangle' ? 0 : 977; // distinct wrecks per water
   const out = [];
   for (let i = 0; i < DERELICT_N; i++) {
-    const ang = unit2(i * 11.3, 41.7) * Math.PI * 2;
-    const r = zone.r * (0.15 + 0.8 * unit2(i * 5.9, 23.1));
+    const ang = unit2(i * 11.3 + salt, 41.7) * Math.PI * 2;
+    const r = zone.r * (0.15 + 0.8 * unit2(i * 5.9 + salt, 23.1));
     const x = zone.x + Math.sin(ang) * r;
     const z = zone.z + Math.cos(ang) * r;
     const ll = worldToLatLon(x, z);
     if (isLand(ll.lat, ll.lon)) continue;
     out.push({
-      id: `drl-${i}`,
+      id: `drl-${zid}-${i}`,
       type: 'derelict',
       x, z,
-      yaw: unit2(i * 17.1, 7.7) * Math.PI * 2,
+      yaw: unit2(i * 17.1 + salt, 7.7) * Math.PI * 2,
       speed: 0,
       looted: false,
       routed: false,
-      purse: Math.round((40 + unit2(i * 6.7, 91.3) * 180) * TYPES.derelict.goldMult),
+      purse: Math.round((40 + unit2(i * 6.7 + salt, 91.3) * 180) * TYPES.derelict.goldMult),
     });
   }
   return out;

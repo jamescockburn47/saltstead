@@ -22,7 +22,45 @@ export const ZONE_R = {
   'davy-jones': 600,
   'plate-fleet': 320,
   'el-dorado': 900,
+  // the second dozen — the mythology goes global
+  'maelstrom': 260,
+  'charybdis': 220,
+  'sirens': 380,
+  'umibozu': 1600,
+  'roc': 1400,
+  'leviathan': 900,
+  'white-whale': 1100,
+  'mary-celeste': 2400,
+  'fountain-of-youth': 300,
+  'selkie-skerries': 320,
+  'cape-horn': 2200,
+  'ryugu': 340,
 };
+
+// ---- the zone FAMILIES: one mechanic, many waters ----
+// A new legend earns its teeth by JOINING a family (append an id) far more
+// often than by new control flow — the whirl that ate Odysseus's men is the
+// same field that runs off Scotland, at its own geography.
+export const WHIRL_ZONES = ['corryvreckan', 'maelstrom', 'charybdis'];
+export const DEADAIR_ZONES = ['davy-jones', 'sirens', 'umibozu'];
+export const KRAKEN_ZONES = ['kraken-deep', 'leviathan'];
+export const DRAGON_ZONES = ['dragons-wales', 'roc'];
+export const DIVE_ZONES = ['plate-fleet', 'ryugu'];
+export const DERELICT_ZONES = ['bermuda-triangle', 'mary-celeste'];
+export const STORM_ZONES = ['cape-horn'];
+export const STORM_GLOOM = 0.5;      // the Horn's permanent filth
+export const STORM_WIND_MULT = 1.3;  // and its wind
+
+// the Roc: no crag hoard like the Welsh dragon — driven off, she drops
+// what her talons tore from the last ship that fought back
+export const ROC_GOLD = 900;
+
+// the White Whale: she RAMS on her own clock while you trespass
+export const WHALE_RAM_S = 38;     // seconds between charges in her water
+export const WHALE_RAM_HULL = 0.14; // planking each charge staves in
+
+// the Selkie Skerries: ride to anchor through the night and one signs on
+export const SELKIE_DWELL_S = 25;  // anchored night-seconds before she comes
 
 const ZONED = LEGENDS.filter((l) => ZONE_R[l.id]);
 

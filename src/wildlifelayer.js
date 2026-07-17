@@ -53,11 +53,13 @@ function buildFin() {
 // what breaks the water IS the whale.
 function buildWhale() {
   const g = new THREE.Group();
-  const back = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), DARK);
+  // her own hide (not the shared DARK): the White Whale zone tints it pale
+  const hide = DARK.clone();
+  const back = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), hide);
   back.scale.set(2.2, 1.3, 6.5);
   g.add(back);
-  const fluke = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.3), DARK);
-  fluke.material = DARK.clone(); fluke.material.side = THREE.DoubleSide;
+  const fluke = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.3), hide.clone());
+  fluke.material.side = THREE.DoubleSide;
   fluke.rotation.x = -Math.PI / 2;
   fluke.position.set(0, 0.4, -7.2);
   g.add(fluke);
@@ -66,7 +68,7 @@ function buildWhale() {
     new THREE.MeshBasicMaterial({ color: 0xdfeef6, transparent: true, opacity: 0 }));
   spout.position.set(0, 3.2, 4.2);
   g.add(spout);
-  return { group: g, spout };
+  return { group: g, spout, hide, flukeMat: fluke.material };
 }
 
 const POD = 4, GULLS = 4;
@@ -110,7 +112,10 @@ export class WildlifeLayer {
   // stations in the ship's own frame so the leaps clear any hull on the
   // ladder; wrecks: fresh sinkings ([{x, z, age}], merchantlayer) — the
   // frenzy gathers at the nearest one in sight
-  update(t, dt, sx, sz, mastTop, speed, coastDist, latAbs, yaw = 0, scale = 1, wrecks = null) {
+  // whiteWhale: the ship is trespassing in HER water (legendfx white-whale
+  // zone) — the whale surfaces regardless of coast distance, pale and vast
+  update(t, dt, sx, sz, mastTop, speed, coastDist, latAbs, yaw = 0, scale = 1,
+    wrecks = null, whiteWhale = false) {
     const spec = ambientSpecies(coastDist, latAbs);
 
     // THE FRENZY: sharks converge on a fresh wreck and tighten on it —
@@ -179,14 +184,20 @@ export class WildlifeLayer {
     // at the surface off the beam: the blow, the rolling back, the fluke.
     // Deterministic in t, parked ~170 m abeam so it reads as ENCOUNTERED,
     // never as following.
-    this.whale.group.visible = !!spec.whale;
-    if (spec.whale) {
+    this.whale.group.visible = !!spec.whale || whiteWhale;
+    if (this.whale.group.visible) {
+      // in HER water she is the White Whale: pale, half again the size,
+      // and she works in CLOSE — the ram reads before it lands
+      this.whale.hide.color.setHex(whiteWhale ? 0xdfe3e2 : 0x4a5860);
+      this.whale.flukeMat.color.copy(this.whale.hide.color);
+      this.whale.group.scale.setScalar(whiteWhale ? 2.3 : 1);
+      const range = whiteWhale ? 110 : 170;
       const u = (t % WHALE_PERIOD) / WHALE_PERIOD;
       const ws = whaleState(u);
       const wAng = Math.floor(t / WHALE_PERIOD) * 2.4; // a new bearing each cycle
-      const wx = sx + Math.sin(yaw + 1.9 + wAng) * 170;
-      const wz = sz + Math.cos(yaw + 1.9 + wAng) * 170;
-      this.whale.group.position.set(wx, waveHeight(wx, wz, t) + ws.y, wz);
+      const wx = sx + Math.sin(yaw + 1.9 + wAng) * range;
+      const wz = sz + Math.cos(yaw + 1.9 + wAng) * range;
+      this.whale.group.position.set(wx, waveHeight(wx, wz, t) + ws.y * (whiteWhale ? 2.3 : 1), wz);
       this.whale.group.rotation.set(ws.pitch, wAng, 0);
       this.whale.spout.material.opacity = ws.blow * 0.75;
       this.whale.spout.scale.y = 0.4 + ws.blow;

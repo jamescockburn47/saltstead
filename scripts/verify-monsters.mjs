@@ -5,7 +5,7 @@
 // to the crag.
 import {
   KRAKEN_ARMS, KRAKEN_WARN, KRAKEN_HOLD, KRAKEN_SHALLOW, KRAKEN_LOOT,
-  ARM_SEGS, tentacleSpine,
+  ARM_SEGS, tentacleSpine, slamPhase,
   newKraken, stepKraken, shootKrakenArm, krakenDrag, krakenOver,
   DRAGON_HP, DRAGON_CIRCLE, DRAGON_STOOP, DRAGON_HIGH, DRAGON_LOW, HOARD_GOLD,
   newDragon, stepDragon, dragonVulnerable, woundDragon, dragonAlt, dragonGone,
@@ -122,6 +122,28 @@ const DT = 1 / 30;
   ok(a.some((v, s) => Math.abs(v - b[s]) > 0.02), 'the arm moves with time');
   const arm0 = tentacleSpine(1, 0, 0.7), arm3 = tentacleSpine(1, 3, 0.7);
   ok(arm0.some((v, s) => Math.abs(v - arm3[s]) > 0.02), 'arms writhe out of step');
+
+  // the SLAM: the strike clock lives in [0,1] and actually reaches the
+  // rear; the spine stays bounded at full slam; the rear throws the root
+  // OUT so the whip-down reads as a blow
+  let mx = 0, staggered = false;
+  for (let t = 0; t < 60; t += 0.05) {
+    let striking = 0;
+    for (let i = 0; i < KRAKEN_ARMS; i++) {
+      const s = slamPhase(t, i);
+      ok(s >= 0 && s <= 1, `slam bounded at t=${t.toFixed(1)}`);
+      mx = Math.max(mx, s);
+      if (s > 0.3) striking++;
+    }
+    if (striking > 0 && striking <= 2) staggered = true;
+  }
+  ok(mx > 0.9, `the strike reaches full rear (${mx.toFixed(2)})`);
+  ok(staggered, 'the arms strike staggered, not as one');
+  for (const s of [0, 0.5, 1]) {
+    ok(tentacleSpine(3.3, 1, 1, s).every((a) => Math.abs(a) <= 0.9), `spine bounded at slam ${s}`);
+  }
+  ok(tentacleSpine(2, 0, 0.8, 1)[0] > tentacleSpine(2, 0, 0.8, 0)[0],
+    'the rear throws the root out');
 }
 
 if (failed) { console.error(`verify-monsters: ${failed} FAILED`); process.exit(1); }

@@ -104,4 +104,100 @@ export const LEGENDS = [
       + 'longboat. Big ship is not always best: the design thesis in one '
       + 'quest.',
   },
+  // ---- the second dozen: the mythology goes global (2026-07-17) ----
+  {
+    id: 'maelstrom', kind: 'anomaly', phase: 2,
+    name: 'The Maelstrom', lat: 67.8, lon: 12.7, radius: 20,
+    pitch: 'Moskstraumen, off Lofoten — THE original maelstrom, the one the '
+      + 'word comes from. A second whirlpool shrine at the top of the world: '
+      + 'ride the rim for the slingshot north, misjudge it and the Arctic '
+      + 'takes your rig.',
+  },
+  {
+    id: 'charybdis', kind: 'anomaly', phase: 2,
+    name: 'Charybdis', lat: 38.24, lon: 15.63, radius: 12,
+    pitch: 'The Strait of Messina, where Odysseus lost six men. She swallows '
+      + 'the strait thrice daily; the rim-riders make the fastest passage '
+      + 'between the Tyrrhenian and Ionian seas — the Mediterranean door, '
+      + 'with teeth.',
+  },
+  {
+    id: 'sirens', kind: 'anomaly', phase: 2,
+    name: 'The Sirens', lat: 40.58, lon: 14.43, radius: 15,
+    pitch: 'Li Galli, the Sirenusas — the singers of the Tyrrhenian. Inside '
+      + 'their water the wind itself forgets to blow: the song becalms every '
+      + 'sail while the rocks wait. Odysseus lashed himself to the mast; you '
+      + 'get a helm that barely answers.',
+  },
+  {
+    id: 'umibozu', kind: 'anomaly', phase: 2,
+    name: 'The Umibōzu', lat: 38.5, lon: 134.5, radius: 200,
+    pitch: 'The sea-monk of the Sea of Japan. The sky goes grey, the wind '
+      + 'dies in the sails, and the old sailors say a vast black head '
+      + 'watches from under the swell. Say nothing, touch nothing, sail '
+      + 'through — the becalmed sea is the whole encounter.',
+  },
+  {
+    id: 'roc', kind: 'boss', phase: 2,
+    name: 'The Roc', lat: -11.9, lon: 50.5, radius: 120,
+    pitch: 'Sinbad’s bird, north of Madagascar — a wingspan that shadows '
+      + 'the whole deck. She stoops on ships like the Welsh dragon stoops, '
+      + 'and three good broadsides drive her off with her talons full of '
+      + 'whatever she tore loose. The Indian Ocean’s sky-boss.',
+  },
+  {
+    id: 'leviathan', kind: 'boss', phase: 2,
+    name: 'Leviathan', lat: 19.8, lon: 38.7, radius: 150,
+    pitch: 'The terror of the Red Sea, older than any chart. Arms like the '
+      + 'Kraken’s — the scripture-monster plays by the northern rules: '
+      + 'axes, broadsides, or run for the reef shallows where it cannot '
+      + 'follow.',
+  },
+  {
+    id: 'white-whale', kind: 'hunt', phase: 2,
+    name: 'The White Whale', lat: -38.37, lon: -74.03, radius: 100,
+    pitch: 'Off Mocha Island, Chile — where the REAL Mocha Dick rammed '
+      + 'whalers for thirty years. A pale mountain of a whale that answers '
+      + 'nobody’s harpoon and stove in ships for spite. She rams. '
+      + 'Leave her water or pay in planking.',
+  },
+  {
+    id: 'mary-celeste', kind: 'wreck', phase: 2,
+    name: 'The Ghost Fleet', lat: 38.0, lon: -25.0, radius: 250,
+    pitch: 'The Azores water where the Mary Celeste was found — sails set, '
+      + 'cargo whole, crew simply GONE. Dead ships drift here in numbers, '
+      + 'holds untouched: the Atlantic’s second salvage ground, and '
+      + 'nobody trades through it willingly.',
+  },
+  {
+    id: 'fountain-of-youth', kind: 'hunt', phase: 2,
+    name: 'The Fountain of Youth', lat: 25.73, lon: -79.28, radius: 30,
+    pitch: 'Bimini, where Ponce de León looked and the Bahamas kept the '
+      + 'secret. Heave to over the sweet-water spring and the sea itself '
+      + 'mends your hull and rig — once a visit; the fountain remembers '
+      + 'greedy captains.',
+  },
+  {
+    id: 'selkie-skerries', kind: 'anomaly', phase: 2,
+    name: 'The Selkie Skerries', lat: 59.35, lon: -2.4, radius: 25,
+    pitch: 'Orkney’s seal-people. Ride to anchor among the skerries '
+      + 'through a night and one may shed her sealskin and sign your '
+      + 'articles — the finest hand on any water, and she works for the '
+      + 'wonder of it.',
+  },
+  {
+    id: 'cape-horn', kind: 'anomaly', phase: 2,
+    name: 'The Horn', lat: -56.6, lon: -67.3, radius: 300,
+    pitch: 'Cape Horn — no myth at all, which is the horror of it. The '
+      + 'williwaws never stop, the sea never settles, and every chart just '
+      + 'writes DANGER. Round it because it is there; brag forever.',
+  },
+  {
+    id: 'ryugu', kind: 'wreck', phase: 2,
+    name: 'Ryūgū-jō', lat: 26.2, lon: 127.2, radius: 60,
+    pitch: 'The Dragon Palace under the East China Sea, off Okinawa — '
+      + 'Urashima Tarō’s hundred years in a single night. Dive the '
+      + 'palace reefs for pearl and coral tribute; each dive pays less, as '
+      + 'the Dragon King’s patience thins.',
+  },
 ];
