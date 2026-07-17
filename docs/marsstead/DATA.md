@@ -22,6 +22,12 @@ tables in code** (the `earthdata.js` discipline).
 4. **Imagery: never.** Colour is synthesised from shape + latitude + season
    (invariant 1). The DEM is shape, not imagery — it's in; photos are out.
 
+**How inputs arrive** — the `earthdata` pattern, unchanged: raw downloads land
+in `tools/` (gitignored, fetched on the dev machine — remote-session network
+policies may not reach PDS/USGS hosts, verified 2026-07-17), the build script
+bakes them, and only the generated `src/marsdata.js` is committed. The build
+script header records product IDs and retrieval dates.
+
 ## The sources
 
 ### 1. Topography — MOLA MEGDR *(the Natural Earth of Marsstead)*
