@@ -39,6 +39,29 @@ export function tentacleSpine(t, i, grip = 0.7, slam = 0) {
   return out;
 }
 
+// THE WING BEAT — pure drive for the dragon's articulated wings (the layer
+// skins two hinged membrane panels per side onto it). The OUTER panel lags
+// the inner by a fixed phase and over-swings it: that whip is what reads as
+// flight instead of a flapping board. Stooping folds both panels hard back.
+// Everything bounded (|angle| < 1 rad); tail and neck ride the same clock.
+export function wingBeat(t, stooping = false) {
+  if (stooping) {
+    return { inner: 0.5, outer: -0.95, tail: Math.sin(t * 3.1) * 0.12, neck: -0.28 };
+  }
+  return {
+    inner: Math.sin(t * 2.4) * 0.5,
+    outer: Math.sin(t * 2.4 - 0.7) * 0.85,
+    tail: Math.sin(t * 1.1) * 0.22,
+    neck: Math.sin(t * 2.4 + 0.4) * 0.12,
+  };
+}
+
+// her fire between stoops: short bursts while she circles (~every 7 s), so
+// the flame is never more than a few seconds off camera. [0..1] envelope.
+export function circleFire(t) {
+  return Math.max(0, Math.sin(t * 0.9)) ** 8;
+}
+
 // the slam clock — pure so both the layer and the verify read the same
 // strike: each arm rears over ~1.2 s and whips down in ~0.4 s, staggered
 // around the pod so at most one or two arms strike at once

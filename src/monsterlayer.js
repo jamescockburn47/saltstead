@@ -8,7 +8,10 @@
 
 import * as THREE from 'three';
 import { waveHeight } from './waves.js';
-import { KRAKEN_ARMS, ARM_SEGS, tentacleSpine, slamPhase, dragonAlt, DRAGON_STOOP } from './monsters.js';
+import {
+  KRAKEN_ARMS, ARM_SEGS, tentacleSpine, slamPhase,
+  dragonAlt, DRAGON_STOOP, wingBeat, circleFire,
+} from './monsters.js';
 
 const KRAKEN_SKIN = new THREE.MeshPhongMaterial({ color: 0x4a3a4e, flatShading: true });
 const KRAKEN_UNDER = new THREE.MeshPhongMaterial({ color: 0x8a6a72, flatShading: true });
@@ -69,51 +72,129 @@ function buildKrakenHead() {
   return g;
 }
 
+// one wing membrane panel: a tapered quad hinged at x=0, spreading to +x —
+// mirrored for the port wing by the pivot's rotation
+function wingPanel(len, rootChord, tipChord) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute([
+    0, 0, rootChord * 0.35, len, 0, tipChord * 0.3, len, 0, tipChord * 0.3 - tipChord,
+    0, 0, rootChord * 0.35, len, 0, tipChord * 0.3 - tipChord, 0, 0, rootChord * 0.35 - rootChord,
+  ], 3));
+  geo.computeVertexNormals();
+  return new THREE.Mesh(geo, DRAGON_WING);
+}
+
 function buildDragon() {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.ConeGeometry(1.1, 7, 6), DRAGON_HIDE);
-  body.rotation.x = Math.PI / 2; // nose along +z
-  g.add(body);
-  const head = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.8, 5), DRAGON_HIDE);
-  head.rotation.x = Math.PI / 2;
-  head.position.set(0, 0.3, 4.2);
-  g.add(head);
+  // the body: a deep chest and a tapering belly — mass, not a traffic cone
+  const chest = new THREE.Mesh(new THREE.SphereGeometry(1.1, 7, 5), DRAGON_HIDE);
+  chest.scale.set(1, 1.15, 1.8);
+  chest.position.set(0, 0, 1.0);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.8, 7, 5), DRAGON_HIDE);
+  belly.scale.set(0.8, 0.8, 2.3);
+  belly.position.set(0, -0.1, -1.8);
+  g.add(chest, belly);
+  // the neck rides its own pivot (it bobs with the beat) up to a proper
+  // head: skull, jaw, and the swept horns
+  const neck = new THREE.Group();
+  neck.position.set(0, 0.5, 2.6);
+  const nseg = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.55, 2.4, 6), DRAGON_HIDE);
+  nseg.rotation.x = Math.PI / 2 - 0.4;
+  nseg.position.set(0, 0.45, 1.0);
+  neck.add(nseg);
+  const head = new THREE.Group();
+  head.position.set(0, 0.95, 2.1);
+  const skull = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.7, 6), DRAGON_HIDE);
+  skull.rotation.x = Math.PI / 2;
+  skull.position.z = 0.6;
+  head.add(skull);
+  const jaw = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.2, 5), KRAKEN_UNDER);
+  jaw.rotation.x = Math.PI / 2 + 0.28;
+  jaw.position.set(0, -0.28, 0.5);
+  head.add(jaw);
   for (const side of [-1, 1]) {
-    const horn = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.9, 4), KRAKEN_UNDER);
-    horn.position.set(side * 0.35, 0.8, 3.9);
-    horn.rotation.z = -side * 0.4;
-    g.add(horn);
+    const horn = new THREE.Mesh(new THREE.ConeGeometry(0.11, 1.0, 4), KRAKEN_UNDER);
+    horn.position.set(side * 0.3, 0.42, -0.15);
+    horn.rotation.set(-0.7, 0, -side * 0.35);
+    head.add(horn);
   }
-  const wingGeo = new THREE.PlaneGeometry(6, 2.6);
-  wingGeo.translate(3, 0, 0); // hinge at the root
-  const wl = new THREE.Mesh(wingGeo, DRAGON_WING);
-  const wr = new THREE.Mesh(wingGeo, DRAGON_WING);
-  wr.rotation.y = Math.PI;
-  g.add(wl, wr);
-  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.4, 5, 5), DRAGON_HIDE);
-  tail.rotation.x = -Math.PI / 2;
-  tail.position.z = -5.2;
-  g.add(tail);
-  // THE FIRE: a cone of flame from the jaws, lit only in the stoop — two
-  // nested cones (white-hot core inside orange) and a real light, so a
-  // strafing dragon LIGHTS the deck she rakes
+  neck.add(head);
+  g.add(neck);
+  // THE WINGS — two hinged panels a side: inner arm, outer hand with finger
+  // spars through the membrane. The outer hinge is what makes the flap read.
+  const wings = [];
+  for (const side of [-1, 1]) {
+    const inner = new THREE.Group();
+    inner.position.set(side * 0.8, 0.55, 0.9);
+    const innerPanel = wingPanel(4.2, 3.0, 2.2);
+    inner.add(innerPanel);
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 4.2, 5), DRAGON_HIDE);
+    arm.rotation.z = Math.PI / 2;
+    arm.position.set(2.1, 0.02, 0.9);
+    inner.add(arm);
+    const outer = new THREE.Group();
+    outer.position.set(4.2, 0, 0);
+    outer.add(wingPanel(5.4, 2.2, 0.5));
+    // finger spars through the membrane — the silhouette that says BAT, not kite
+    for (let f = 0; f < 3; f++) {
+      const spar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 5.2, 4), DRAGON_HIDE);
+      spar.rotation.z = Math.PI / 2;
+      spar.rotation.y = -0.12 - f * 0.24;
+      spar.position.set(2.5, 0.01, 0.5 - f * 0.5);
+      outer.add(spar);
+    }
+    inner.add(outer);
+    if (side < 0) inner.scale.x = -1; // mirror the port wing
+    g.add(inner);
+    wings.push({ inner, outer, side });
+  }
+  // the tail: three chained segments and a fin — it SWAYS
+  const tailSegs = [];
+  let carrier = g;
+  for (let s = 0; s < 3; s++) {
+    const pivot = new THREE.Group();
+    pivot.position.z = s === 0 ? -3.4 : -2.0;
+    const seg = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.32 - s * 0.09, 0.42 - s * 0.1, 2.2, 5), DRAGON_HIDE);
+    seg.rotation.x = Math.PI / 2;
+    seg.position.z = -1.0;
+    pivot.add(seg);
+    carrier.add(pivot);
+    tailSegs.push(pivot);
+    carrier = pivot;
+  }
+  const fin = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.3, 4), DRAGON_WING);
+  fin.rotation.x = -Math.PI / 2;
+  fin.position.z = -2.4;
+  tailSegs[2].add(fin);
+  // the talons, tucked for flight
+  for (const side of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.ConeGeometry(0.22, 1.2, 5), DRAGON_HIDE);
+    leg.position.set(side * 0.55, -0.85, 0.4);
+    leg.rotation.x = 0.9;
+    g.add(leg);
+  }
+  // THE FIRE: a cone of flame from the JAWS — two nested cones (white-hot
+  // core inside orange) and a real light. She rakes the deck with it in the
+  // stoop and breathes short bursts even circling (monsters.js circleFire),
+  // so the flame is never long off camera.
   const fire = new THREE.Group();
-  const outer = new THREE.Mesh(new THREE.ConeGeometry(1.1, 7, 7),
+  const fireOuter = new THREE.Mesh(new THREE.ConeGeometry(1.1, 7, 7),
     new THREE.MeshBasicMaterial({ color: 0xff7a26, transparent: true, opacity: 0.75, fog: false, depthWrite: false }));
-  const core = new THREE.Mesh(new THREE.ConeGeometry(0.5, 5.4, 6),
+  const fireCore = new THREE.Mesh(new THREE.ConeGeometry(0.5, 5.4, 6),
     new THREE.MeshBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.9, fog: false, depthWrite: false }));
-  outer.rotation.x = Math.PI / 2; core.rotation.x = Math.PI / 2; // point along +z (the nose)
-  outer.position.z = 3.5; core.position.z = 2.8;
-  fire.add(outer, core);
+  fireOuter.rotation.x = Math.PI / 2; fireCore.rotation.x = Math.PI / 2; // along +z, out of the mouth
+  fireOuter.position.z = 3.5; fireCore.position.z = 2.8;
+  fire.add(fireOuter, fireCore);
   const fireLight = new THREE.PointLight(0xff8a30, 0, 60, 1.8);
   fire.add(fireLight);
-  fire.position.set(0, -0.4, 5.2); // from the jaws, angled at the prey below
+  fire.position.set(0, 1.1, 4.6); // from the jaws, angled at the prey below
   fire.rotation.x = 0.5;
   fire.visible = false;
   g.add(fire);
   // the whole animal at NIGHTMARE scale — she must dwarf the masts she rakes
   g.scale.setScalar(1.8);
-  return { group: g, wl, wr, fire, fireLight, fireOuter: outer, fireCore: core };
+  return { group: g, wings, neck, tailSegs, fire, fireLight, fireOuter, fireCore };
 }
 
 export class MonsterLayer {
@@ -249,20 +330,33 @@ export class MonsterLayer {
     }
     this.dragon.group.position.set(x, alt, z);
     this.dragon.group.rotation.set(dragon.state === 'stoop' ? 0.35 : 0, heading, 0);
-    const flap = dragon.state === 'stoop' ? 0.1 : Math.sin(t * 2.6) * 0.5;
-    this.dragon.wl.rotation.z = flap;
-    this.dragon.wr.rotation.z = -flap;
-    // THE FIRE rides the heart of the stoop: she opens her jaws on the way
-    // in, rakes the deck with flame at the bottom of the pass, and shuts
-    // off climbing out — flickering the whole way
+
+    // THE ARTICULATED BEAT (monsters.js wingBeat, verify-gated): the outer
+    // panels lag and over-swing the inner — the whip that reads as FLIGHT.
+    // The port wing is built mirrored (scale.x = -1), so one sign serves.
+    const wb = wingBeat(t, dragon.state === 'stoop');
+    for (const w of this.dragon.wings) {
+      w.inner.rotation.z = w.side * -wb.inner;
+      w.outer.rotation.z = -wb.outer; // in the mirrored frame the sign carries
+    }
+    // the tail sways down its chain; the neck rides the beat
+    for (let s = 0; s < this.dragon.tailSegs.length; s++) {
+      this.dragon.tailSegs[s].rotation.y = Math.sin(t * 1.1 - s * 0.55) * (0.2 - s * 0.03);
+    }
+    this.dragon.neck.rotation.x = wb.neck;
+
+    // THE FIRE: she rakes the deck through the heart of the stoop, and
+    // breathes short bursts even circling — flickering the whole way
     const stoopU = dragon.state === 'stoop' ? Math.min(1, dragon.t / DRAGON_STOOP) : 0;
-    const firing = stoopU > 0.25 && stoopU < 0.75;
-    this.dragon.fire.visible = firing;
-    if (firing) {
-      const flick = 0.8 + 0.2 * Math.sin(t * 31) * Math.sin(t * 17);
+    const stoopFire = stoopU > 0.25 && stoopU < 0.75 ? 1 : 0;
+    const burst = dragon.state === 'stoop' ? 0 : circleFire(t);
+    const fireK = Math.max(stoopFire, burst > 0.15 ? burst : 0);
+    this.dragon.fire.visible = fireK > 0;
+    if (fireK > 0) {
+      const flick = (0.8 + 0.2 * Math.sin(t * 31) * Math.sin(t * 17)) * fireK;
       this.dragon.fireOuter.material.opacity = 0.75 * flick;
       this.dragon.fireCore.material.opacity = 0.9 * flick;
-      this.dragon.fireOuter.scale.set(flick, 1 + 0.2 * Math.sin(t * 23), flick);
+      this.dragon.fireOuter.scale.set(Math.max(0.2, flick), Math.max(0.3, 1 + 0.2 * Math.sin(t * 23)) * fireK, Math.max(0.2, flick));
       this.dragon.fireLight.intensity = 90 * flick;
     } else {
       this.dragon.fireLight.intensity = 0;

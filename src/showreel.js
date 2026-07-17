@@ -26,6 +26,38 @@ export const clamp01 = (t) => Math.max(0, Math.min(0.999, t));
 export const DEFAULT_BEATS = [
   { name: 'Golden hour off Port Royal', lat: 17.55, lon: -76.6, frac: 0.745,
     weather: { state: 'clear', gloom: 0 }, dist: 16, height: 5, az0: 2.2, az1: 3.1 },
+  // THE BATTLE: a King's corvette stands off the beam and the guns talk
+  // both ways for the whole sweep — stage() summons her, during() runs the
+  // exchange on the beat clock, strike() clears the sea for the next cut
+  { name: 'Broadsides in the Windward Passage', lat: 19.6, lon: -73.6, frac: 0.71, sec: 10,
+    weather: { state: 'overcast', gloom: 0.3 }, dist: 34, height: 9, az0: 1.7, az1: 2.5,
+    stage: (g) => {
+      const id = g.merchants.spawnEscort(g.ship.x + 60, g.ship.z + 18, g.ship.yaw);
+      const e = g.merchants.live.get(id);
+      if (e) { e.m.speed = 2.5; }
+      g._reelFoe = id;
+      g._reelGunN = -1;
+    },
+    during: (g, u) => {
+      const e = g.merchants.live.get(g._reelFoe);
+      if (!e) return;
+      // hold formation: she keeps station off the beam for the camera
+      e.m.x = g.ship.x + 60; e.m.z = g.ship.z + 18; e.m.yaw = g.ship.yaw;
+      const n = Math.floor(u * 9);
+      if (n !== g._reelGunN) {
+        g._reelGunN = n;
+        const mine = n % 2 === 0, miss = n % 3 === 2;
+        const from = mine
+          ? { x: g.ship.x + 2, y: g.shipGroup.position.y + 2.2, z: g.ship.z }
+          : { x: e.m.x - 2, y: g.shipGroup.position.y + 2.2, z: e.m.z };
+        const at = mine
+          ? { x: e.m.x + (miss ? -10 : 0), z: e.m.z + (miss ? 7 : 0) }
+          : { x: g.ship.x + (miss ? 9 : 0), z: g.ship.z + (miss ? -7 : 0) };
+        g.combatFx.fire(from, at, miss);
+      }
+    },
+    strike: (g) => { g.merchants.take(g._reelFoe); g._reelFoe = null; },
+  },
   { name: 'The Bermuda Triangle', lat: 25.5, lon: -70.0, frac: 0.5,
     weather: { state: 'fog', gloom: 0.75 }, dist: 22, height: 8, az0: -0.6, az1: 0.2 },
   // shot from high overhead so the whole spinning scar is in frame — the
@@ -141,6 +173,7 @@ export async function runShowreel(g, opts = {}) {
       const u = Math.min(1, (performance.now() - start)
         / (beat.sec != null ? beat.sec * 1000 : beatMs));
       g.photoCam = cameraPose(beat, u, g.ship.x, g.ship.z);
+      if (beat.during) beat.during(g, u); // the beat's own action (the battle)
       if (u >= 1 || g._showreelAbort) return res();
       requestAnimationFrame(step);
     };
@@ -168,12 +201,14 @@ export async function runShowreel(g, opts = {}) {
       g.ship.trim = 0.8; g.ship.speed = 2.5; g.ship.rudder = 0;
       g.geoClock = 0;                     // re-sample coast/zone at once
       g.photoCam = cameraPose(b, 0, g.ship.x, g.ship.z);
+      if (b.stage) b.stage(g);            // the beat dresses its own set
       console.log(`[showreel] beat ${i + 1}/${beats.length}: ${b.name}`);
       await sleep(settleMs);              // terrain streams OFF-camera (recorder paused)
       if (g._showreelAbort) break;
       if (recorder) recorder.resume();
       await orbit(b);
       if (recorder) recorder.pause();
+      if (b.strike) b.strike(g);          // and clears it for the next cut
     }
   } finally {
     if (recorder && recorder.state !== 'inactive') {
