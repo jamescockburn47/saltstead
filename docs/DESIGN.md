@@ -226,6 +226,16 @@ sloop's is "run, hunt traders, dig treasure, hide in the shallows" (corvettes
 break off the chase over water thinner than NAVY_SHOAL); the galleon's is
 "you don't chase anymore — they come to you".
 
+**The anchor** (anchor.js, pure + verify-anchor): Q lets go or weighs. The
+cable is good to CABLE_DEPTH (20 m of game water — earth.js's shelf reaches
+~44 m in blue water, so anchoring is an inshore act by construction) and
+refuses a running drop above DROP_SPEED. Riding to it: position pinned over
+the ground, way snubbed off exponentially, bow weathercocking to the wind
+(swingToWind, shortest way round, no overshoot), sails handed (the same
+`furl` flag the port panel uses). A catted anchor at the port bow swaps for
+a taut cable out the hawse (ship.js setAnchor), and `anchorDown` rides the
+save additively — she resumes riding where you left her.
+
 **Below decks** (shipframe.js holdFor + ship.js buildBelowDecks): every hull
 from the brig up carries a walkable hold under the weather deck — a second
 ship-local frame (`mode: 'below'`) entered by E on the hatch grating abaft

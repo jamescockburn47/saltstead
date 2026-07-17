@@ -33,6 +33,7 @@ export function snapshotSave(ship, skyT, loot = {}) {
     log: Array.isArray(loot.log) ? loot.log : [],
     banked: loot.banked || 0,           // consigned to the Locker, forever
     won: Array.isArray(loot.won) ? loot.won : [], // one-shot legends claimed
+    anchorDown: !!loot.anchorDown,      // riding to her anchor when saved
     savedAt: Date.now(),
   };
 }
@@ -63,6 +64,7 @@ export function acceptSave(meta) {
     log: acceptLog(meta.log),
     banked: Number.isFinite(meta.banked) && meta.banked >= 0 ? Math.round(meta.banked) : 0,
     won: Array.isArray(meta.won) ? meta.won.filter((w) => typeof w === 'string').slice(0, 32) : [],
+    anchorDown: !!meta.anchorDown,
     savedAt: meta.savedAt || 0,
   };
 }

@@ -4,9 +4,10 @@
 // (shipframe.js frameFor), then dressed by the def — masts, SQUARE courses
 // for the big hulls, a sterncastle for the galleon, and a visible row of
 // CANNON at the gun posts main.js actually fires from. Returns
-// { group, deck, setSail, setLantern } — group carries position + attitude,
-// the captain is parented to `deck` so the whole ship is one moving frame,
-// setLantern lights the masthead after dark.
+// { group, deck, setSail, setLantern, setAnchor } — group carries position +
+// attitude, the captain is parented to `deck` so the whole ship is one moving
+// frame, setLantern lights the masthead after dark, setAnchor lets the
+// ground tackle go (catted anchor swaps for a cable run out the hawse).
 
 import * as THREE from 'three';
 import { SLOOP } from './shipphysics.js';
@@ -441,6 +442,39 @@ export function buildShip(def = SLOOP, legacyMasts) {
   group.add(lantern);
   const setLantern = (on) => { lantern.visible = !!on; };
 
+  // the ground tackle: an anchor CATTED at the port bow — shank, stock and
+  // flukes, black iron against the strakes. setAnchor(true) lets it go: the
+  // stowed anchor vanishes and a taut cable runs from the hawse down into
+  // the sea ahead, so a ship riding to her anchor READS as one from a
+  // cable's length away.
+  const ironMat = new THREE.MeshPhongMaterial({ color: 0x1c1c22, flatShading: true, shininess: 20 });
+  const catted = new THREE.Group();
+  {
+    const shank = new THREE.Mesh(new THREE.CylinderGeometry(0.045 * s, 0.045 * s, 0.85 * s, 6), ironMat);
+    catted.add(shank);
+    const stock = new THREE.Mesh(new THREE.CylinderGeometry(0.035 * s, 0.035 * s, 0.5 * s, 6), ironMat);
+    stock.rotation.x = Math.PI / 2;
+    stock.position.y = 0.36 * s;
+    catted.add(stock);
+    for (const side of [-1, 1]) {
+      const fluke = new THREE.Mesh(new THREE.BoxGeometry(0.3 * s, 0.1 * s, 0.06 * s), ironMat);
+      fluke.position.set(side * 0.16 * s, -0.38 * s, 0);
+      fluke.rotation.z = side * 0.7;
+      catted.add(fluke);
+    }
+  }
+  catted.position.set(-(D.maxX * 0.9), D.y - 0.15 * s, D.maxZ - 0.3 * s);
+  group.add(catted);
+  const cable = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.035 * s, 0.035 * s, 3.6 * s, 5),
+    new THREE.MeshPhongMaterial({ color: 0x3a2c1c, flatShading: true }));
+  // from the hawse at the bow, down and forward into the sea
+  cable.position.set(-0.2 * s, D.y - 1.0 * s, D.maxZ + 1.3 * s);
+  cable.rotation.x = 1.1;
+  cable.visible = false;
+  group.add(cable);
+  const setAnchor = (down) => { catted.visible = !down; cable.visible = !!down; };
+
   // heading, trim [0..1], windFrom -> swing the rigs and belly the sails.
   // Fore-and-aft rigs SWING with the trim; square rigs BRACE — a shallower
   // sweep, yards never fore-and-aft — so the two families move differently.
@@ -456,7 +490,7 @@ export function buildShip(def = SLOOP, legacyMasts) {
     jib.rotation.y = side * (0.15 + trim * 0.5);
   }
 
-  return { group, deck, setSail, setLantern };
+  return { group, deck, setSail, setLantern, setAnchor };
 }
 
 // the unit hull, for every caller that just wants "a ship" (the title

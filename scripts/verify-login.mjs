@@ -98,6 +98,14 @@ const fakeStorage = () => {
   const cheat = acceptSave({ ...snapshotSave(ship, 0), banked: -50, won: [7, 'el-dorado', {}] });
   ok(cheat.banked === 0 && cheat.won.length === 1, 'a mangled vault empties, mangled legends drop');
 
+  // the anchor rides the save (additive): she resumes riding to it
+  const riding = acceptSave(snapshotSave(ship, 0, { anchorDown: true }));
+  ok(riding.anchorDown === true, 'a save at anchor comes back at anchor');
+  ok(bare.anchorDown === false, 'a fresh pirate is under way');
+  const mangledAnchor = acceptSave({ ...snapshotSave(ship, 0), anchorDown: 'yes' });
+  ok(mangledAnchor.anchorDown === true && acceptSave({ ...snapshotSave(ship, 0) }).anchorDown === false,
+    'anchorDown reads as a plain boolean');
+
   // the hull rides the save; a mangled hull reads as the sloop's string
   const brig = acceptSave(snapshotSave(ship, 0, { hull: 'brig' }));
   ok(brig.hull === 'brig', 'the brig survives the round-trip');

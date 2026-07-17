@@ -151,6 +151,63 @@ try {
   await sleep(1400);
   await page.screenshot({ path: join(OUT, 'hold-brig.png') });
 
+  // ---- the ground tackle ----
+  const anchor = await page.evaluate(async () => {
+    const { latLonToWorld, elevation } = await import('/src/earth.js');
+    const { CABLE_DEPTH } = await import('/src/anchor.js');
+    const g = window.saltstead;
+    g.onE(); // up from the brig's hold first
+
+    // over the abyss the cable must find nothing
+    const deep = latLonToWorld(25, -45);
+    g.ship.x = deep.x; g.ship.z = deep.z; g.ship.speed = 0;
+    g.toggleAnchor();
+    const refusedDeep = !g.anchorDown;
+
+    // scan the Port Royal approaches for honest soundings (2..CABLE_DEPTH m)
+    let spot = null;
+    for (let lat = 17.6; lat <= 18.1 && !spot; lat += 0.02) {
+      for (let lon = -77.4; lon <= -76.5 && !spot; lon += 0.02) {
+        const d = -elevation(lat, lon);
+        if (d > 2 && d < CABLE_DEPTH - 2) spot = { lat, lon, d };
+      }
+    }
+    if (!spot) return { refusedDeep, noSoundings: true };
+    const w = latLonToWorld(spot.lat, spot.lon);
+    g.ship.x = w.x; g.ship.z = w.z;
+
+    g.ship.speed = 6; // too much way on her
+    g.toggleAnchor();
+    const refusedWay = !g.anchorDown;
+    g.ship.speed = 1;
+    g.toggleAnchor();
+    return {
+      refusedDeep, refusedWay, dropped: g.anchorDown,
+      depth: spot.d, x: g.ship.x, z: g.ship.z,
+    };
+  });
+  ok(!anchor.noSoundings, 'the scan found an anchorage in the Port Royal approaches');
+  ok(anchor.refusedDeep, 'over the abyss: NO BOTTOM — the anchor stays catted');
+  ok(anchor.refusedWay, 'at 6 m/s: too much way — refused');
+  ok(anchor.dropped, `slowed down, in ${anchor.depth?.toFixed(0)} m: LET GO`);
+
+  await sleep(2500); // the cable takes her weight
+  const riding = await page.evaluate(() => {
+    const g = window.saltstead;
+    return { speed: g.ship.speed, x: g.ship.x, z: g.ship.z, mode: g.mode };
+  });
+  ok(riding.speed < 0.3, `the snub kills her way (${riding.speed.toFixed(2)} m/s)`);
+  ok(Math.hypot(riding.x - anchor.x, riding.z - anchor.z) < 1,
+    'the cable holds her over the ground');
+  await page.screenshot({ path: join(OUT, 'at-anchor.png') });
+
+  const weighed = await page.evaluate(() => {
+    const g = window.saltstead;
+    g.toggleAnchor();
+    return !g.anchorDown;
+  });
+  ok(weighed, 'Q again and the anchor\u2019s aweigh');
+
   ok(pageErrors.length === 0, pageErrors.length ? `page errors: ${pageErrors.slice(0, 3).join(' | ')}` : 'no page errors');
 } finally {
   await browser.close();

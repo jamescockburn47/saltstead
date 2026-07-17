@@ -13,6 +13,7 @@ import { FoamLayer } from './foamlayer.js';
 import { SkyFx } from './skyfx.js';
 import { newShipState, stepShip, shipAttitude, beaches } from './shipphysics.js';
 import { frameFor, clampToDeck, localToWorld, gunPosts, holdFor } from './shipframe.js';
+import { CABLE_DEPTH, canLetGo, snubSpeed, swingToWind } from './anchor.js';
 import { HULLS, hullById, nextHull, prevHull, buyHull } from './shipyard.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
 import { waveHeight } from './waves.js';
@@ -185,6 +186,9 @@ class Game {
     this.shipGroup.rotation.order = 'YXZ';
     this.setSail = built.setSail;
     this.setLantern = built.setLantern;
+    this.setAnchor = built.setAnchor;
+    this.anchorDown = !!save?.anchorDown; // she rides where you left her
+    this.setAnchor(this.anchorDown);
     this.scene.add(this.shipGroup);
     this.riseMastLight();
     this.riseHoldLight(this.hullDef);
@@ -222,6 +226,7 @@ class Game {
       if (e.code === 'KeyT') this.toggleTiller();
       if (e.code === 'KeyF' && !e.repeat) this.fireGuns();
       if (e.code === 'KeyR' && !e.repeat) this.toggleShot();
+      if (e.code === 'KeyQ' && !e.repeat) this.toggleAnchor();
       if (e.code === 'KeyY' && !e.repeat) this.wardenMaterialise();
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -305,6 +310,7 @@ class Game {
       crew: this.crew, fleet: this.fleet.size(), log: this.log,
       banked: this.banked, won: this.won, hull: this.hullId,
       dmgRig: this.hull.rig, dmgHull: this.hull.hull, crippled: this.crippled,
+      anchorDown: this.anchorDown,
     })).catch(() => {});
   }
 
@@ -395,6 +401,8 @@ class Game {
     this.shipGroup.rotation.order = 'YXZ';
     this.setSail = built.setSail;
     this.setLantern = built.setLantern;
+    this.setAnchor = built.setAnchor;
+    this.setAnchor(this.anchorDown); // the cable outlives the hull swap
     this.scene.add(this.shipGroup);
     this.riseMastLight();
     this.riseHoldLight(def);
@@ -671,6 +679,35 @@ class Game {
     this.say(`THE WARDEN\u2019S WRIT \u2014 a ${def.name.toUpperCase()} materialises beneath you `
       + `(${def.guns} gun${def.guns > 1 ? 's' : ''} a side, ${def.berths} berths)`, 6);
     this.logEvent(`The warden's writ raised a ${def.name} from the sea`);
+    this.persist();
+  }
+
+  // ---- the ground tackle (anchor.js) ----
+  // Q lets go or weighs. The cable needs bottom it can find (CABLE_DEPTH)
+  // and not too much way on her; riding to it she stops dead over the
+  // ground and swings head to wind. The one honest way to PARK at sea.
+  toggleAnchor() {
+    if (this.mode === 'ashore' || this.portui.open) return;
+    if (this.anchorDown) {
+      this.anchorDown = false;
+      this.setAnchor(false);
+      this.say('ANCHOR\u2019S AWEIGH \u2014 the hands walk the capstan and she\u2019s free', 4);
+      this.persist();
+      return;
+    }
+    const ll = worldToLatLon(this.ship.x, this.ship.z);
+    const depth = -elevation(ll.lat, ll.lon);
+    const call = canLetGo(depth, this.ship.speed);
+    if (!call.ok) {
+      this.say(call.why === 'deep'
+        ? `NO BOTTOM \u2014 the lead finds nothing here (the cable is good to ${CABLE_DEPTH} m; work into soundings near a coast)`
+        : 'Too much way on her \u2014 luff up and slow below ~8 knots before you let go', 5);
+      return;
+    }
+    this.anchorDown = true;
+    this.setAnchor(true);
+    this.say('LET GO! The cable roars out the hawse \u2014 she snubs round and rides to her anchor', 5);
+    this.logEvent('Let go the anchor');
     this.persist();
   }
 
@@ -1308,9 +1345,10 @@ class Game {
     }
 
     const px = this.ship.x, pz = this.ship.z;
-    // only the port panel furls the sails (so she doesn't sail off mid-trade);
-    // everywhere else you stop the intuitive way — run her up the beach
-    const furled = this.portui.open;
+    // the port panel furls the sails (so she doesn't sail off mid-trade),
+    // and so does riding to an anchor — the hands hand the canvas the
+    // moment the cable takes her weight
+    const furled = this.portui.open || this.anchorDown;
 
     // what the hull can actually DO this frame: battle damage caps her,
     // the Kraken's grip drags her, and over the trench the wind itself dies
@@ -1324,6 +1362,14 @@ class Game {
       ? { ...this.spec, maxSpeed: this.spec.maxSpeed * hullFactor }
       : this.spec;
     stepShip(this.ship, windEff, dt, specEff, gait, furled);
+
+    // riding to her anchor (anchor.js): the cable holds her over the
+    // ground, snubs her way dead, and weathercocks the bow into the wind
+    if (this.anchorDown) {
+      this.ship.x = px; this.ship.z = pz;
+      this.ship.speed = snubSpeed(this.ship.speed, dt);
+      this.ship.yaw = swingToWind(this.ship.yaw, this.wind.from, dt);
+    }
 
     // the Corryvreckan takes the helm: rim slings, core swallows and shreds
     if (zoneId === 'corryvreckan') {
@@ -1641,13 +1687,15 @@ class Game {
           : this.bankReady
             ? `E \u2014 consign ${this.gold} doubloons to the Locker (banked FOREVER)`
             : this.mode === 'helm'
-              ? (anchored
+              ? (this.anchorDown
+                ? 'RIDING TO HER ANCHOR \u2014 Q \u2014 weigh anchor \u00b7 she won\u2019t answer the helm till it\u2019s up'
+                : anchored
                 ? `ANCHORAGE \u2014 T to leave the tiller, E to put in at ${this.port.haven.name}`
                 : this.aground
                 ? (beaches(this.spec)
                   ? 'BEACHED \u2014 T to leave the tiller, E to step ashore \u00b7 steer A/D to swing her off'
                   : 'ANCHORED OFF \u2014 she draws too much to beach \u00b7 T, then E to send the longboat ashore')
-                : 'A/D — steer · W/S — sheet · F — fire · R — shot type · T — leave the tiller · M — chart')
+                : 'A/D — steer · W/S — sheet · F — fire · R — shot · Q — anchor · T — leave the tiller · M — chart')
               : anchored
                 ? `E \u2014 put in at ${this.port.haven.name} \u00b7 T \u2014 take the tiller`
                 : this.canStepAshore()
@@ -1660,7 +1708,9 @@ class Game {
                       : 'ANCHORED OFF \u2014 E sends the longboat ashore \u00b7 T to take the tiller')
                     : this.canGoBelow()
                       ? 'E \u2014 go below \u00b7 T \u2014 take the tiller \u00b7 WASD \u2014 walk the deck'
-                    : 'T — take the tiller · WASD — walk the deck · F — fire · M — chart · N — stars · L — log';
+                    : this.anchorDown
+                      ? 'AT ANCHOR \u2014 Q \u2014 weigh anchor \u00b7 T \u2014 the tiller \u00b7 WASD \u2014 walk the deck'
+                    : 'T — take the tiller · WASD — walk the deck · F — fire · Q — anchor · M — chart · N — stars · L — log';
     // below decks the hold is windowless: the sea and its foam would only
     // ever render as leaks through the planking seams — douse them outright
     // (self-healing every frame, so any path out of 'below' restores them)

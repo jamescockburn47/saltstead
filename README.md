@@ -84,6 +84,14 @@ a **real row of cannon** at the rail — the guns you see are the broadside you 
 NPC ships sail the same ladder (traders are schooners, Indiamen three-masted
 square-riggers, the navy corvettes), with **visible crews** working their decks.
 
+And when you want to stop somewhere and STAY stopped, use the **anchor**: press
+**Q** in soundings (up to ~20 m of water — work in near a coast) with the way off
+her, and the cable roars out the hawse. She stops dead over the ground, swings
+head to wind, and rides there while you go below, dig, dive, or sleep — through
+a save and back. Q again and the hands walk the capstan: anchor's aweigh. Over
+deep water the lead finds no bottom, and at speed the cable would part — the
+game tells you both.
+
 From the brig up, every hull carries a **whole environment below decks**: press
 **E** on the hatch grating abaft the mainmast and the companionway takes you down
 into a lantern-lit hold — ribs and deck beams, lashed cargo, the spare broadside
