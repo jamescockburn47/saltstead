@@ -254,7 +254,8 @@ class Game {
       this.cam.pitch = Math.max(0.08, Math.min(1.25, this.cam.pitch + e.movementY * 0.004));
     });
     addEventListener('wheel', (e) => {
-      this.cam.targetDist = Math.max(4, Math.min(30, this.cam.targetDist + e.deltaY * 0.01));
+      // the far stop clears a galleon's truck — the flag must be zoomable-to
+      this.cam.targetDist = Math.max(4, Math.min(60, this.cam.targetDist + e.deltaY * 0.01));
     });
     addEventListener('resize', () => {
       this.camera.aspect = innerWidth / innerHeight;
@@ -613,7 +614,9 @@ class Game {
     this.mode = 'helm';
     this.cap.x = this.shipFrame.helm.x; this.cap.z = this.shipFrame.helm.z + 0.6;
     this.cap.facing = 0; // face the bow
-    this.cam.targetDist = 10 + this.spec.length; // a longer hull needs a longer look
+    // a longer hull needs a longer look — and the look must clear the main
+    // truck: the flag overhead is the point of the whole livery
+    this.cam.targetDist = 15 + this.spec.length * 1.3;
   }
 
   // E is the DOING key — board, capture, dig, dive, bank, step ashore, put
