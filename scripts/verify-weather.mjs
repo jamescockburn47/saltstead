@@ -1,7 +1,7 @@
 // verify-weather: the wind builds offshore, WMO codes map to sane marine
 // states, and the sea state tracks the wind inside its clamps. Pure half
 // only — the live fetch is a layer, never a dependency (the Moorstead rule).
-import { windProfile, mapMarine, seaStateFor, skyDressing, WIND_FLOOR } from '../src/weather.js';
+import { windProfile, seaStateFor, skyDressing, WIND_FLOOR } from '../src/weather.js';
 import {
   SEA_STATE_MIN, SEA_STATE_MAX, RIVER_STATE, MAX_WAVE_HEIGHT,
   setSeaState, getSeaState, waveHeight,
@@ -21,23 +21,6 @@ ok(windProfile(800, 12) > 12 && windProfile(800, 12) < 12 * 1.9, 'building throu
 let prev = -1, mono = true;
 for (let d = 0; d <= 6000; d += 100) { const w = windProfile(d, 7); if (w < prev - 1e-9) mono = false; prev = w; }
 ok(mono, 'monotonic build all the way out');
-
-// WMO mapping
-ok(mapMarine({ weatherCode: 0, cloudCover: 10, windSpeed: 20 }).state === 'clear', 'code 0 = clear');
-ok(mapMarine({ weatherCode: 45 }).state === 'fog', 'code 45 = fog');
-ok(mapMarine({ weatherCode: 63 }).state === 'rain', 'code 63 = rain');
-ok(mapMarine({ weatherCode: 95 }).state === 'storm', 'code 95 = storm');
-ok(mapMarine({ weatherCode: 2, cloudCover: 95 }).state === 'overcast', 'near-total cloud = overcast');
-ok(mapMarine({ weatherCode: 2, cloudCover: 70 }).state === 'clear', '70% cloud still reads clear (the Goathland lesson)');
-{
-  const m = mapMarine({ weatherCode: 0, windSpeed: 36, windDirection: 270 });
-  ok(Math.abs(m.windMs - 10) < 1e-9, '36 km/h -> 10 m/s');
-  ok(Math.abs(m.windFromRad - Math.PI * 1.5) < 1e-9, 'met degrees -> radians, FROM convention');
-  ok(mapMarine({ windSpeed: 200 }).windMs === 24, 'hurricane clamped to the game ceiling');
-  ok(mapMarine({ windSpeed: 0 }).windMs === 2, 'dead calm floored');
-  ok(mapMarine({ weatherCode: 95 }).gloom > mapMarine({ weatherCode: 2, cloudCover: 95 }).gloom, 'storm gloomier than overcast');
-  ok(mapMarine({ weatherCode: 0, cloudCover: 0 }).gloom === 0, 'clear sky, no gloom');
-}
 
 // the sky dressing table: every state dresses sanely, and worse weather
 // never wears LESS cloud

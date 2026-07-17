@@ -15,7 +15,9 @@ import { newShipState, stepShip, shipAttitude, beaches, oarSpeed } from './shipp
 import { oarMode, oarPosts, oarLength, oarStroke, towOffset } from './oars.js';
 import { frameFor, clampToDeck, localToWorld, gunPosts, holdFor, crewPosts } from './shipframe.js';
 import { CABLE_DEPTH, canLetGo, snubSpeed, swingToWind } from './anchor.js';
-import { helmOrder } from './helmsman.js';
+import { helmOrder, helmRoute } from './helmsman.js';
+import { route as laneRoute } from './lanes.js';
+import { windAt } from './wind.js';
 import { RESCUE_R, GRATITUDE } from './survivors.js';
 import { HULLS, hullById, nextHull, prevHull, buyHull } from './shipyard.js';
 import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from './sailing.js';
@@ -40,7 +42,7 @@ import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
   encounterGait, ENCOUNTER_FAR, isLand,
 } from './earth.js';
-import { windProfile, seaStateFor, LiveWeather } from './weather.js';
+import { windProfile, seaStateFor } from './weather.js';
 import { setSeaState, RIVER_STATE } from './waves.js';
 import { makeEntry, pushEntry, acceptLog, fmtPos } from './shiplog.js';
 import { crewPersona, crewContext } from './crewchat.js';
@@ -234,11 +236,9 @@ class Game {
 
     this.mode = 'walk'; // 'walk' | 'helm' | 'below' | 'ashore'
     this.wind = { from: 2.3, speed: 7 };
-    // the procedural wind machine's base; real weather (open-meteo at the
-    // ship's REAL lat/lon) eases these when it lands — a layer, never a
-    // dependency (the Moorstead weather-live rule)
-    this.windBase = { from: 2.3, speed: 7 };
-    this.weather = new LiveWeather();
+    // wind direction + strength now come from the procedural field (wind.js),
+    // sampled at the ship each frame; the live Open-Meteo layer was retired for
+    // determinism. weatherState stays 'clear' until the storms plan drives it.
     this.weatherState = 'clear';
     this.gloom = 0;
     this.swell = 1;
@@ -314,6 +314,8 @@ class Game {
     // the chart SETS the helmsman's course: click the world chart with a
     // hand aboard and she sails there (helmsman.js) while you work the deck
     this.course = null;
+    this.route = null;
+    this.routeLeg = 0;
     this.maps.onCourse = (lat, lon) => {
       if (this.crew < 1) {
         this.say('No hand aboard to take the helm — sign crew at a port, then set your course', 6);
@@ -321,6 +323,8 @@ class Game {
       }
       const w = latLonToWorld(lat, lon);
       this.course = { x: w.x, z: w.z };
+      this.route = laneRoute(this.ship.x, this.ship.z, w.x, w.z);
+      this.routeLeg = 0;
       this.maps.course = { lat, lon };
       const d = Math.hypot(w.x - this.ship.x, w.z - this.ship.z);
       this.say(`COURSE SET — the helmsman lays her for the ${compassPoint(this.ship.x, this.ship.z, w.x, w.z)}, `
@@ -1634,11 +1638,14 @@ class Game {
     // The base itself is REAL weather when open-meteo answers (geo block
     // below), and the wind BUILDS offshore: sheltered inshore, near double
     // in blue water — stacked with the gait, a crossing genuinely flies.
-    this.wind.from = this.windBase.from + 0.3 * Math.sin(t * 0.011) + 0.12 * Math.sin(t * 0.037);
+    // the wind field (wind.js): trades, westerlies, doldrums by latitude,
+    // breathing a little around the bearing so it never sits dead on the bow
+    const wf = windAt(this.ship.x, this.ship.z);
+    this.wind.from = wf.from + 0.3 * Math.sin(t * 0.011) + 0.12 * Math.sin(t * 0.037);
     const gusts = 0.3 * Math.sin(t * 0.07) + 0.15 * Math.sin(t * 0.21);
     // over land the ship is on a river: sheltered inshore wind, not the
     // blue-water build the raw sea-coast distance would claim
-    this.wind.speed = windProfile(this.overLand ? 0 : this.coastDist, this.windBase.speed * (1 + gusts));
+    this.wind.speed = windProfile(this.overLand ? 0 : this.coastDist, wf.speed * (1 + gusts));
     // the Horn: the williwaws never stop — whatever the forecast says
     if (this.zone && STORM_ZONES.includes(this.zone.legend.id)) {
       this.wind.speed *= STORM_WIND_MULT;
@@ -1657,18 +1664,20 @@ class Game {
       this.ship.rudder += (rt - this.ship.rudder) * Math.min(1, dt * 5);
       if (k.has('KeyW')) this.ship.trim = Math.max(0, this.ship.trim - dt * 0.45);
       if (k.has('KeyS')) this.ship.trim = Math.min(1, this.ship.trim + dt * 0.45);
-    } else if (this.course && this.crew >= 1 && !this.anchorDown && !this.aground) {
-      // THE HELMSMAN (helmsman.js, verify-gated): a hand steers the course
-      // set on the chart — rudder for the mark, trim for the point of sail,
-      // tacking on the watch clock upwind — while the captain walks the
-      // deck, works the guns, or goes below. The captain at the wheel (T)
-      // always overrides; the anchor and the sand always win.
-      const order = helmOrder(this.ship.yaw, this.ship.x, this.ship.z,
-        this.course.x, this.course.z, this.wind.from, t);
+    } else if (this.course && this.route && this.crew >= 1 && !this.anchorDown && !this.aground) {
+      // THE HELMSMAN (helmsman.js + lanes.js, verify-gated): a hand steers the
+      // ROUTE laid from the chart — through the fast water and WITH the wind,
+      // rudder for the mark, trim for the point of sail, tacking upwind — while
+      // the captain walks the deck, works the guns, or goes below. The captain
+      // at the wheel (T) always overrides; the anchor and the sand always win.
+      const order = helmRoute({ yaw: this.ship.yaw, x: this.ship.x, z: this.ship.z },
+        this.route, this.routeLeg, this.wind.from, t);
+      this.routeLeg = order.next;
       if (order.arrived) {
         this.say('THE MARK IS MADE — the helmsman heaves to and hands you the ship', 7);
         this.logEvent('The helmsman made the set course');
         this.course = null;
+        this.route = null;
         this.maps.course = null;
         this.ship.trim = 0;
       } else {
@@ -1711,18 +1720,6 @@ class Game {
       this.zone = legendAt(ll.lat, ll.lon);
       if (this.zone && this.zone.legend.id !== wasZone) this.enterZone(this.zone.legend);
       if (!this.zone && this.diveN > 0) this.diveN = 0; // a fresh visit, fresh wrecks
-      // real weather at the ship's real coordinates — the Azores get Azores
-      // wind. Eased in over ~20 s so a fresh sample never snaps the sails.
-      const live = this.weather.poll(ll.lat, ll.lon);
-      if (live && !this.weatherLock) {
-        this.weatherState = live.state;
-        this.gloom = live.gloom;
-        // soft floor here; the HARD floor is windProfile's WIND_FLOOR (10),
-        // so a becalmed forecast can never make the game boring
-        this.windBase.speed += (Math.max(6, live.windMs) - this.windBase.speed) * 0.012;
-        const dFrom = wrapAngle(live.windFromRad - this.windBase.from);
-        this.windBase.from += dFrom * 0.012;
-      }
     }
     // the trade lanes live: merchants stream, sail, flee, and count as
     // contacts — each sail reading the player's FLAG (faction.js), and any
