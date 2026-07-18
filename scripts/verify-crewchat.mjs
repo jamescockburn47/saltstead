@@ -10,6 +10,10 @@ import { HAND_COST, PRIZE_VALUE } from '../src/port.js';
 import { PRIZE_CREW } from '../src/fleet.js';
 import { HULLS } from '../src/shipyard.js';
 import { PORTS } from '../src/ports.js';
+import { JETTISON_FRAC } from '../src/chase.js';
+import { RELOAD_CUT } from '../src/gundrill.js';
+import { SURVEY_RATE } from '../src/survey.js';
+import { RECORD_KM } from '../src/watchbill.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -67,6 +71,21 @@ ok(all.includes('sleeps one') && HULLS[0].berths === 1, 'berth fact matches the 
   ok(all.includes('Eighteen honest dockyards') && dockyards === 18,
     `port fact matches the roster (${dockyards})`);
 }
+// the passage layer's numbers hold too
+ok(all.includes('QUARTER of the chest') && JETTISON_FRAC === 0.25,
+  'jettison fact matches JETTISON_FRAC');
+ok(all.includes('nearly a third faster') && RELOAD_CUT === 0.3,
+  'drill fact matches RELOAD_CUT');
+ok(all.includes('six doubloons') && SURVEY_RATE === 6,
+  'survey fact matches SURVEY_RATE');
+ok(all.includes('twenty kilometres') && RECORD_KM === 20,
+  'record fact matches RECORD_KM');
+
+// the new lore retrieves
+ok(hits('can we jettison the cargo overboard', null, 'jettison'), 'jettison question finds the bargain');
+ok(hits('put the fishing lines out', 'cook', 'fishing'), 'fishing question finds the grounds');
+ok(hits('what is the chip log for', 'helmsman', 'chip-log'), 'chip log question finds the glass');
+ok(hits('there is a leak in the hold', 'bosun', 'seams'), 'leak question finds the oakum');
 
 // ---- personas: deterministic, first hand is the helmsman ----
 ok(JSON.stringify(crewPersona(0)) === JSON.stringify(crewPersona(0)), 'personas deterministic');

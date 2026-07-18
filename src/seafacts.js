@@ -244,6 +244,103 @@ export const SEA_FACTS = [
       + 'the lamp after dark and lay her alongside the timber. The '
       + 'warehouses stand back of the stone quay.',
   },
+  {
+    id: 'the-hunt', topic: 'combat',
+    keywords: ['hunt', 'notoriety', 'heat', 'hunted', 'stern', 'chase', 'famous'],
+    text: 'Plunder loudly enough and the sea talks: a hot name gets HUNTED '
+      + 'on the open crossing — a King’s corvette lifts astern of a pirate, '
+      + 'a black raider astern of a fat King’s ship. Outsail her, run for '
+      + 'the shoals, round on her — or lighten ship. Quiet days cool a name.',
+  },
+  {
+    id: 'jettison', topic: 'combat',
+    keywords: ['jettison', 'lighten', 'dump', 'cargo', 'overboard', 'escape'],
+    text: 'Under a stern chase, X heaves a QUARTER of the chest over the '
+      + 'side. No hunter on any sea sails past floating gold — she breaks '
+      + 'off to fish it out while the lightened hull flies. Dear, and worth '
+      + 'it, in that order.',
+  },
+  {
+    id: 'storm-riding', topic: 'sailing',
+    keywords: ['storm', 'cyclone', 'band', 'ride', 'hurricane', 'eyewall'],
+    text: 'A cyclone’s OUTER BAND is the fastest water afloat — ride the '
+      + 'ring between the rim and the dangerous heart and she flies. The '
+      + 'helmsman will not do it; that gamble belongs to the captain’s own '
+      + 'wheel, eyes open, rig at stake.',
+  },
+  {
+    id: 'reefing', topic: 'sailing',
+    keywords: ['reef', 'shorten', 'gale', 'tear', 'canvas', 'press'],
+    text: 'Above a whole gale, sheeted hard, the canvas TEARS — ease the '
+      + 'trim to half or better and she holds any weather. The helmsman '
+      + 'reefs himself like an honest hand; a captain pressing for the '
+      + 'extra knot pays for it in rig.',
+  },
+  {
+    id: 'fishing', topic: 'trade',
+    keywords: ['fish', 'handline', 'line', 'catch', 'cod', 'herring', 'bite'],
+    text: 'Slow her below five knots and P puts the handlines out; when '
+      + 'something takes the line, E strikes it home. Cod on the Grand '
+      + 'Banks, herring in the North Sea, bluefin in the Med, dorado in '
+      + 'the tropics — the catch sells itself at the next port call.',
+  },
+  {
+    id: 'gun-drill', topic: 'combat',
+    keywords: ['drill', 'gunnery', 'practice', 'reload', 'train', 'dry'],
+    text: 'K runs the batteries through the dry-fire drill between fights: '
+      + 'a fully drilled crew loads nearly a third faster, and the early '
+      + 'drills teach most. Arrive battle-ready — a hot name never knows '
+      + 'who waits at the far end of a crossing.',
+  },
+  {
+    id: 'seams', topic: 'ship',
+    keywords: ['seam', 'leak', 'oakum', 'carpenter', 'weep', 'planking'],
+    text: 'Heavy weather works the seams open on the bigger hulls — an '
+      + 'open seam WEEPS the hull down slow. Go below, find the weep '
+      + 'against the frames, and E drives the oakum home. Neglected she '
+      + 'lists; she never founders from her own planking.',
+  },
+  {
+    id: 'chip-log', topic: 'navigation',
+    keywords: ['chip', 'knots', 'glass', 'reckoning', 'speed', 'measure'],
+    text: 'U heaves the chip log against the 28-second glass — counting '
+      + 'the knots on the line is where KNOTS come from. The first cast '
+      + 'takes departure and the reckoning runs from it by heading and '
+      + 'logged speed; the current is what the log cannot see, so take a '
+      + 'star sight to fix the book and learn how far the sea set you.',
+  },
+  {
+    id: 'bottles', topic: 'legends',
+    keywords: ['bottle', 'message', 'flotsam', 'crate', 'raft', 'castaway'],
+    text: 'The sea posts its own mail: crates hook aboard alongside for '
+      + 'small gold, a BOTTLE takes an E — a treasure map if the chart '
+      + 'table is bare, else a rumour worth sailing on. Rafts carry '
+      + 'castaways: haul them in like any soul in the water.',
+  },
+  {
+    id: 'survey', topic: 'geography',
+    keywords: ['survey', 'hydrography', 'coast', 'ink', 'admiralty', 'fair copy'],
+    text: 'Keep a NEW coast in sight and the survey inks itself, half a '
+      + 'degree at a time; any port buys the fair copy at six doubloons '
+      + 'the cell. The Admiralty always paid for hydrography — steady '
+      + 'money, no powder burned.',
+  },
+  {
+    id: 'temper', topic: 'crew',
+    keywords: ['morale', 'temper', 'happy', 'quarrel', 'ration', 'rope'],
+    text: 'The crew’s temper is a real thing: yarns, rations, fish and '
+      + 'victories lift it; the rope’s end and festering quarrels sour it. '
+      + 'A happy ship loads quicker and boards heavier — mildly, but '
+      + 'fights are won at the margins.',
+  },
+  {
+    id: 'passage-records', topic: 'sailing',
+    keywords: ['record', 'passage', 'fastest', 'brag', 'crossing', 'best'],
+    text: 'The log keeps the brag sheet: any routed passage of twenty '
+      + 'kilometres or better gets its distance, time and rate written '
+      + 'up, and a beaten record is called out loud. The fastest way to '
+      + 'sail faster is to stand the sheets yourself.',
+  },
 ];
 
 // ---- retrieval (Moorstead facts.js scoring, verbatim philosophy) ----

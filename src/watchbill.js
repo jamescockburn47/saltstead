@@ -66,6 +66,9 @@ export function spectacleLine(kind, seed = 0) {
   return lines[Math.floor(unit2(seed * 1.9, 31.7) * lines.length)];
 }
 
+// a routed passage this long or better makes the brag sheet
+export const RECORD_KM = 20;
+
 // the brag sheet's arithmetic: a routed passage's distance, time, and rate
 export function passageStats(km, s) {
   const min = s / 60;
