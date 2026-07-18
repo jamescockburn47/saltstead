@@ -342,6 +342,21 @@ the crew becomes real management: genuine jobs (helm watches, lookouts, sail
 handling, the galley) held by named NPCs — the yorkshire_bot brain pattern ports
 for below-decks chatter, and the log starts writing entries about THEM.
 
+## The passage layer (BUILT — docs/PASSAGE.md, ten pure modules)
+
+The helmsman made the empty room bigger; the passage layer is the furniture.
+The design law: **the helmsman gets you there; the captain gets you there
+faster, richer, and readier** — attention converts to passage time, readiness,
+intel or gold, and AFK stays safe. A watch-bell spine (watchbill.js) strikes
+deterministic events in open water: yarns and disputes (yarns.js — morale),
+bottles/crates/rafts (flotsam.js), spectacles, and the stern chase (chase.js —
+heat, the hunter astern, the jettison bargain). Pull stations: gun drill
+(gundrill.js), the carpenter's seams (carpenter.js), handlines on real grounds
+(fishing.js), the chip log + dead reckoning (reckoning.js — the current IS the
+error), the running survey (survey.js), storm-band riding and the reef rule
+(storms.js), and the record book. Every module verify-gated; every field
+additive on the save.
+
 ## The sea must not be boring (first-class pillar)
 
 1. **Active sailing** — wind direction/strength matter; trim and point of sail are a

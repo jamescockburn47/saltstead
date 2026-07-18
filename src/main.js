@@ -20,7 +20,28 @@ import { route as laneRoute } from './lanes.js';
 import { seaLeg } from './searoute.js';
 import { windAt } from './wind.js';
 import { currentAt } from './currents.js';
-import { stormWindAt, stormFieldAt } from './storms.js';
+import {
+  stormWindAt, stormFieldAt, stormBandAt, canvasRisk, REEF_WIND, REEF_TRIM,
+} from './storms.js';
+import { BELL_S, bellEvent, spectacleLine, passageStats, RECORD_KM } from './watchbill.js';
+import {
+  newMorale, moveMorale, driftMorale, moraleReload, moraleBoard,
+  yarnFor, disputeFor, resolveDispute, festerDispute, FESTER_S,
+} from './yarns.js';
+import {
+  heatFromPlunder, coolHeat, hunterDue, hunterBerth, jettisonPlan,
+  SPRINT_S, SPRINT_MULT, CHASE_OVER_R,
+} from './chase.js';
+import { FISH_SPEED, STRIKE_S, biteAfter, catchFor } from './fishing.js';
+import { drillGain, drillReload, DRILL_S, DRILL_COOL, GUNNERY_MAX } from './gundrill.js';
+import { accrueWear, seamDue, seamSpots, seamDecay, FIX_REACH } from './carpenter.js';
+import { chipLog, newReckoning, castReckoning, stepReckoning, fixReckoning } from './reckoning.js';
+import { SURVEY_R, SURVEY_MIN_SALE, markCell, surveyValue, acceptSurvey } from './survey.js';
+import {
+  flotsamNear, crateValue, bottleLead, raftSouls, HOOK_R, BOTTLE_R, RAFT_R,
+} from './flotsam.js';
+import { FlotsamLayer } from './flotsamlayer.js';
+import { LEGENDS } from './legends.js';
 import { decide as helmWatch, PILOT_R } from './helmwatch.js';
 import { RESCUE_R, GRATITUDE } from './survivors.js';
 import { HULLS, hullById, nextHull, prevHull, buyHull } from './shipyard.js';
@@ -150,6 +171,16 @@ class Game {
     this.log = [];             // the ship's log — the voyage writes itself
     this.banked = 0;           // consigned to Davy Jones' vault, forever
     this.won = [];             // one-shot legends already claimed (save-persistent)
+    // ---- the passage layer (docs/PASSAGE.md) ----
+    this.heat = 0;             // how loudly the sea talks about you (chase.js)
+    this.gunnery = 0;          // the drilled crews' edge (gundrill.js)
+    this.morale = newMorale(); // the ship's temper (yarns.js)
+    this.fishCatch = 0;        // the well — sold at the next port call
+    this.seamWear = 0;         // heavy weather working the planking (carpenter.js)
+    this.seamsOpen = 0;
+    this.surveyed = [];        // the running survey's inked cells (survey.js)
+    this.surveySold = 0;
+    this.bests = null;         // the brag sheet's record passage
     if (save) {
       this.ship.x = save.ship.x; this.ship.z = save.ship.z;
       this.ship.yaw = save.ship.yaw; this.ship.trim = save.ship.trim;
@@ -162,7 +193,32 @@ class Game {
       this.log = acceptLog(save.log);
       this.banked = save.banked || 0;
       this.won = save.won || [];
+      this.heat = save.heat || 0;
+      this.gunnery = save.gunnery || 0;
+      this.morale = save.morale ?? newMorale();
+      this.fishCatch = save.fishCatch || 0;
+      this.seamWear = save.seamWear || 0;
+      this.seamsOpen = save.seamsOpen || 0;
+      this.surveyed = acceptSurvey(save.surveyed);
+      this.surveySold = save.surveySold || 0;
+      this.bests = save.bests || null;
     }
+    // session-local passage state: the watch bill, the chase, the lines,
+    // the reckoning, the drill and the mast's quarrels
+    this.passage = null;       // { seed, n, bellT, prev, t0, km } while a course is set
+    this.chaseId = null;       // the hunter astern, if the heat raised one
+    this.sprintUntil = 0;      // the jettison's lightened sprint
+    this.lines = false;        // handlines out (fishing.js)
+    this.lineState = null;
+    this.fishSeed = 1;
+    this.drillT = 0;           // a running gun drill's clock
+    this.drillCool = 0;
+    this.reckoning = null;     // the navigator's book (reckoning.js)
+    this.castSeed = 1;
+    this.dispute = null;       // { until } while the deck waits on the captain
+    this.reefWarned = false;
+    this.flotsamList = [];
+    this.flotsamTaken = new Set();
     this.saveClock = 12; // first autosave soon after boarding
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') this.persist();
@@ -179,6 +235,7 @@ class Game {
     this.merchants = new MerchantLayer(this.scene);
     this.hailed = new Set(); // ships the lookout has already sung out
     this.wildlife = new WildlifeLayer(this.scene);
+    this.flotsam = new FlotsamLayer(this.scene); // the sea's own post (flotsam.js)
     this.fleet = new FleetLayer(this.scene);
     this.fleet.restore(this.savedFleet, this.ship.x, this.ship.z, this.ship.yaw);
     this.lastPrizeId = null; // the stripped hull still alongside (capture window)
@@ -273,6 +330,12 @@ class Game {
       if (e.code === 'KeyC' && !e.repeat) this.belayCourse();
       if (e.code === 'KeyB' && !e.repeat) this.hailCrew();
       if (e.code === 'KeyO' && !e.repeat) this.toggleOars();
+      if (e.code === 'KeyX' && !e.repeat) this.jettisonCargo();
+      if (e.code === 'KeyK' && !e.repeat) this.startDrill();
+      if (e.code === 'KeyP' && !e.repeat) this.toggleLines();
+      if (e.code === 'KeyU' && !e.repeat) this.heaveChipLog();
+      if (e.code === 'Digit1' && !e.repeat) this.callDispute(1);
+      if (e.code === 'Digit2' && !e.repeat) this.callDispute(2);
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     this.dragging = false;
@@ -354,6 +417,13 @@ class Game {
       this.say(`COURSE SET — the helmsman lays her for the ${compassPoint(this.ship.x, this.ship.z, this.ship.x + dxw, w.z)}, `
         + `${Math.max(1, Math.round(d / 1000))} km by the log${legs}${watch} (C belays it; the wheel overrides)`, 8);
       this.logEvent('Set a course on the chart — a hand takes the helm');
+      // the passage begins: the watch bill's bells (watchbill.js) strike
+      // while she sails this course in open water; arrival makes the brag
+      // sheet if the road was long enough
+      this.passage = {
+        seed: (this.lootSeed * 131 + this.route.length * 17 + Math.round(d)) % 99991,
+        n: 0, bellT: 0, prev: null, t0: this.t, km: d / 1000,
+      };
     };
     this.starchart = new StarChartUI();
     this.logui = new LogUI();
@@ -515,6 +585,9 @@ class Game {
       faction: this.faction,
       dmgRig: this.hull.rig, dmgHull: this.hull.hull, crippled: this.crippled,
       anchorDown: this.anchorDown,
+      heat: this.heat, gunnery: this.gunnery, morale: this.morale,
+      fishCatch: this.fishCatch, seamWear: this.seamWear, seamsOpen: this.seamsOpen,
+      surveyed: this.surveyed, surveySold: this.surveySold, bests: this.bests,
     })).catch(() => {});
   }
 
@@ -965,6 +1038,28 @@ class Game {
     this.portui.show(this.port.haven);
     this.refreshPort();
     this.logEvent(`Put in at ${this.port.haven.name}`);
+    // the quay settles the passage's honest earnings: the fish well and the
+    // survey's fair copy (fishing.js / survey.js)
+    const settled = [];
+    if (this.fishCatch > 0) {
+      this.gold += this.fishCatch;
+      this.logEvent(`Sold the catch at ${this.port.haven.name} — ${this.fishCatch} doubloons`);
+      settled.push(`the catch sells for ${this.fishCatch}`);
+      this.fishCatch = 0;
+    }
+    const fresh = this.surveyed.length - this.surveySold;
+    if (fresh >= SURVEY_MIN_SALE) {
+      const pay = surveyValue(fresh);
+      this.gold += pay;
+      this.surveySold = this.surveyed.length;
+      this.logEvent(`Sold the running survey at ${this.port.haven.name} — ${pay} doubloons`);
+      settled.push(`the survey's fair copy brings ${pay}`);
+    }
+    if (settled.length) {
+      this.say(`The quay settles up — ${settled.join('; ')} doubloons`, 7);
+      this.refreshPort();
+      this.persist();
+    }
   }
 
   // the two-stage rule (combat.js): foundering is the warning, a second
@@ -1004,6 +1099,8 @@ class Game {
     // the harbour's patched stake: she sails, but the yard will want coin
     this.hull.rig = 0.75; this.hull.hull = 0.75;
     this.crippled = false;
+    this.morale = moveMorale(this.morale, -0.2); // a wreck sours any crew
+    this.seamsOpen = 0; this.seamWear = 0; // the old planking is on the seabed
     // the longboat makes the nearest port; she lies to anchor just offshore
     const w = latLonToWorld(port.lat, port.lon);
     const spot = this.findAnchorage(w.x, w.z) || w;
@@ -1048,6 +1145,7 @@ class Game {
       const text = sightText(sight, ll.lat);
       this.starchart.setCaption(text + ' \u00b7 N or Esc closes the chart');
       this.logEvent(`Star sight \u2014 ${text}`);
+      this.fixTheBook('The star sight'); // the fix corrects the reckoning
     } else {
       this.starchart.setCaption(vis.reason === 'daylight'
         ? 'The stars are up there, but the sun owns the sky \u2014 a sight needs the dark'
@@ -1153,7 +1251,25 @@ class Game {
   // in at port. The tiller lives on T alone, so E can never trap you off it.
   onE() {
     if (this.portui.open) { this.portui.hide(); return; }
-    if (this.mode === 'below') { this.goUp(); return; } // the hold has one door
+    if (this.mode === 'below') {
+      // the carpenter's rounds come before the ladder: a weeping seam in
+      // arm's reach takes the oakum (carpenter.js)
+      if (this.seamsOpen > 0) {
+        const spots = seamSpots(this.spec, 7, this.seamsOpen);
+        const near = spots.some((s) =>
+          Math.hypot(this.cap.x - s.x, this.cap.z - s.z) <= FIX_REACH * this.shipFrame.scale);
+        if (near) {
+          this.seamsOpen--;
+          this.say(this.seamsOpen > 0
+            ? 'Oakum driven home — one seam holds; another still weeps'
+            : 'Oakum driven home — the hold is tight again', 6);
+          this.logEvent('Drove the oakum home — a seam made tight');
+          this.persist();
+          return;
+        }
+      }
+      this.goUp(); return; // the hold has one door
+    }
     if (this.mode === 'ashore') {
       if (this.hoardReady) { this.lootHoard(); return; }
       if (this.digReady && this.digTimer <= 0) {
@@ -1166,6 +1282,15 @@ class Game {
     }
     if (this.dutchmanBoardable) { this.boardDutchman(); return; }
     if (this.rescueReady && this.rescueReady.length) { this.rescueSurvivors(); return; }
+    // the passage layer's E-verbs: a taken line ranks first (its clock runs),
+    // then souls on a raft, then the sea's mail
+    if (this.lines && this.lineState?.bit && this.t <= this.lineState.until) { this.landFish(); return; }
+    {
+      const raft = this.nearFlotsam('raft', RAFT_R);
+      if (raft && this.ship.speed < 2.5) { this.takeRaft(raft); return; }
+      const bottle = this.nearFlotsam('bottle', BOTTLE_R);
+      if (bottle && this.ship.speed < 4) { this.openBottle(bottle); return; }
+    }
     if (this.boardable) { this.boardPrize(); return; }
     if (this.captureable) { this.takePrize(); return; }
     if (this.digReady && this.digTimer <= 0) {
@@ -1248,6 +1373,7 @@ class Game {
     this.ship.z = this.course.z;
     this.ship.speed = 0;
     this.course = null; this.route = null; this.maps.course = null;
+    this.passage = null;
     this.courseFromPilotage = false; this.handbackMode = null; this.handbackReason = '';
     this.geoClock = 0; // re-sample coast, zone and weather at the new berth at once
     const ll = worldToLatLon(this.ship.x, this.ship.z);
@@ -1263,7 +1389,239 @@ class Game {
     this.route = null;
     this.routeLeg = 0;
     this.maps.course = null;
+    this.passage = null; // a struck course makes no brag sheet
     this.say('BELAY THAT — the course is struck; the helm is lashed on the last heading', 5);
+  }
+
+  // ---- the passage layer (docs/PASSAGE.md) ----
+  // The design law: the helmsman gets you there; the captain gets you there
+  // faster, richer and readier. Everything below converts attention into
+  // passage time, readiness, intel or gold — and AFK stays safe.
+
+  // the live reload: crew size (combat.js), drilled gunnery (gundrill.js),
+  // and the ship's temper (yarns.js) — one truth for all three batteries
+  reload() {
+    return drillReload(reloadTime(this.crew), this.gunnery) * moraleReload(this.morale);
+  }
+
+  // the boarding weight: a happy ship boards a shade heavier
+  effCrew() {
+    return Math.max(1, Math.round(this.crew * moraleBoard(this.morale)));
+  }
+
+  // real unwon legends with true bearings — what yarns and bottles talk about
+  unwonLegends(max = 5) {
+    const out = [];
+    for (const l of LEGENDS) {
+      if (l.kind === 'haven' || this.won.includes(l.id)) continue;
+      const z = zoneOf(l.id);
+      if (!z) continue;
+      out.push({ name: l.name, dir: compassPoint(this.ship.x, this.ship.z, z.x, z.z) });
+      if (out.length >= max) break;
+    }
+    return out;
+  }
+
+  idh(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 99991; return h + 1; }
+
+  nearFlotsam(kind, r) {
+    for (const o of this.flotsamList) {
+      if (o.kind === kind && Math.hypot(o.x - this.ship.x, o.z - this.ship.z) <= r) return o;
+    }
+    return null;
+  }
+
+  // one bell's event, dispatched (watchbill.js decided WHAT; this stages it)
+  bellStrikes(kind, seed) {
+    const handAt = (n) => crewPersona(n % Math.max(1, Math.min(this.crew, 13)));
+    if (kind === 'yarn') {
+      const hand = handAt(seed);
+      const y = yarnFor(seed, this.unwonLegends());
+      this.say(`${hand.name} ${y.text}`, 9);
+      if (y.legend) this.logEvent(`${hand.name}'s yarn: ${y.legend.name}, away to the ${y.legend.dir}`);
+      this.morale = moveMorale(this.morale, 0.02);
+    } else if (kind === 'dispute') {
+      if (this.dispute) return;
+      const a = handAt(seed);
+      let b = handAt(seed + 1);
+      if (b.name === a.name) b = handAt(seed + 2);
+      const d = disputeFor(seed, a.name, b.name);
+      this.dispute = { until: this.t + FESTER_S };
+      this.say(d.text, FESTER_S);
+    } else if (kind === 'bottle' || kind === 'raft') {
+      const o = this.nearFlotsam(kind, 2400);
+      if (!o) return; // the lookout saw a wave — a quiet bell after all
+      this.say(`The lookout sings out — ${kind === 'raft' ? 'a RAFT, and souls on it,' : 'a bottle bobbing'} `
+        + `to the ${compassPoint(this.ship.x, this.ship.z, o.x, o.z)}`, 8);
+    } else {
+      const line = spectacleLine(kind, seed);
+      if (!line) return;
+      this.say(line, 9);
+      this.logEvent(line);
+      this.morale = moveMorale(this.morale, 0.01);
+    }
+  }
+
+  // the heat's answer (chase.js): a hunter lifts over the horizon astern
+  liftHunter(seed) {
+    const b = hunterBerth(this.ship.x, this.ship.z, this.ship.yaw, seed);
+    const ll = worldToLatLon(b.x, b.z);
+    if (isLand(ll.lat, ll.lon)) return; // no hunter berths in a field
+    const type = this.fac.hostileType;
+    this.chaseId = this.merchants.spawnEscort(wrapX(b.x), b.z, b.yaw, type);
+    this.say(type === 'navy'
+      ? 'SAIL ASTERN — a KING’S CORVETTE lifts over the horizon, crowding canvas after us. Your name is known. Outsail her, run for shoals, round on her — or X heaves cargo over'
+      : 'SAIL ASTERN — a BLACK RAIDER lifts over the horizon, hungry for a King’s hull. Outsail her, round on her — or X heaves cargo over', 12);
+    this.logEvent('A hunter lifted over the horizon astern — the name is getting expensive');
+  }
+
+  // X — the jettison bargain (chase.js): gold for the sea, sprint for the ship
+  jettisonCargo() {
+    if (this.mode === 'ashore' || this.portui.open) return;
+    if (!this.chaseId) { this.say('Nothing astern worth bribing — the cargo stays aboard', 4); return; }
+    const plan = jettisonPlan(this.gold);
+    if (!plan) { this.say('The chest is too bare to interest her — sail or fight', 5); return; }
+    this.gold = plan.keep;
+    this.sprintUntil = this.t + SPRINT_S;
+    this.merchants.rout(this.chaseId);
+    this.chaseId = null;
+    this.say(`CARGO OVER THE SIDE — ${plan.cost} doubloons go to the sea, and the hunter heaves to `
+      + `for the floating gold. The lightened hull FLIES (${SPRINT_S}s of sprint)`, 10);
+    this.logEvent(`Jettisoned ${plan.cost} doubloons under a stern chase — the hunter stopped for the gold`);
+    this.persist();
+  }
+
+  // P — the handlines (fishing.js)
+  toggleLines() {
+    if (this.mode === 'ashore' || this.mode === 'below' || this.portui.open) return;
+    if (this.lines) {
+      this.lines = false;
+      this.lineState = null;
+      this.say('Lines inboard', 3);
+      return;
+    }
+    if (this.ship.speed > FISH_SPEED) {
+      this.say('Too much way on her for handlines — slow below five knots (or anchor), then P again', 5);
+      return;
+    }
+    this.lines = true;
+    this.lineState = { biteAt: this.t + biteAfter(this.fishSeed), until: 0, bit: false };
+    this.say('LINES OUT — the hands bait hooks and pay out the handlines. Wait for the take…', 6);
+  }
+
+  // E on a taken line: the strike
+  landFish() {
+    const ll = worldToLatLon(this.ship.x, this.ship.z);
+    const c = catchFor(this.fishSeed, ll.lat, ll.lon);
+    this.fishSeed++;
+    this.fishCatch += c.value;
+    this.morale = moveMorale(this.morale, 0.01);
+    this.lineState = { biteAt: this.t + biteAfter(this.fishSeed), until: 0, bit: false };
+    this.say(`${c.name.toUpperCase()} comes over the rail — ${c.value} doubloons at the next port `
+      + `(the well holds ${this.fishCatch})`, 6);
+    this.logEvent(`Caught ${c.name} — ${c.value} doubloons' worth in the well`);
+  }
+
+  // K — gun drill (gundrill.js): dry-fire the batteries between fights
+  startDrill() {
+    if (this.mode === 'ashore' || this.mode === 'below' || this.portui.open) return;
+    if (this.crew < 1) { this.say('Gun drill needs hands at the guns — sign crew at a port', 5); return; }
+    if (this.drillT > 0) return;
+    if (this.t < this.drillCool) { this.say('The hands are still getting their breath — a minute between drills', 4); return; }
+    const hostile = this.merchants.nearestHostile(this.ship.x, this.ship.z, this.fac.hostileType);
+    if (hostile && hostile.dist < GUN_RANGE * 1.5) { this.say('No drills with an enemy in range — this one is live', 4); return; }
+    if (this.gunnery >= GUNNERY_MAX - 1e-9) { this.say('The crews are drilled to the bone — no drill sharpens them further', 5); return; }
+    this.drillT = DRILL_S;
+    this.say('GUN DRILL — run out, prick the cartridge, dry-fire, worm and home. The crews dance it double time.', 6);
+  }
+
+  // U — the chip log (reckoning.js): departure, casts, and the book
+  heaveChipLog() {
+    if (this.mode === 'ashore' || this.mode === 'below' || this.portui.open) return;
+    const cast = chipLog(this.castSeed++, this.ship.speed);
+    if (!this.reckoning) {
+      this.reckoning = castReckoning(newReckoning(this.ship.x, this.ship.z), cast.estMs);
+      this.say(`DEPARTURE TAKEN — ${cast.text}. The reckoning runs from here by heading and logged `
+        + 'speed (U casts again; a star sight or a landfall fixes the book)', 10);
+      this.logEvent(`Hove the chip log — ${cast.text}; departure taken`);
+      return;
+    }
+    castReckoning(this.reckoning, cast.estMs);
+    const ll = worldToLatLon(this.reckoning.x, this.reckoning.z);
+    this.say(`${cast.text} — by the reckoning she stands at ${fmtPos(ll.lat, ll.lon)}`, 8);
+    this.logEvent(`Hove the log — ${cast.text}; by the reckoning ${fmtPos(ll.lat, ll.lon)}`);
+  }
+
+  // a fix — star sight or landfall — corrects the reckoning and teaches why
+  fixTheBook(how) {
+    if (!this.reckoning) return;
+    const off = fixReckoning(this.reckoning, this.ship.x, this.ship.z);
+    if (off > 0.05) {
+      this.say(`${how} FIXES the reckoning — the book was out by ${off.toFixed(1)} km. `
+        + 'The sea’s set did it: the log line cannot see the current.', 9);
+      this.logEvent(`${how} found the reckoning ${off.toFixed(1)} km out — the current's set`);
+    }
+  }
+
+  // 1 / 2 — the captain's word on a quarrel (yarns.js)
+  callDispute(choice) {
+    if (!this.dispute || this.t > this.dispute.until) return;
+    const r = resolveDispute(choice, this.gold);
+    this.gold += r.dGold;
+    this.morale = moveMorale(this.morale, r.dMorale);
+    this.dispute = null;
+    this.say(r.text, 6);
+    this.logEvent(r.text);
+  }
+
+  // E alongside a bottle: the sea's own mail (flotsam.js)
+  openBottle(o) {
+    this.flotsamTaken.add(o.id);
+    this.flotsamList = this.flotsamList.filter((f) => f.id !== o.id);
+    const lead = bottleLead(this.idh(o.id), !!this.treasureMap, this.unwonLegends());
+    if (lead.kind === 'map') {
+      const ll = worldToLatLon(this.ship.x, this.ship.z);
+      const site = findDigSite(this.lootSeed, ll.lat, ll.lon);
+      if (site) {
+        this.treasureMap = { seed: this.lootSeed, lat: site.lat, lon: site.lon };
+        this.lootSeed++;
+        this.say('A BOTTLE comes aboard — inside, a TREASURE MAP in a dead man’s hand (M for the chart)', 9);
+        this.logEvent('A message in a bottle — a treasure map, salt-stained but legible');
+        this.persist();
+        return;
+      }
+    }
+    if (lead.kind === 'rumour') {
+      this.say(`A BOTTLE comes aboard — a scrawled note: “${lead.legend.name}… `
+        + `${lead.legend.dir} of these waters…”`, 9);
+      this.logEvent(`A bottle's rumour: ${lead.legend.name}, away to the ${lead.legend.dir}`);
+    } else {
+      const gold = lead.gold || 20;
+      this.gold += gold;
+      this.say(`A BOTTLE comes aboard — ${gold} doubloons wrapped in oilcloth`, 6);
+      this.logEvent(`A bottle held ${gold} doubloons in oilcloth`);
+    }
+    this.persist();
+  }
+
+  // E alongside a raft: castaways, under the survivors' law
+  takeRaft(o) {
+    this.flotsamTaken.add(o.id);
+    this.flotsamList = this.flotsamList.filter((f) => f.id !== o.id);
+    const souls = raftSouls(this.idh(o.id));
+    let joined = 0, grateful = 0;
+    for (const s of souls) {
+      if (s.join && this.crew < this.hullDef.berths) { this.crew++; joined++; } else grateful++;
+    }
+    const purse = grateful * GRATITUDE;
+    this.gold += purse;
+    this.morale = moveMorale(this.morale, 0.02);
+    let msg = `${souls.length} castaway${souls.length > 1 ? 's' : ''} hauled off the raft`;
+    if (joined) msg += ` — ${joined} sign${joined === 1 ? 's' : ''} articles on the spot`;
+    if (grateful) msg += `${joined ? ';' : ' —'} ${grateful} press${grateful === 1 ? 'es' : ''} ${purse} grateful doubloons on you`;
+    this.say(msg, 8);
+    this.logEvent(msg);
+    this.persist();
   }
 
   // ---- the signal rocket (faction.js) — the NAVY's institutional edge ----
@@ -1351,7 +1709,7 @@ class Game {
     if (this.kraken && this.kraken.state === 'gripping') {
       const s = shootKrakenArm(this.kraken);
       if (!s.hit) return;
-      this.gunCool = reloadTime(this.crew);
+      this.gunCool = this.reload();
       const arm = this.muzzlePos(this.shotSeed % 2 ? 1 : -1);
       this.combatFx.fire(arm, { x: arm.x + (this.shotSeed % 2 ? 12 : -12), z: arm.z }, true);
       this.shotSeed++;
@@ -1365,7 +1723,7 @@ class Game {
     if (this.dragon && dragonVulnerable(this.dragon) && dp) {
       const dist = Math.hypot(dp.x - this.ship.x, dp.z - this.ship.z);
       if (dist < GUN_RANGE && dp.alt < 30) {
-        this.gunCool = reloadTime(this.crew);
+        this.gunCool = this.reload();
         const hit = unit2(this.shotSeed * 1.51, 88.3) < DRAGON_HIT;
         const b = beamBearing(this.ship.yaw, dp.x - this.ship.x, dp.z - this.ship.z);
         this.combatFx.fire(this.muzzlePos(b.side), { x: dp.x, z: dp.z }, !hit);
@@ -1417,7 +1775,7 @@ class Game {
       this.say(`She doesn't bear \u2014 turn the ship (guns fire off the ${b.side > 0 ? 'starboard' : 'port'} beam)`, 4);
       return;
     }
-    this.gunCool = reloadTime(this.crew);
+    this.gunCool = this.reload();
     if (target.ghost) {
       this.shotSeed++;
       this.combatFx.fire(this.muzzlePos(b.side),
@@ -1448,6 +1806,7 @@ class Game {
         ? 'She goes down by the stern \u2014 an empty hull for the fishes'
         : 'HOLED THROUGH \u2014 she\u2019s going down! Most of her cargo goes with her\u2026', 6);
       this.logEvent('Sank her with round shot');
+      this.heat = heatFromPlunder(this.heat, 120); // a sinking is talked about
     } else if (!hits) {
       this.say(this.hullDef.guns > 1 ? 'Short \u2014 the sea takes every ball' : 'Short \u2014 the sea takes the ball', 3);
     } else if (this.shotKind === 'chain') {
@@ -1516,11 +1875,13 @@ class Game {
     // an armed ship doesn't strike her colours — the crews fight it out
     // (combat.js autoBattle): the player's job was DELIVERING the boarding
     if (type.armed && !prize.m.routed) {
-      const battle = autoBattle(this.lootSeed, this.crew, type.crew);
+      // the ship's temper weighs the boarding (yarns.js moraleBoard)
+      const battle = autoBattle(this.lootSeed, this.effCrew(), type.crew);
       this.lootSeed++;
-      if (battle.losses > 0) this.crew -= battle.losses;
+      if (battle.losses > 0) this.crew = Math.max(0, this.crew - battle.losses);
       if (!battle.won) {
         this.merchants.rout(prize.id);
+        this.morale = moveMorale(this.morale, -0.06);
         const crew = prize.m.type === 'raider' ? 'her cut-throats' : 'her marines';
         this.say(battle.losses > 0
           ? `REPELLED \u2014 ${crew} hold the rail; ${battle.losses} of your hands lost. She breaks off.`
@@ -1540,6 +1901,9 @@ class Game {
     const roll = lootRoll(this.lootSeed, type.goldMult);
     roll.gold = Math.round(roll.gold * this.fac.plunderMult);
     this.gold += roll.gold;
+    // every purse warms the name (chase.js) and lifts the watch (yarns.js)
+    this.heat = heatFromPlunder(this.heat, roll.gold);
+    this.morale = moveMorale(this.morale, 0.05);
     const name = {
       trader: 'a merchantman', indiaman: 'an INDIAMAN', navy: 'a navy corvette',
       raider: 'a PIRATE RAIDER', derelict: 'a derelict',
@@ -1640,6 +2004,7 @@ class Game {
     this.lastPrizeId = null;
     if (!pose) return;
     this.crew -= PRIZE_CREW;
+    this.morale = moveMorale(this.morale, 0.03); // a prize astern is money made
     this.fleet.add(pose.x, pose.z, pose.yaw);
     this.say(`A prize crew of ${PRIZE_CREW} takes her \u2014 she falls in astern. `
       + `(${this.crew} hands left aboard)`, 7);
@@ -1759,13 +2124,28 @@ class Game {
       if (order.arrived) {
         this.say('THE MARK IS MADE — the helmsman heaves to and hands you the ship', 7);
         this.logEvent('The helmsman made the set course');
+        // the brag sheet (watchbill.js): a long enough road makes the record book
+        if (this.passage && this.passage.km >= RECORD_KM) {
+          const st = passageStats(this.passage.km, this.t - this.passage.t0);
+          const best = !this.bests || st.kmMin > this.bests.kmMin;
+          if (best) this.bests = st;
+          this.logEvent(`Passage made: ${st.km} km in ${st.min} min (${st.kmMin} km/min)`
+            + (best ? ' — THE BEST YET' : ''));
+          if (best) this.say(`A RECORD PASSAGE — ${st.km} km in ${st.min} minutes. The log remembers.`, 8);
+          this.persist();
+        }
+        this.passage = null;
         this.course = null;
         this.route = null;
         this.maps.course = null;
         this.ship.trim = 0;
       } else {
         this.ship.rudder += (order.rudder - this.ship.rudder) * Math.min(1, dt * 4);
-        this.ship.trim += (order.trim - this.ship.trim) * Math.min(1, dt * (sheets >= 1 ? 1.2 : 0.15));
+        // in a whole gale the hand shortens sail himself (storms.js REEF) —
+        // the honest watch never tears her canvas; pressing is wheel work
+        const wantTrim = this.wind.speed > REEF_WIND
+          ? Math.min(order.trim, REEF_TRIM) : order.trim;
+        this.ship.trim += (wantTrim - this.ship.trim) * Math.min(1, dt * (sheets >= 1 ? 1.2 : 0.15));
       }
     } else if (this.aground) {
       // beached with nobody at the tiller: she STAYS beached — no lashed
@@ -1811,6 +2191,16 @@ class Game {
       if (!this.weatherLock) {
         this.weatherState = this.stormField.weatherState;
         this.gloom += (this.stormField.gloom - this.gloom) * 0.12;
+      }
+      // the sea's own post (flotsam.js): what floats within the lookout's
+      // reach — skyT, so the same wreckage rides across a reload
+      this.flotsamList = flotsamNear(skyT, this.ship.x, this.ship.z)
+        .filter((o) => !this.flotsamTaken.has(o.id));
+      // the running survey (survey.js): NEW coast in sight inks the book
+      if (!this.overLand && this.coastDist < SURVEY_R
+        && markCell(this.surveyed, ll.lat, ll.lon) && !this.surveyTold) {
+        this.surveyTold = true;
+        this.say('The survey inks a new reach of coastline — any port buys the fair copy', 6);
       }
     }
     // the trade lanes live: merchants stream, sail, flee, and count as
@@ -1990,6 +2380,21 @@ class Game {
         this.ship.yaw, this.shipFrame.scale, this.merchants.wrecks(),
         !!(this.zone && this.zone.legend.id === 'white-whale'));
     }
+    // the sea's post rides the waves (flotsamlayer.js) — and a crate within
+    // a boathook's reach comes aboard by itself
+    this.flotsam.update(t, this.flotsamList);
+    for (const o of this.flotsamList) {
+      if (o.kind !== 'crate') continue;
+      if (Math.hypot(o.x - this.ship.x, o.z - this.ship.z) > HOOK_R) continue;
+      this.flotsamTaken.add(o.id);
+      this.flotsamList = this.flotsamList.filter((f) => f.id !== o.id);
+      const v = crateValue(this.idh(o.id));
+      this.gold += v;
+      this.say(`A drifting crate hooked aboard — ${v} doubloons of sodden cargo`, 5);
+      this.logEvent(`Boathooked a drifting crate — ${v} doubloons`);
+      break;
+    }
+
     const allContacts = this.contacts.concat(this.merchants.contacts())
       .concat(this.legendFx.contacts());
 
@@ -2001,6 +2406,9 @@ class Game {
     // river-sailing is inshore sailing wherever the sea coast is: over land
     // the fair current dies and she moves at human scale
     let gait = encounterGait(gaitFactor(this.overLand ? 0 : this.coastDist), contactDist);
+    // a cyclone's outer band is the fastest water afloat (storms.js): the
+    // captain's gamble multiplies the current itself
+    gait *= stormBandAt(this.ship.x, this.ship.z, skyT);
     this.shipSighted = contactDist < ENCOUNTER_FAR;
     this.lastGait = gait; // the crew's brains tell the truth about the current
 
@@ -2059,12 +2467,121 @@ class Game {
           this.say(`THE HELMSMAN HEAVES TO — ${hb.reason}. Take the helm (T).`, 8);
           this.logEvent(`The helmsman handed back the ship: ${hb.reason}`);
           this.course = null; this.route = null; this.maps.course = null; this.ship.trim = 0;
+          this.passage = null; // a handed-back course makes no brag sheet
         } else if (hb.mode === 'soft') {
           this.say(hb.reason, 6);
         }
       }
     } else {
       this.handbackMode = null; this.handbackReason = '';
+    }
+
+    // ---- THE WATCH BILL (watchbill.js) ----
+    // bells strike only while the helmsman sails open water — the passage
+    // is the room, these are the furniture. The stern-chase roll (chase.js)
+    // rides the same bell, ahead of the pleasanter business.
+    if (this.passage && this.course && this.crew >= 1 && gait > 1.3) {
+      this.passage.bellT += dt;
+      if (this.passage.bellT >= BELL_S) {
+        this.passage.bellT = 0;
+        const P = this.passage;
+        P.n++;
+        if (!this.chaseId && hunterDue(P.seed, P.n, this.heat)) {
+          this.liftHunter(P.seed + P.n);
+        } else {
+          const ev = bellEvent(P.seed, P.n, {
+            night: !!this.lastNight,
+            clear: this.weatherState === 'clear',
+            storm: this.weatherState === 'storm',
+            crew: this.crew,
+          }, P.prev);
+          if (ev) { P.prev = ev.kind; this.bellStrikes(ev.kind, P.seed * 100 + P.n); }
+        }
+      }
+    }
+
+    // ---- the passage layer breathes ----
+    {
+      // the chase runs its course: sunk, routed, or outsailed past sea-room
+      if (this.chaseId) {
+        const e = this.merchants.live.get(this.chaseId);
+        if (!e || e.sinkT !== null || e.m.routed || e.m.looted) {
+          this.chaseId = null;
+          this.say('The chase is done — she troubles us no more', 6);
+        } else if (Math.hypot(dxWrap(e.m.x, this.ship.x), e.m.z - this.ship.z) > CHASE_OVER_R) {
+          this.chaseId = null;
+          this.morale = moveMorale(this.morale, 0.04);
+          this.say('The hunter falls hull-down astern — she gives it up. Cleanly sailed.', 8);
+          this.logEvent('Outsailed a hunter on the open sea');
+        }
+      }
+      // quiet water cools a name; the temper eases home (chase.js / yarns.js)
+      this.heat = coolHeat(this.heat, dt / DAY_LENGTH);
+      this.morale = driftMorale(this.morale, dt);
+      // an ignored quarrel festers (yarns.js)
+      if (this.dispute && t > this.dispute.until) {
+        const f = festerDispute();
+        this.morale = moveMorale(this.morale, f.dMorale);
+        this.dispute = null;
+        this.say(f.text, 6);
+      }
+      // the handlines (fishing.js): the bite comes on its own clock
+      if (this.lines) {
+        if (this.ship.speed > FISH_SPEED + 1) {
+          this.lines = false; this.lineState = null;
+          this.say('Way comes on her — the lines are hauled inboard', 4);
+        } else if (this.lineState) {
+          if (!this.lineState.bit && t >= this.lineState.biteAt) {
+            this.lineState.bit = true;
+            this.lineState.until = t + STRIKE_S;
+            this.say('SOMETHING TAKES THE LINE — E — STRIKE!', STRIKE_S);
+          } else if (this.lineState.bit && t > this.lineState.until) {
+            this.fishSeed++;
+            this.lineState = { biteAt: t + biteAfter(this.fishSeed), until: 0, bit: false };
+            this.say('The line goes slack — the bait is gone. Rebaited.', 4);
+          }
+        }
+      }
+      // the gun drill runs its clock (gundrill.js)
+      if (this.drillT > 0) {
+        this.drillT -= dt;
+        if (this.drillT <= 0) {
+          this.gunnery = drillGain(this.gunnery);
+          this.drillCool = t + DRILL_COOL;
+          this.morale = moveMorale(this.morale, 0.01);
+          this.say(`THE DRILL TELLS — reload down to ${this.reload().toFixed(0)}s `
+            + `(gunnery ${Math.round((this.gunnery / GUNNERY_MAX) * 100)}%)`, 6);
+          this.logEvent(`Drilled the gun crews — reload ${this.reload().toFixed(0)}s`);
+        }
+      }
+      // the carpenter's rounds (carpenter.js): weather works the seams
+      if (this.hullDef.below) {
+        const heavy = this.wind.speed > 22 || (this.stormField && this.stormField.danger > 0);
+        this.seamWear = accrueWear(this.seamWear, heavy, dt);
+        if (seamDue(this.seamWear, this.seamsOpen)) {
+          this.seamWear = 0;
+          this.seamsOpen++;
+          this.say('A SEAM LETS GO below — the hold weeps. Find it at the frames and drive the oakum home (E)', 9);
+          this.logEvent('The weather sprang a seam — the carpenter’s rounds are owed');
+        }
+        if (this.seamsOpen > 0) this.hull.hull = seamDecay(this.hull.hull, this.seamsOpen, dt);
+      }
+      // SHORTEN SAIL OR TEAR CANVAS (storms.js): pressing hard in a gale
+      const risk = canvasRisk(this.wind.speed, this.ship.trim);
+      if (risk > 0) {
+        this.hull.rig = Math.max(0, this.hull.rig - risk * dt);
+        if (!this.reefWarned) {
+          this.reefWarned = true;
+          this.say('THE CANVAS IS TEARING — shorten sail! Ease the sheet (W) to half, or the gale takes the rig', 8);
+          this.logEvent('Pressed her too hard in the gale — the canvas paying for it');
+        }
+      } else this.reefWarned = false;
+      // the navigator's book (reckoning.js): heading and logged speed, only
+      // while she's genuinely under way (the port panel furls her sails)
+      if (this.reckoning && !this.anchorDown && !this.aground && this.mode !== 'ashore'
+        && !this.portui.open) {
+        stepReckoning(this.reckoning, this.ship.yaw, dt, gait);
+      }
     }
 
     // ---- the monsters wake (monsters.js) ----
@@ -2266,6 +2783,8 @@ class Game {
     // The black flag's individual edge rides here too (faction.js): a
     // lawless hull sails faster than her rated class.
     let hullFactor = speedFactor(this.hull) * this.fac.speedMult;
+    // the jettison's bargain paid for a sprint: the lightened hull flies
+    if (this.t < this.sprintUntil) hullFactor *= SPRINT_MULT;
     if (this.kraken) hullFactor *= krakenDrag(this.kraken);
     let windEff = this.wind;
     if (DEADAIR_ZONES.includes(zoneId)) {
@@ -2566,6 +3085,7 @@ class Game {
         this.logEvent(sea
           ? 'The land drops astern \u2014 open sea'
           : 'Land ho \u2014 the coast rises on the horizon');
+        if (!sea) this.fixTheBook('The landfall'); // a sighted coast is a fix
       }
       this.atSea = sea;
     }
@@ -2638,7 +3158,7 @@ class Game {
       if (!this.boardable) return null;
       const bt = TYPES[this.boardable.m.type] || TYPES.trader;
       if (bt.armed && !this.boardable.m.routed) {
-        const odds = Math.round(boardingOdds(this.crew, bt.crew) * 100);
+        const odds = Math.round(boardingOdds(this.effCrew(), bt.crew) * 100);
         return `E \u2014 BOARD HER \u2014 her marines WILL fight (${odds}% with ${this.crew} hands)`;
       }
       if (this.boardable.m.type === 'derelict') return 'E \u2014 board the derelict\u2026';
@@ -2647,8 +3167,21 @@ class Game {
     // the hint speaks the hull's own helm: 'tiller' below the brig, 'wheel'
     // from the brig up \u2014 one substitution beats threading it through thirty
     // string literals
+    // the carpenter's steer: where the weeping seam sits, relative to the boots
+    const seamHint = () => {
+      const spots = seamSpots(this.spec, 7, this.seamsOpen);
+      let best = null, bd = Infinity;
+      for (const s of spots) {
+        const d = Math.hypot(this.cap.x - s.x, this.cap.z - s.z);
+        if (d < bd) { bd = d; best = s; }
+      }
+      if (bd <= FIX_REACH * this.shipFrame.scale) return 'THE SEAM WEEPS AT YOUR FEET \u2014 E drives the oakum home';
+      return `THE HOLD \u2014 a seam weeps ${best.x < 0 ? 'to port' : 'to starboard'}, `
+        + `${best.z > this.cap.z ? 'forward' : 'aft'} \u00b7 E at the frame mends it`;
+    };
     const hintText = this.mode === 'below'
-      ? 'THE HOLD \u2014 WASD to walk her \u00b7 E \u2014 up the ladder \u00b7 T \u2014 straight to the tiller'
+      ? (this.seamsOpen > 0 ? seamHint()
+        : 'THE HOLD \u2014 WASD to walk her \u00b7 E \u2014 up the ladder \u00b7 T \u2014 straight to the tiller')
       : this.mode === 'ashore'
       ? (this.hoardReady
         ? 'E \u2014 THE DRAGON\u2019S HOARD'
@@ -2667,6 +3200,12 @@ class Game {
         ? 'E \u2014 BOARD THE FLYING DUTCHMAN!'
       : this.rescueReady && this.rescueReady.length
         ? `E \u2014 HAUL ${this.rescueReady.length > 1 ? 'THE SURVIVORS' : 'THE SURVIVOR'} FROM THE WATER`
+      : this.lines && this.lineState?.bit
+        ? 'E \u2014 STRIKE \u2014 SOMETHING TAKES THE LINE!'
+      : this.nearFlotsam('raft', RAFT_R)
+        ? 'E \u2014 lay alongside slow and take them off the raft'
+      : this.nearFlotsam('bottle', BOTTLE_R)
+        ? 'E \u2014 fish the BOTTLE out of the water'
       : boardHint()
         ? boardHint()
         : this.captureable
@@ -2699,7 +3238,7 @@ class Game {
                 ? (beaches(this.spec)
                   ? 'BEACHED \u2014 O poles her off \u00b7 A/D swings her \u00b7 T leaves the tiller, E steps ashore'
                   : 'ANCHORED OFF \u2014 O runs the kedge out \u00b7 T, then E to send the longboat ashore')
-                : 'A/D — steer · W/S — sheet · F — fire · R — shot · Q — anchor · T — leave the tiller · M — chart')
+                : 'A/D — steer · W/S — sheet · F — fire · R — shot · Q — anchor · T — leave the tiller · M — chart · U — the log')
               : anchored
                 ? `E \u2014 put in at ${this.port.haven.name} \u00b7 T \u2014 take the tiller`
                 : this.canStepAshore()
@@ -2714,7 +3253,7 @@ class Game {
                       ? 'E \u2014 go below \u00b7 T \u2014 take the tiller \u00b7 WASD \u2014 walk the deck'
                     : this.anchorDown
                       ? 'AT ANCHOR \u2014 Q \u2014 weigh anchor \u00b7 T \u2014 the tiller \u00b7 WASD \u2014 walk the deck'
-                    : 'T — take the tiller · WASD — walk the deck · F — fire · Q — anchor · M — chart · B — the crew · N — stars · L — log';
+                    : 'T — take the tiller · WASD — walk the deck · F — fire · Q — anchor · M — chart · B — the crew · N — stars · L — log · P — fish · K — drill';
     this.hud.hint.textContent = this.hullDef.wheel
       ? hintText.replace(/tiller/g, 'wheel') : hintText;
     // below decks the hold is windowless: the sea and its foam would only

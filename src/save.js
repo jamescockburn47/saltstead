@@ -6,6 +6,8 @@ export const SAVE_VERSION = 1;
 const DB = 'saltstead', STORE = 'meta', KEY = 'game';
 
 import { acceptLog } from './shiplog.js';
+import { acceptSurvey } from './survey.js';
+import { SEAM_MAX } from './carpenter.js';
 
 const clamp01 = (v, dflt) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : dflt);
 
@@ -14,7 +16,10 @@ const clamp01 = (v, dflt) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) :
 // — additive fields, version stays 1 (older saves simply read as a poor
 // pirate with no map, no hands — the sloop sails solo — no prizes, a blank
 // log, nothing in Davy Jones' vault, no legends won, the starting sloop,
-// and the black flag: every save before the two services WAS a pirate)
+// and the black flag: every save before the two services WAS a pirate).
+// The passage layer's fields (docs/PASSAGE.md) are additive too: an old
+// save reads as a green, unremarkable, unsurveyed ship with no name on the
+// sea and nothing in the fish well.
 export function snapshotSave(ship, skyT, loot = {}) {
   return {
     version: SAVE_VERSION,
@@ -36,6 +41,15 @@ export function snapshotSave(ship, skyT, loot = {}) {
     banked: loot.banked || 0,           // consigned to the Locker, forever
     won: Array.isArray(loot.won) ? loot.won : [], // one-shot legends claimed
     anchorDown: !!loot.anchorDown,      // riding to her anchor when saved
+    heat: clamp01(loot.heat, 0),        // how loudly the sea talks about you
+    gunnery: clamp01(loot.gunnery, 0),  // the drilled crews' edge
+    morale: clamp01(loot.morale, 0.7),  // the ship's temper
+    fishCatch: loot.fishCatch || 0,     // the well, sold at the next port
+    seamWear: Number.isFinite(loot.seamWear) ? Math.max(0, loot.seamWear) : 0,
+    seamsOpen: loot.seamsOpen || 0,     // seams weeping below decks
+    surveyed: Array.isArray(loot.surveyed) ? loot.surveyed : [],
+    surveySold: loot.surveySold || 0,   // cells already paid for
+    bests: loot.bests || null,          // the brag sheet's record passage
     savedAt: Date.now(),
   };
 }
@@ -68,6 +82,19 @@ export function acceptSave(meta) {
     banked: Number.isFinite(meta.banked) && meta.banked >= 0 ? Math.round(meta.banked) : 0,
     won: Array.isArray(meta.won) ? meta.won.filter((w) => typeof w === 'string').slice(0, 32) : [],
     anchorDown: !!meta.anchorDown,
+    heat: clamp01(meta.heat, 0),
+    gunnery: clamp01(meta.gunnery, 0),
+    morale: clamp01(meta.morale, 0.7),
+    fishCatch: Number.isFinite(meta.fishCatch) && meta.fishCatch >= 0 ? Math.round(meta.fishCatch) : 0,
+    seamWear: Number.isFinite(meta.seamWear) && meta.seamWear >= 0 ? meta.seamWear : 0,
+    seamsOpen: Number.isFinite(meta.seamsOpen)
+      ? Math.max(0, Math.min(SEAM_MAX, Math.round(meta.seamsOpen))) : 0,
+    surveyed: acceptSurvey(meta.surveyed),
+    surveySold: Number.isFinite(meta.surveySold) && meta.surveySold >= 0
+      ? Math.round(meta.surveySold) : 0,
+    bests: (meta.bests && Number.isFinite(meta.bests.kmMin) && Number.isFinite(meta.bests.km)
+      && Number.isFinite(meta.bests.min))
+      ? { kmMin: meta.bests.kmMin, km: meta.bests.km, min: meta.bests.min } : null,
     savedAt: meta.savedAt || 0,
   };
 }

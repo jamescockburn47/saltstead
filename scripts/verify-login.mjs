@@ -141,6 +141,29 @@ const fakeStorage = () => {
   const tornBook = acceptSave({ ...snapshotSave(ship, 0), log: [page, { d: 'x' }, 7] });
   ok(tornBook.log.length === 1, 'mangled log pages are torn out, good ones kept');
 
+  // the passage layer's fields (docs/PASSAGE.md) — additive, vetted, clamped
+  const salty = acceptSave(snapshotSave(ship, 0, {
+    heat: 0.6, gunnery: 0.4, morale: 0.9, fishCatch: 55,
+    seamWear: 20, seamsOpen: 1, surveyed: ['100:-8', '101:-8'], surveySold: 1,
+    bests: { kmMin: 11.2, km: 120, min: 10.7 },
+  }));
+  ok(salty.heat === 0.6 && salty.gunnery === 0.4 && salty.morale === 0.9,
+    'heat, gunnery and temper survive the round-trip');
+  ok(salty.fishCatch === 55 && salty.seamWear === 20 && salty.seamsOpen === 1,
+    'the well and the weeping seams survive');
+  ok(salty.surveyed.length === 2 && salty.surveySold === 1,
+    'the survey book and its sold count survive');
+  ok(salty.bests && salty.bests.kmMin === 11.2, 'the brag sheet survives');
+  ok(bare.heat === 0 && bare.gunnery === 0 && Math.abs(bare.morale - 0.7) < 1e-9
+    && bare.fishCatch === 0 && bare.seamsOpen === 0 && bare.surveyed.length === 0
+    && bare.bests === null,
+    'an old save reads as a green, unremarkable, unsurveyed ship');
+  const salted = acceptSave({ ...snapshotSave(ship, 0), heat: 9, gunnery: -1,
+    morale: 'x', seamsOpen: 99, surveyed: 'junk', bests: { kmMin: 'x' } });
+  ok(salted.heat === 1 && salted.gunnery === 0 && Math.abs(salted.morale - 0.7) < 1e-9
+    && salted.seamsOpen <= 4 && salted.surveyed.length === 0 && salted.bests === null,
+    'mangled passage fields clamp or drop, never crash');
+
   ok(acceptSave(null) === null, 'no save = null');
   ok(acceptSave({}) === null, 'junk = null');
   ok(acceptSave({ ...meta, version: SAVE_VERSION + 1 }) === null,
