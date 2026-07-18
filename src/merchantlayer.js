@@ -281,14 +281,16 @@ export class MerchantLayer {
 
   // the Admiralty answers a signal from an empty sea: a corvette joins the
   // lanes at (x, z) — session-local, like any battle outcome; the spawn
-  // table's world trade is untouched. Returns her id.
-  spawnEscort(x, z, yaw = 0) {
+  // table's world trade is untouched. Returns her id. The stern chase
+  // (chase.js) lifts hunters through the same berth: type picks the flag —
+  // a corvette for a hot pirate, a raider for a fat King's ship.
+  spawnEscort(x, z, yaw = 0, type = 'navy') {
     const id = `esc-${++this.escortN}`;
-    const def = NPC_HULLS.navy;
+    const def = NPC_HULLS[type] || NPC_HULLS.navy;
     const built = buildShip(def);
     const seed = idHash(id);
     const F = frameFor(def.spec);
-    for (const [i, p] of crewPosts(F.deck, NPC_HANDS.navy, seed).entries()) {
+    for (const [i, p] of crewPosts(F.deck, NPC_HANDS[type] ?? NPC_HANDS.navy, seed).entries()) {
       const hand = buildHand(seed + i);
       hand.position.set(p.x, F.deck.y, p.z);
       built.group.add(hand);
@@ -296,7 +298,7 @@ export class MerchantLayer {
     this.scene.add(built.group);
     this.live.set(id, {
       m: {
-        id, type: 'navy', x, z, yaw, speed: TYPES.navy.cruise,
+        id, type, x, z, yaw, speed: (TYPES[type] || TYPES.navy).cruise,
         looted: false, routed: false, purse: 0,
       },
       group: built.group, setSail: built.setSail, setLantern: built.setLantern,
