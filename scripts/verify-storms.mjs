@@ -1,7 +1,10 @@
 // verify-storms: cyclones spin the right way per hemisphere, a calm eye inside a
 // gale eyewall, a storm sky and a risen sea within the system and fair water
 // beyond, a danger disc at the heart, and the whole thing deterministic in t.
-import { stormsAt, stormWindAt, stormFieldAt, vortexToward } from '../src/storms.js';
+import {
+  stormsAt, stormWindAt, stormFieldAt, vortexToward,
+  stormBandAt, canvasRisk, BAND_GAIN, REEF_WIND, REEF_TRIM, STORM_DANGER_R,
+} from '../src/storms.js';
 import { latLonToWorld } from '../src/earth.js';
 
 let failed = 0;
@@ -35,5 +38,28 @@ ok(vortexToward(100, 0, -1).z > 0, 'south storms spin CW (mirrored)');
   ok(stormFieldAt(s.x, s.z, 0).danger > 0, 'the eye is dangerous water');
 }
 
+// THE OUTER BAND (passage layer): fast water in the ring between the danger
+// disc and the rim — nothing outside, nothing in the dangerous heart
+{
+  const s = stormsAt(0).reduce((a, b) => (b.intensity > a.intensity ? b : a));
+  const far = latLonToWorld(58, -30);
+  const mid = STORM_DANGER_R + (s.r - STORM_DANGER_R) * 0.5;
+  ok(stormBandAt(s.x + mid, s.z, 0) > 1.05, 'the outer band carries fast water');
+  ok(stormBandAt(s.x + mid, s.z, 0) <= BAND_GAIN, 'bounded by the gamble’s promise');
+  ok(stormBandAt(s.x, s.z, 0) === 1, 'no free ride in the dangerous heart');
+  ok(stormBandAt(far.x, far.z, 0) === 1, 'and none on a fair sea');
+  ok(stormBandAt(s.x + mid, s.z, 0) === stormBandAt(s.x + mid, s.z, 0), 'deterministic');
+}
+
+// SHORTEN SAIL OR TEAR CANVAS: no risk under the reef wind or at an honest
+// reef; pressing harder in more wind pays more rig
+{
+  ok(canvasRisk(REEF_WIND - 1, 1) === 0, 'under the reef wind the canvas holds');
+  ok(canvasRisk(30, REEF_TRIM) === 0, 'an honest reef holds in any gale');
+  const easy = canvasRisk(22, 0.7), hard = canvasRisk(28, 1);
+  ok(easy > 0 && hard > easy, `pressing harder in more wind pays more rig (${easy.toFixed(4)} < ${hard.toFixed(4)})`);
+  ok(hard < 0.02, 'but even full press is a gamble, not an execution');
+}
+
 if (failed) { console.error(`verify-storms: ${failed} FAILED`); process.exit(1); }
-console.log('verify-storms: OK — cyclones spin true, calm eye + gale eyewall, storm sky + risen sea, danger disc, deterministic');
+console.log('verify-storms: OK — cyclones spin true, calm eye + gale eyewall, danger disc, the band pays, the reef rule holds, deterministic');

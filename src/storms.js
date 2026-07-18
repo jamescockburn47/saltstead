@@ -80,6 +80,40 @@ export function stormWindAt(x, z, t) {
   return { from: Math.atan2(-w.x, -w.z), speed: Math.max(0, speed) };
 }
 
+// ---- storm SAILING (docs/PASSAGE.md) — the captain's gamble ----
+// The OUTER BAND, between the danger disc and the rim, carries the storm's
+// own wind and sea in a ring: ride it and the gait multiplies toward
+// BAND_GAIN. The helm watch will never do this for you — it heaves to at
+// danger ahead; band riding is wheel work (T), eyes open, rig at stake.
+export const BAND_GAIN = 1.35;
+
+export function stormBandAt(x, z, t) {
+  let gain = 1;
+  for (const s of stormsAt(t)) {
+    const d = Math.hypot(dxWrap(s.x, x), z - s.z);
+    if (d >= s.r || d <= STORM_DANGER_R) continue;
+    // 0 at both edges of the band, full gain mid-band
+    const u = (d - STORM_DANGER_R) / (s.r - STORM_DANGER_R);
+    const ring = Math.sin(u * Math.PI);
+    gain = Math.max(gain, 1 + (BAND_GAIN - 1) * ring * s.intensity);
+  }
+  return gain;
+}
+
+// SHORTEN SAIL OR TEAR CANVAS: above REEF_WIND, sheeted harder than
+// REEF_TRIM, the rig pays per second — ramping with both the excess wind
+// and the excess sheet. The helmsman reefs himself (main.js clamps his trim
+// in a gale); the captain at the wheel may press harder, and pays in rig.
+export const REEF_WIND = 19;  // m/s — a whole gale wants shortened sail
+export const REEF_TRIM = 0.5; // the deepest honest reef
+
+export function canvasRisk(windSpeed, trim) {
+  if (windSpeed <= REEF_WIND || trim <= REEF_TRIM) return 0;
+  const overWind = Math.min(1, (windSpeed - REEF_WIND) / 12);
+  const overSheet = (trim - REEF_TRIM) / (1 - REEF_TRIM);
+  return 0.012 * overWind * overSheet; // rig fraction per second, full press in a hurricane
+}
+
 // sea/sky/hazard at a point: 'storm' state inside, a raised sea and gloom near
 // the eye, and a danger [0..1] for the eyewall (helm heaves-to; routing avoids)
 export function stormFieldAt(x, z, t) {
