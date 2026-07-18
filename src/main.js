@@ -2761,3 +2761,8 @@ bootTitle({
     window.saltstead = new Game(save, auth, side); // the live handle, moorstead-style
   },
 });
+
+// PWA: the offline shell. Prod only — dev has no sw.js and must never cache.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
