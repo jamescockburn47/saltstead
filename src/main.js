@@ -2766,3 +2766,23 @@ bootTitle({
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
+
+// Silk on a Fire tablet never volunteers an install banner (no beforeinstallprompt),
+// so a first visit gets one quiet steer toward Silk's own menu. Silk-only, never in
+// the installed app, shown once, tap or 20s dismisses it.
+try {
+  const installed = matchMedia('(display-mode: standalone)').matches
+    || matchMedia('(display-mode: fullscreen)').matches;
+  if (/\bSilk\b/.test(navigator.userAgent) && !installed && !localStorage.getItem('saltstead-install-nudge')) {
+    localStorage.setItem('saltstead-install-nudge', '1');
+    const n = document.createElement('div');
+    n.id = 'install-nudge';
+    n.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:200;max-width:min(92vw,560px);background:rgba(10,22,34,.94);border:1px solid #e8c46a;border-radius:10px;padding:12px 18px;color:#eef6fb;font-size:14px;line-height:1.5;cursor:pointer;font-family:Georgia,serif;';
+    n.innerHTML = 'Put Saltstead on the home screen: Silk menu (&#8942;) &rarr; <b>Add to Home Screen</b> &mdash; then she sails offline too. <i style="opacity:.7;font-size:12px">(tap to dismiss)</i>';
+    const bye = () => n.remove();
+    n.addEventListener('click', bye);
+    n.addEventListener('touchstart', bye);
+    document.body.appendChild(n);
+    setTimeout(bye, 20000);
+  }
+} catch { /* storage blocked - skip the nudge, never block boot */ }
