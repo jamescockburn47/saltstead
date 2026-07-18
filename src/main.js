@@ -232,6 +232,7 @@ class Game {
     this.riseHoldLight(this.hullDef);
 
     this.warden = isWarden(auth); // the harbourmaster's own standing
+    if (this.warden) this.crew = this.hullDef.berths; // a full watch, so a hand answers the chart
     this.captain = buildCaptain(this.warden);
     this.cap = { x: 0, z: -2.2, facing: 0, moving: false };
     this.captain.group.position.set(this.cap.x, this.shipFrame.deck.y, this.cap.z);
@@ -265,6 +266,7 @@ class Game {
       if (e.code === 'KeyR' && !e.repeat) this.toggleShot();
       if (e.code === 'KeyQ' && !e.repeat) this.toggleAnchor();
       if (e.code === 'KeyY' && !e.repeat) this.wardenMaterialise();
+      if (e.code === 'KeyJ' && !e.repeat) this.wardenTeleport();
       if (e.code === 'KeyG' && !e.repeat) this.signalSquadron();
       if (e.code === 'KeyV' && !e.repeat) this.toggleQuality();
       if (e.code === 'KeyC' && !e.repeat) this.belayCourse();
@@ -1200,9 +1202,29 @@ class Game {
     this.setHull(def);
     this.hull.rig = 1; this.hull.hull = 1;
     this.crippled = false;
+    this.crew = this.hullDef.berths; // a full watch on every materialised hull
     this.say(`THE WARDEN\u2019S WRIT \u2014 a ${def.name.toUpperCase()} materialises beneath you `
       + `(${def.guns} gun${def.guns > 1 ? 's' : ''} a side, ${def.berths} berths)`, 6);
     this.logEvent(`The warden's writ raised a ${def.name} from the sea`);
+    this.persist();
+  }
+
+  // Y's sibling: J steps the warden to wherever the chart is marked. Set a course
+  // on the world chart (M) and press J to cross the sea in a stride \u2014 any water,
+  // for testing the helmsman, the currents, the wrap, and the storms.
+  wardenTeleport() {
+    if (!this.warden || this.portui.open) return;
+    if (this.mode === 'ashore') { this.say('Come back aboard first, Warden', 3); return; }
+    if (!this.course) { this.say('Mark a spot on the chart (M) first, then J steps you to it', 5); return; }
+    this.ship.x = wrapX(this.course.x);
+    this.ship.z = this.course.z;
+    this.ship.speed = 0;
+    this.course = null; this.route = null; this.maps.course = null;
+    this.courseFromPilotage = false; this.handbackMode = null; this.handbackReason = '';
+    this.geoClock = 0; // re-sample coast, zone and weather at the new berth at once
+    const ll = worldToLatLon(this.ship.x, this.ship.z);
+    this.say(`THE WARDEN\u2019S WRIT \u2014 you stride across the sea to ${ll.lat.toFixed(1)}\u00b0, ${ll.lon.toFixed(1)}\u00b0`, 6);
+    this.logEvent(`The warden stepped to ${ll.lat.toFixed(1)}, ${ll.lon.toFixed(1)}`);
     this.persist();
   }
 
