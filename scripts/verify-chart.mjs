@@ -1,7 +1,10 @@
 // verify-chart: the captain's charts tell the truth — the world map shows
 // the continents where they are, the local chart matches the real coastline,
 // and positions project to the right pixels.
-import { globalChartPixels, localChartPixels, chartXY, SEA_RGB, LAND_RGB, RIVER_RGB } from '../src/chart.js';
+import {
+  globalChartPixels, localChartPixels, chartXY, SEA_RGB, LAND_RGB, RIVER_RGB,
+  beginFineWorld, stepFineWorld, finishFineWorld,
+} from '../src/chart.js';
 import { isLand } from '../src/earth.js';
 
 let failed = 0;
@@ -30,6 +33,42 @@ for (const [name, lat, lon, dry] of spots) {
 // determinism (invariant 6)
 const world2 = globalChartPixels(720, 360);
 ok(world.data.every((v, i) => v === world2.data[i]), 'world chart deterministic');
+
+// ---- the zoomed world view (chartXY's ppd form) ----
+{
+  // at zoom 1, centred, the ppd view IS the classic sheet
+  const zv = { w: 720, h: 360, ppd: 720 / 360, latC: 0, lonC: 0 };
+  for (const [, lat, lon] of spots) {
+    const a = chartXY(lat, lon, wview), b = chartXY(lat, lon, zv);
+    ok(Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.y - b.y) < 1e-9,
+      `ppd view at zoom 1 matches the sheet (${lat},${lon})`);
+  }
+  // zoomed 4x on the Irish Sea: the centre projects to the canvas centre,
+  // a degree is ppd pixels, and lon wraps the short way about the centre
+  const z4 = { w: 720, h: 360, ppd: 8, latC: 53.6, lonC: -4.9 };
+  const c = chartXY(53.6, -4.9, z4);
+  ok(Math.abs(c.x - 360) < 1e-9 && Math.abs(c.y - 180) < 1e-9, 'the zoom centre is the canvas centre');
+  const e = chartXY(53.6, -3.9, z4);
+  ok(Math.abs(e.x - 368) < 1e-9, 'a degree east is ppd pixels');
+  const seam = { w: 720, h: 360, ppd: 8, latC: 0, lonC: 179 };
+  ok(chartXY(0, -179, seam).x - 360 === 2 * 8, 'the seam wraps the short way');
+}
+
+// ---- the fine sheet bakes by instalments and is deterministic ----
+{
+  const whole = beginFineWorld(180, 90);
+  while (!stepFineWorld(whole, 90)) ;
+  const a = finishFineWorld(whole);
+  const bits = beginFineWorld(180, 90);
+  while (!stepFineWorld(bits, 7)) ; // ragged instalments
+  const b = finishFineWorld(bits);
+  ok(a.data.length === 180 * 90 * 4, 'fine sheet RGBA sizing');
+  ok(a.data.every((v, i) => v === b.data[i]), 'instalment size never changes the sheet');
+  const fv = { w: 180, h: 90 };
+  const sah = chartXY(23, 10, fv), pac = chartXY(0, -150, fv);
+  ok(isDry(a, sah.x, sah.y), 'fine sheet: the Sahara is land');
+  ok(isSea(a, pac.x, pac.y), 'fine sheet: the mid-Pacific is sea');
+}
 
 // ---- local chart ----
 // around Port Royal: Jamaica dry to the north, Caribbean wet to the south

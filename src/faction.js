@@ -68,10 +68,12 @@ export function canBoardType(type, factionId) {
 // waters: the black flag off Port Royal (the pirate republic's harbour),
 // the King's commission at SPITHEAD — the fleet anchorage in the lee of
 // the Isle of Wight, the most Royal Navy water on earth. (NOT the Bristol
-// Channel: the whole of it sits inside the dragons-wales legend zone, and
-// a stooping dragon is the wrong welcome for a fresh captain.) yaw is the
-// bow's opening heading (0 = south; pirate 0.5 faces the Jamaican coast,
-// navy 4.7 points her west down the Channel toward open water).
+// Channel: when Spithead was chosen the dragons-wales zone reached it, and
+// a stooping dragon is the wrong welcome for a fresh captain — the zone is
+// since confined to the Irish Sea (legendfx ZONE_C), but Spithead is the
+// better anchorage regardless.) yaw is the bow's opening heading (0 =
+// south; pirate 0.5 faces the Jamaican coast, navy 4.7 points her west
+// down the Channel toward open water).
 export function homeAnchorage(factionId) {
   return factionId === 'navy'
     ? { name: 'Spithead', lat: 50.5, lon: -1.0, yaw: 4.7 }

@@ -72,6 +72,38 @@ export function globalChartPixels(w = 720, h = 360) {
   return { w, h, data };
 }
 
+// ---- the FINE world sheet, baked a few rows a frame ----
+// The 0.5-degree mask sheet blurs the moment the chart zooms; the REAL
+// coastline (isLand) at 2880x1440 costs whole seconds — far too long for a
+// frame. So the fine sheet is a JOB: begin it, feed it rows whenever the
+// caller has frame budget to spare, finish it into pixels when the last
+// row is baked. Deterministic: any step sizes produce the same sheet.
+export function beginFineWorld(w = 2880, h = 1440) {
+  return { w, h, land: new Uint8Array(w * h), y: 0 };
+}
+
+// bake the next `rows` rows of real coastline; true when every row is baked
+export function stepFineWorld(job, rows = 1) {
+  const { w, h, land } = job;
+  const yEnd = Math.min(h, job.y + rows);
+  for (; job.y < yEnd; job.y++) {
+    const lat = 90 - ((job.y + 0.5) * 180) / h;
+    for (let x = 0; x < w; x++) {
+      const lon = -180 + ((x + 0.5) * 360) / w;
+      land[job.y * w + x] = isLand(lat, lon) ? 1 : 0;
+    }
+  }
+  return job.y >= h;
+}
+
+// paint + ink the finished job into chart pixels (the same aged-paper look)
+export function finishFineWorld(job) {
+  const { w, h, land } = job;
+  const data = paint(land, w, h);
+  inkRivers(data, land, w, h, (lat, lon) => chartXY(lat, lon, { w, h }));
+  return { w, h, data };
+}
+
 // a square window of the real coastline centred on the ship. spanDeg is the
 // full width in degrees — the game world is unprojected (x = lon·M_PER_DEG),
 // so equal degree spans are equal game metres and the window stays square.
@@ -90,9 +122,16 @@ export function localChartPixels(latC, lonC, spanDeg = 9, n = 96) {
   return { w: n, h: n, data };
 }
 
-// lat/lon -> pixel. view: { w, h } for the world, or
-// { w, h, latC, lonC, spanDeg } for a local window. May land outside 0..w.
+// lat/lon -> pixel. view: { w, h } for the world, { w, h, latC, lonC,
+// spanDeg } for a local window, or { w, h, ppd, latC, lonC } for the ZOOMED
+// world chart — ppd is pixels per degree (both axes; the game world is
+// unprojected) and lon wraps the short way about the view centre. May land
+// outside 0..w.
 export function chartXY(lat, lon, view) {
+  if (view.ppd !== undefined) {
+    const dl = ((lon - view.lonC + 540) % 360) - 180;
+    return { x: view.w / 2 + dl * view.ppd, y: view.h / 2 + (view.latC - lat) * view.ppd };
+  }
   if (view.spanDeg === undefined) {
     return { x: ((lon + 180) / 360) * view.w, y: ((90 - lat) / 180) * view.h };
   }

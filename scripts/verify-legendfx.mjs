@@ -32,6 +32,21 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
   ok(!inZone(45, -35, 'kraken-deep'), 'the Kraken keeps to her deeps');
 }
 
+// the Welsh dragons hunt the IRISH SEA and nothing beyond it: Dublin's
+// water and Liverpool Bay are theirs; the Celtic Sea, the Clyde and the
+// Channel approaches are not (playtest: 'the dragon comes too far')
+{
+  const dragon = (lat, lon) => { const z = legendAt(lat, lon); return !!(z && z.legend.id === 'dragons-wales'); };
+  ok(dragon(53.35, -5.5), 'mid-Irish Sea is dragon water');
+  ok(dragon(53.4, -5.9), 'the Dublin approaches are dragon water');
+  ok(dragon(53.5, -3.6), 'Liverpool Bay is dragon water');
+  ok(dragon(52.3, -5.6), "St George's Channel is dragon water");
+  ok(!dragon(51.2, -6.3), 'the Celtic Sea is not');
+  ok(!dragon(55.6, -5.2), 'the Firth of Clyde is not');
+  ok(!dragon(50.0, -5.5), "the Channel approaches off Land's End are not");
+  ok(!dragon(51.3, -3.6), 'the Bristol Channel is not');
+}
+
 // the Triangle: depth grows inward, the lies are bounded, deterministic
 {
   ok(triangleDepth(0, 2000) === 1, 'the heart of the triangle is depth 1');

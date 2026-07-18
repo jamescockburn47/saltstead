@@ -17,7 +17,7 @@ export const ZONE_R = {
   'bermuda-triangle': 3200,
   'corryvreckan': 240,
   'kraken-deep': 900,
-  'dragons-wales': 1400,
+  'dragons-wales': 800,
   'flying-dutchman': 1200,
   'davy-jones': 600,
   'plate-fleet': 320,
@@ -35,6 +35,17 @@ export const ZONE_R = {
   'selkie-skerries': 320,
   'cape-horn': 2200,
   'ryugu': 340,
+};
+
+// A zone's HUNTING WATER may be recentred off its story anchor. The Welsh
+// dragons NEST on Snowdonia — the legend's own lat/lon, which stays the
+// chart mark, the crag and the hoard (zoneOf) — but they hunt the IRISH
+// SEA, whose middle is not the nest: centred on the nest, any circle wide
+// enough for Dublin's water also reached the Celtic Sea and the Clyde
+// (playtest: 'the dragon comes too far'). Membership (legendAt / inZone)
+// reads this; anchors do not. Keyed by id, absent = the story anchor.
+export const ZONE_C = {
+  'dragons-wales': { lat: 53.6, lon: -4.9 }, // the middle of the Irish Sea
 };
 
 // ---- the zone FAMILIES: one mechanic, many waters ----
@@ -70,7 +81,8 @@ const ZONED = LEGENDS.filter((l) => ZONE_R[l.id]);
 export function legendAt(lat, lon) {
   let best = null;
   for (const l of ZONED) {
-    const d = Math.hypot((lat - l.lat) * M_PER_DEG, (lon - l.lon) * M_PER_DEG);
+    const c = ZONE_C[l.id] || l; // the hunting water, where it isn't the nest
+    const d = Math.hypot((lat - c.lat) * M_PER_DEG, (lon - c.lon) * M_PER_DEG);
     const r = ZONE_R[l.id];
     if (d <= r && (!best || d - r < best.dist - best.r)) best = { legend: l, dist: d, r };
   }
@@ -80,7 +92,8 @@ export function legendAt(lat, lon) {
 export function inZone(lat, lon, id) {
   const l = ZONED.find((z) => z.id === id);
   if (!l) return false;
-  return Math.hypot((lat - l.lat) * M_PER_DEG, (lon - l.lon) * M_PER_DEG) <= ZONE_R[id];
+  const c = ZONE_C[id] || l; // same membership water legendAt reads
+  return Math.hypot((lat - c.lat) * M_PER_DEG, (lon - c.lon) * M_PER_DEG) <= ZONE_R[id];
 }
 
 // a zone's anchor for systems that scatter things inside it:

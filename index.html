@@ -40,7 +40,8 @@
     #worldmap { position: fixed; inset: 0; display: none; align-items: center;
       justify-content: center; background: rgba(8,14,20,.72); z-index: 10; }
     #worldmap canvas { width: min(92vw, 1440px); border: 2px solid rgba(58,44,28,.9);
-      border-radius: 4px; box-shadow: 0 8px 40px rgba(0,0,0,.6); image-rendering: pixelated; }
+      border-radius: 4px; box-shadow: 0 8px 40px rgba(0,0,0,.6); image-rendering: pixelated;
+      touch-action: none; cursor: crosshair; }
     #worldmap .cap { position: absolute; bottom: 6vh; width: 100%; text-align: center;
       color: #eef6fb; font-size: 13px; letter-spacing: 1px; opacity: .8; }
     /* the chart's own way out — the only exit that exists on a phone */
@@ -345,7 +346,7 @@
   <canvas id="minimap" width="296" height="296"></canvas>
   <div id="worldmap"><canvas width="1440" height="720"></canvas>
     <button id="worldmapclose" aria-label="close the chart">✕</button>
-    <div class="cap">click the chart to set a course · M, Esc, ✕ or tap outside — close</div></div>
+    <div class="cap">click the chart to set a course · scroll or pinch — zoom · drag — pan · M, Esc, ✕ or tap outside — close</div></div>
   <div id="starchart"><canvas width="900" height="900"></canvas>
     <div class="cap">—</div></div>
   <div id="crewchat"><div class="book">

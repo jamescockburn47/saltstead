@@ -7,7 +7,10 @@
 // Ship is a heading arrow; legends are inked marks (X for havens' rivals too —
 // every row of legends.js lands on both charts, that's the point of a chart).
 
-import { globalChartPixels, localChartPixels, chartXY } from './chart.js';
+import {
+  globalChartPixels, localChartPixels, chartXY,
+  beginFineWorld, stepFineWorld, finishFineWorld,
+} from './chart.js';
 import { LEGENDS } from './legends.js';
 import { PORTS } from './ports.js';
 
@@ -18,6 +21,7 @@ const INK = '#3a2c1c', BLOOD = '#8c2f22';
 const LOCAL_SPAN = 9;      // degrees across the minimap window
 const LOCAL_N = 96;        // chart resolution
 const REBUILD_DEG = LOCAL_SPAN / 10; // recentre after drifting a tenth of the window
+const MAX_ZOOM = 8;        // the world chart zooms to 8x (45 degrees across)
 
 function blit(img) {
   const c = document.createElement('canvas');
@@ -82,6 +86,10 @@ export class MapUI {
     // the world chart never changes: bake it once
     this.worldImg = globalChartPixels(720, 360);
     this.worldBase = blit(this.worldImg);
+    // the FINE sheet (real coastline at 2880x1440) is baked a row a frame
+    // while the chart is open — the mask sheet serves until the ink dries
+    this.fineJob = null;
+    this.fineBase = null;
 
     this.localView = null;   // { w, h, latC, lonC, spanDeg }
     this.localBase = null;
@@ -110,14 +118,108 @@ export class MapUI {
     this.routeLeg = 0;    // the ACTIVE leg (main.js syncs it) — passed marks aren't drawn
     this.onCourse = null; // main.js hangs the handler here
     this.worldCanvas.addEventListener('click', (e) => {
-      if (!this.onCourse) return;
-      const r = this.worldCanvas.getBoundingClientRect();
-      const px = ((e.clientX - r.left) / r.width) * this.worldCanvas.width;
-      const py = ((e.clientY - r.top) / r.height) * this.worldCanvas.height;
-      const lon = (px / this.worldCanvas.width) * 360 - 180;
-      const lat = 90 - (py / this.worldCanvas.height) * 180;
-      this.onCourse(lat, lon);
+      if (!this.onCourse || this._dragged) return;
+      const p = this.toCanvasXY(e);
+      const ll = this.worldLatLonAt(p.x, p.y);
+      this.onCourse(ll.lat, ll.lon);
     });
+
+    // ---- ZOOM AND PAN: scroll or pinch to zoom, drag to pan ----
+    // The view is { zoom, centre }: zoom 1 is the whole sheet exactly as it
+    // always was; zoomed, the projection is uniform pixels-per-degree
+    // (chartXY's ppd form) so a click still inverts exactly. A drag or a
+    // pinch marks _dragged, and the click handler above stands down.
+    this.worldZoom = 1;
+    this.worldC = { lat: 0, lon: 0 };
+    this._wPtrs = new Map();
+    this._dragged = false;
+    const wc = this.worldCanvas;
+    wc.addEventListener('wheel', (e) => {
+      if (!this.worldOpen) return;
+      e.preventDefault();
+      const p = this.toCanvasXY(e);
+      const before = this.worldLatLonAt(p.x, p.y);
+      this.worldZoom = Math.max(1, Math.min(MAX_ZOOM, this.worldZoom * Math.exp(-e.deltaY * 0.0016)));
+      this.holdUnder(p, before); // the water under the cursor stays put
+    }, { passive: false });
+    wc.addEventListener('pointerdown', (e) => {
+      this._wPtrs.set(e.pointerId, this.toCanvasXY(e));
+      if (this._wPtrs.size === 1) this._dragged = false;
+      wc.setPointerCapture(e.pointerId);
+    });
+    wc.addEventListener('pointermove', (e) => {
+      if (!this._wPtrs.has(e.pointerId)) return;
+      const p = this.toCanvasXY(e);
+      if (this._wPtrs.size === 1) {
+        const prev = this._wPtrs.get(e.pointerId);
+        const dx = p.x - prev.x, dy = p.y - prev.y;
+        if (Math.hypot(dx, dy) > 4) this._dragged = true;
+        if (this._dragged) {
+          const ppd = (wc.width / 360) * this.worldZoom;
+          this.worldC.lon -= dx / ppd;
+          this.worldC.lat += dy / ppd;
+          this.clampWorldC();
+        }
+        this._wPtrs.set(e.pointerId, p);
+      } else if (this._wPtrs.size === 2) {
+        // pinch: zoom about the midpoint, and pan as the midpoint moves
+        const ids = [...this._wPtrs.keys()];
+        const old = ids.map((id) => this._wPtrs.get(id));
+        this._wPtrs.set(e.pointerId, p);
+        const now = ids.map((id) => this._wPtrs.get(id));
+        const dOld = Math.hypot(old[1].x - old[0].x, old[1].y - old[0].y);
+        const dNew = Math.hypot(now[1].x - now[0].x, now[1].y - now[0].y);
+        const midOld = { x: (old[0].x + old[1].x) / 2, y: (old[0].y + old[1].y) / 2 };
+        const midNew = { x: (now[0].x + now[1].x) / 2, y: (now[0].y + now[1].y) / 2 };
+        const before = this.worldLatLonAt(midOld.x, midOld.y);
+        if (dOld > 0) this.worldZoom = Math.max(1, Math.min(MAX_ZOOM, this.worldZoom * (dNew / dOld)));
+        this.holdUnder(midNew, before);
+        this._dragged = true;
+      }
+    });
+    const endPtr = (e) => { this._wPtrs.delete(e.pointerId); };
+    wc.addEventListener('pointerup', endPtr);
+    wc.addEventListener('pointercancel', endPtr);
+  }
+
+  // event -> canvas pixel space (the canvas is CSS-scaled)
+  toCanvasXY(e) {
+    const r = this.worldCanvas.getBoundingClientRect();
+    return {
+      x: ((e.clientX - r.left) / r.width) * this.worldCanvas.width,
+      y: ((e.clientY - r.top) / r.height) * this.worldCanvas.height,
+    };
+  }
+
+  // the zoomed world view (chartXY's ppd form); zoom 1 = the classic sheet
+  worldView() {
+    const W = this.worldCanvas.width, H = this.worldCanvas.height;
+    return { w: W, h: H, ppd: (W / 360) * this.worldZoom, latC: this.worldC.lat, lonC: this.worldC.lon };
+  }
+
+  // canvas pixel -> { lat, lon } through the current view
+  worldLatLonAt(px, py) {
+    const v = this.worldView();
+    return {
+      lat: v.latC - (py - v.h / 2) / v.ppd,
+      lon: ((v.lonC + (px - v.w / 2) / v.ppd + 540) % 360) - 180,
+    };
+  }
+
+  // recentre so the given water stays under the given canvas point, then clamp
+  holdUnder(p, ll) {
+    const v = this.worldView();
+    this.worldC.lon = ll.lon - (p.x - v.w / 2) / v.ppd;
+    this.worldC.lat = ll.lat + (p.y - v.h / 2) / v.ppd;
+    this.clampWorldC();
+  }
+
+  // the chart never scrolls past the poles; lon wraps (the world is a cylinder)
+  clampWorldC() {
+    const v = this.worldView();
+    const m = Math.max(0, 90 - v.h / 2 / v.ppd);
+    this.worldC.lat = Math.max(-m, Math.min(m, this.worldC.lat));
+    this.worldC.lon = ((this.worldC.lon + 540) % 360) - 180;
   }
 
   // the course on a chart: the LAID ROUTE as a dashed line, ship through
@@ -138,6 +240,9 @@ export class MapUI {
       ? view.lonC + (((lon - view.lonC + 540) % 360) - 180)
       : lon;
     const P = marks.map((m) => chartXY(m.lat, wrapLon(m.lon), view));
+    // one full world turn in pixels — the seam-split threshold (the zoomed
+    // world's ppd view projects wider than its canvas)
+    const worldPx = view.ppd !== undefined ? 360 * view.ppd : view.w;
     ctx.strokeStyle = BLOOD;
     ctx.lineWidth = 1.5;
     ctx.setLineDash([5, 4]);
@@ -145,14 +250,12 @@ export class MapUI {
     let px = s.x, py = s.y;
     ctx.moveTo(px * k, py * k);
     for (const q of P) {
-      if (view.spanDeg === undefined && Math.abs(q.x - px) > view.w / 2) {
-        // the short way crosses the seam: out one edge, in at the other
-        const qx = q.x - Math.sign(q.x - px) * view.w; // q unwrapped into px's frame
-        const xOut = qx < px ? 0 : view.w;
-        const t = (xOut - px) / (qx - px);
-        const ySeam = py + (q.y - py) * t;
-        ctx.lineTo(xOut * k, ySeam * k);
-        ctx.moveTo((view.w - xOut) * k, ySeam * k);
+      if (view.spanDeg === undefined && Math.abs(q.x - px) > worldPx / 2) {
+        // the short way crosses the seam: run the leg out past one edge
+        // (the canvas clips it), then re-enter from beyond the other
+        const dir = Math.sign(q.x - px);
+        ctx.lineTo((q.x - dir * worldPx) * k, q.y * k);
+        ctx.moveTo((px + dir * worldPx) * k, py * k);
       }
       ctx.lineTo(q.x * k, q.y * k);
       px = q.x; py = q.y;
@@ -226,11 +329,31 @@ export class MapUI {
   updateWorld(lat, lon, yaw) {
     const ctx = this.worldCanvas.getContext('2d');
     const W = this.worldCanvas.width, H = this.worldCanvas.height;
+    // bake a slice of the FINE sheet each open-chart frame (real coastline;
+    // whole seconds of work in total, never more than ~8 ms of any frame) —
+    // the mask sheet serves until the ink dries, then the fine one forever
+    if (!this.fineBase) {
+      if (!this.fineJob) this.fineJob = beginFineWorld(2880, 1440);
+      if (stepFineWorld(this.fineJob, this.worldZoom > 1 ? 2 : 1)) {
+        this.fineBase = blit(finishFineWorld(this.fineJob));
+        this.fineJob = null;
+      }
+    }
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(this.worldBase, 0, 0, W, H);
-    const view = { w: W, h: H };
+    const view = this.worldView();
+    const ppd = view.ppd;
+    // the world is a cylinder: tile the sheet across the seam
+    const sheet = this.fineBase || this.worldBase;
+    const wPx = 360 * ppd, hPx = 180 * ppd;
+    const y0 = H / 2 + (view.latC - 90) * ppd;
+    for (let k = -1; k <= 1; k++) {
+      const x0 = W / 2 + (-180 + k * 360 - view.lonC) * ppd;
+      if (x0 + wPx < 0 || x0 > W) continue;
+      ctx.drawImage(sheet, x0, y0, wPx, hPx);
+    }
     for (const L of MARKS) {
       const p = chartXY(L.lat, L.lon, view);
+      if (p.x < -80 || p.x > W + 80 || p.y < -20 || p.y > H + 20) continue;
       drawLegend(ctx, p.x, p.y, L.kind);
       ctx.fillStyle = INK;
       // dockyards mark quietly; the legends get the big ink
