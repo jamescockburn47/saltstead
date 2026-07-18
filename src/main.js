@@ -11,12 +11,13 @@ import { buildCaptain } from './captain.js';
 import { isWarden, loadAuth, displayName } from './identity.js';
 import { FoamLayer } from './foamlayer.js';
 import { SkyFx } from './skyfx.js';
-import { newShipState, stepShip, shipAttitude, beaches, oarSpeed } from './shipphysics.js';
+import { newShipState, stepShip, shipAttitude, beaches, oarSpeed, poleOff } from './shipphysics.js';
 import { oarMode, oarPosts, oarLength, oarStroke, towOffset } from './oars.js';
 import { frameFor, clampToDeck, localToWorld, gunPosts, holdFor, crewPosts } from './shipframe.js';
 import { CABLE_DEPTH, canLetGo, snubSpeed, swingToWind } from './anchor.js';
 import { helmOrder, helmRoute } from './helmsman.js';
 import { route as laneRoute } from './lanes.js';
+import { seaLeg } from './searoute.js';
 import { windAt } from './wind.js';
 import { currentAt } from './currents.js';
 import { stormWindAt, stormFieldAt } from './storms.js';
@@ -339,10 +340,19 @@ class Game {
       // reaches open water; a coast met later still hands back)
       this.courseFromPilotage = this.coastDist < PILOT_R;
       this.maps.course = { lat, lon };
+      // the chart inks the whole laid road, and the log reads the ROUTED
+      // distance — round the capes, not through them
+      this.maps.routeLL = this.route.map((p) => worldToLatLon(p.x, p.z));
+      this.maps.routeLeg = 0;
+      let d = 0, ax = this.ship.x, az = this.ship.z;
+      for (const p of this.route) { d += Math.hypot(dxWrap(ax, p.x), p.z - az); ax = p.x; az = p.z; }
       const dxw = dxWrap(this.ship.x, w.x); // the short way across the world seam
-      const d = Math.hypot(dxw, w.z - this.ship.z);
+      const legs = this.route.length > 1 ? ` in ${this.route.length} legs` : '';
+      const watch = this.crew === 1
+        ? ' — one hand: he lashes the wheel to cleat her sheets coarse; a second hand would trim her true'
+        : '';
       this.say(`COURSE SET — the helmsman lays her for the ${compassPoint(this.ship.x, this.ship.z, this.ship.x + dxw, w.z)}, `
-        + `${Math.max(1, Math.round(d / 1000))} km by the log (C belays it; the wheel overrides)`, 8);
+        + `${Math.max(1, Math.round(d / 1000))} km by the log${legs}${watch} (C belays it; the wheel overrides)`, 8);
       this.logEvent('Set a course on the chart — a hand takes the helm');
     };
     this.starchart = new StarChartUI();
@@ -611,9 +621,12 @@ class Game {
 
   // the muster made VISIBLE: every hired hand stands a station on deck.
   // The first is the HELMSMAN \u2014 he keeps the helm, which is exactly what
-  // he does for a living (helmOrder steers only while crew >= 1). The rest
-  // take the waist at crewPosts stations. Rebuilt whenever the muster or
-  // the hull changes; capped so a galleon's deck reads crewed, not crowded.
+  // he does for a living (helmOrder steers only while crew >= 1). The
+  // SECOND is the SAIL-HAND \u2014 he stands the sheets at the waist rail
+  // (with him aboard the helmsman's trim is true; alone it's cleated coarse
+  // \u2014 helmsman.js sheets). The rest take the waist at crewPosts stations.
+  // Rebuilt whenever the muster or the hull changes; capped so a galleon's
+  // deck reads crewed, not crowded.
   refreshHands() {
     const shown = Math.min(this.crew, 13);
     if (this._handsShown === shown && this._handsHull === this.hullId) return;
@@ -632,7 +645,15 @@ class Game {
       helmsman.position.set(F.helm.x, F.deck.y, F.helm.z - 0.55 * F.scale);
       this.handGroup.add(helmsman); // faces the bow, hands to the helm
     }
-    for (const [i, p] of crewPosts(F.deck, shown - 1, 3).entries()) {
+    if (shown >= 2) {
+      const sailHand = buildHand(9);
+      sailHand.scale.setScalar(scale);
+      // the sheet station: the waist rail, abaft the mast, facing inboard
+      sailHand.position.set(F.deck.maxX * 0.62, F.deck.y, F.deck.maxZ * 0.08);
+      sailHand.rotation.y = -1.1;
+      this.handGroup.add(sailHand);
+    }
+    for (const [i, p] of crewPosts(F.deck, shown - 2, 3).entries()) {
       const hand = buildHand(11 + i);
       hand.scale.setScalar(scale);
       hand.position.set(p.x, F.deck.y, p.z);
@@ -751,11 +772,18 @@ class Game {
   }
 
   // sweeps out / sweeps in: the wind-proof crawl. Works from any state but
-  // the anchor — she cannot row against her own cable.
+  // the anchor — she cannot row against her own cable. AGROUND, the same
+  // muscle poles her off the sand instead (the deep hulls kedge by longboat).
   toggleOars() {
     if (this.mode === 'ashore' || this.mode === 'below') return;
     if (!this.oars && this.anchorDown) { this.say('Weigh anchor first — she cannot row against her own cable', 5); return; }
     this.oars = !this.oars;
+    if (this.oars && this.aground) {
+      this.say(beaches(this.spec)
+        ? `POLES OUT — ${this.crew > 0 ? 'the crew sets poles against the sand and walks her off' : 'you set a pole against the sand and heave, alone'}`
+        : 'THE KEDGE GOES OUT — the longboat runs the anchor to seaward and the capstan heaves her off', 6);
+      return;
+    }
     this.say(this.oars
       ? `OUT SWEEPS — ${this.crew > 0 ? 'the hands bend to the oars' : 'you bend to the oars alone'}. Slow, but the wind has no vote`
       : 'Sweeps inboard — she is the wind’s again', 5);
@@ -1712,11 +1740,17 @@ class Game {
       // the captain walks the deck, works the guns, or goes below. The captain
       // at the wheel (T) always overrides; the anchor and the sand always win.
       // the hand at the wheel is only as good as the watch you can muster: a
-      // lone hand pinches, a full crew sails near-optimal (helmsman.js skill)
+      // lone hand pinches, a full crew sails near-optimal (helmsman.js skill).
+      // THE SHEETS ARE A SECOND JOB: hand one keeps the helm; only a second
+      // hand mans the sheets. Alone, the helmsman lashes the wheel, cleats
+      // the sheet at a coarse notch, and his trim answers SLOWLY (0.15/s vs a
+      // sail-hand's crisp 1.2/s) — the berth ladder buys real sailing.
       const helmSkill = Math.max(0.6, Math.min(1, 0.55 + 0.06 * this.crew));
+      const sheets = this.crew - 1;
       const order = helmRoute({ yaw: this.ship.yaw, x: this.ship.x, z: this.ship.z },
-        this.route, this.routeLeg, this.wind.from, t, helmSkill);
+        this.route, this.routeLeg, this.wind.from, t, helmSkill, sheets);
       this.routeLeg = order.next;
+      this.maps.routeLeg = order.next; // the chart drops marks already made
       if (order.arrived) {
         this.say('THE MARK IS MADE — the helmsman heaves to and hands you the ship', 7);
         this.logEvent('The helmsman made the set course');
@@ -1726,7 +1760,7 @@ class Game {
         this.ship.trim = 0;
       } else {
         this.ship.rudder += (order.rudder - this.ship.rudder) * Math.min(1, dt * 4);
-        this.ship.trim += (order.trim - this.ship.trim) * Math.min(1, dt * 0.8);
+        this.ship.trim += (order.trim - this.ship.trim) * Math.min(1, dt * (sheets >= 1 ? 1.2 : 0.15));
       }
     } else if (this.aground) {
       // beached with nobody at the tiller: she STAYS beached — no lashed
@@ -1978,11 +2012,36 @@ class Game {
       const az = this.ship.z + Math.cos(this.ship.yaw) * 3500;
       const stormNear = Math.max(this.stormField ? this.stormField.danger : 0,
         stormFieldAt(ax, az, skyT).danger);
+      // look ahead for LAND the same way: does the track to the next mark
+      // cross a coastline in eyeshot (a stale route, a current set), or does
+      // the present board stand toward a bank (a tack the route line can't
+      // see)? Rounds her up BEFORE the sand — helmwatch makes it a hard
+      // handback. Suppressed while she works out of pilotage water.
+      let landAhead = false;
+      if (!this.courseFromPilotage) {
+        const wp = this.route[Math.min(this.routeLeg, this.route.length - 1)];
+        const wdx = dxWrap(this.ship.x, wp.x);
+        const wpDist = Math.hypot(wdx, wp.z - this.ship.z);
+        if (wpDist > 60) {
+          const look = Math.min(wpDist, 1500);
+          const lx = wrapX(this.ship.x + (wdx / wpDist) * look);
+          const lz = this.ship.z + ((wp.z - this.ship.z) / wpDist) * look;
+          const lastLeg = this.routeLeg >= this.route.length - 1;
+          landAhead = !seaLeg(this.ship.x, this.ship.z, lx, lz, 60,
+            lastLeg && wpDist <= 1500 ? 600 : 0);
+        }
+        if (!landAhead && wpDist > 700) {
+          const hx = wrapX(this.ship.x + Math.sin(this.ship.yaw) * 600);
+          const hz = this.ship.z + Math.cos(this.ship.yaw) * 600;
+          landAhead = !seaLeg(this.ship.x, this.ship.z, hx, hz, 60, 0);
+        }
+      }
       const hb = helmWatch({
         kraken: !!this.kraken,
         inTriangle: !!(this.zone && this.zone.legend.id === 'bermuda-triangle'),
         aground: this.aground,
         overLand: this.overLand,
+        landAhead,
         coastDist: this.coastDist,
         nearPort: !this.courseFromPilotage && !!(this.port && this.port.dist < 3000),
         shoal: !this.courseFromPilotage && this.shoalWater,
@@ -2253,22 +2312,40 @@ class Game {
     const groundAt = (x, z) => { const g = worldToLatLon(x, z); return elevation(g.lat, g.lon); };
     if (this.coastDist < 400 || this.overLand) {
       const gl = this.spec.groundLine;
-      const bowX = this.ship.x + Math.sin(this.ship.yaw) * this.spec.length * 0.5;
-      const bowZ = this.ship.z + Math.cos(this.ship.yaw) * this.spec.length * 0.5;
-      if (groundAt(bowX, bowZ) > gl || groundAt(this.ship.x, this.ship.z) > gl) {
+      const hullTouches = (x, z) => {
+        const bowX = x + Math.sin(this.ship.yaw) * this.spec.length * 0.5;
+        const bowZ = z + Math.cos(this.ship.yaw) * this.spec.length * 0.5;
+        return groundAt(bowX, bowZ) > gl || groundAt(x, z) > gl;
+      };
+      if (hullTouches(this.ship.x, this.ship.z)) {
         this.ship.x = px; this.ship.z = pz;
         this.ship.speed = 0;
         this.aground = true;
         // beached, the rudder alone barely bites — the captain poles her
         // round off the sand, so swinging her back to sea takes seconds
         if (this.mode === 'helm') this.ship.yaw += this.ship.rudder * 0.45 * dt;
+        // sweeps out (O): the crew POLES HER OFF — the hull is walked
+        // seaward down the shelving ground (shipphysics.poleOff; the deep
+        // hulls kedge off by longboat) until she floats free, bow to sea
+        if (this.oars) {
+          poleOff(this.ship, dt, this.spec, this.crew, groundAt);
+          this.ship.x = wrapX(this.ship.x);
+          if (!hullTouches(this.ship.x, this.ship.z)) {
+            this.aground = false;
+            this.say(beaches(this.spec)
+              ? 'SHE SWIMS — poled off the sand; the sweeps have her'
+              : 'SHE SWIMS — the kedge broke her free; she rides open water again', 6);
+            this.logEvent(beaches(this.spec) ? 'Poled her off the sand' : 'Kedged her off the shoal');
+          }
+        }
       } else this.aground = false;
     } else this.aground = false;
     // the moment she fetches up, say OUT LOUD how you get ashore from here
+    // \u2014 and how you get OFF: O mans the poles (the deep hulls run the kedge)
     if (this.aground && !this.wasAgroundSay) {
       this.say(beaches(this.spec)
-        ? 'The bow takes the sand \u2014 E steps you ashore'
-        : 'She draws too much to beach \u2014 the boats must go in. E sends the longboat ashore', 8);
+        ? 'The bow takes the sand \u2014 O poles her off \u00b7 E steps you ashore'
+        : 'She draws too much to beach \u2014 O runs the kedge out \u00b7 E sends the longboat ashore', 8);
     }
     this.wasAgroundSay = this.aground;
 
@@ -2615,8 +2692,8 @@ class Game {
                 ? `ANCHORAGE \u2014 T to leave the tiller, E to put in at ${this.port.haven.name}`
                 : this.aground
                 ? (beaches(this.spec)
-                  ? 'BEACHED \u2014 T to leave the tiller, E to step ashore \u00b7 steer A/D to swing her off'
-                  : 'ANCHORED OFF \u2014 she draws too much to beach \u00b7 T, then E to send the longboat ashore')
+                  ? 'BEACHED \u2014 O poles her off \u00b7 A/D swings her \u00b7 T leaves the tiller, E steps ashore'
+                  : 'ANCHORED OFF \u2014 O runs the kedge out \u00b7 T, then E to send the longboat ashore')
                 : 'A/D — steer · W/S — sheet · F — fire · R — shot · Q — anchor · T — leave the tiller · M — chart')
               : anchored
                 ? `E \u2014 put in at ${this.port.haven.name} \u00b7 T \u2014 take the tiller`
@@ -2626,8 +2703,8 @@ class Game {
                     : 'E \u2014 send the longboat ashore \u00b7 T \u2014 take the tiller')
                   : this.aground
                     ? (beaches(this.spec)
-                      ? 'BEACHED \u2014 E to step ashore \u00b7 T to take the tiller'
-                      : 'ANCHORED OFF \u2014 E sends the longboat ashore \u00b7 T to take the tiller')
+                      ? 'BEACHED \u2014 O poles her off \u00b7 E to step ashore \u00b7 T to take the tiller'
+                      : 'ANCHORED OFF \u2014 O runs the kedge out \u00b7 E sends the longboat ashore \u00b7 T to take the tiller')
                     : this.canGoBelow()
                       ? 'E \u2014 go below \u00b7 T \u2014 take the tiller \u00b7 WASD \u2014 walk the deck'
                     : this.anchorDown

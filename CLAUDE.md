@@ -12,8 +12,8 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 - `src/` modules are small and single-purpose; pure logic modules (waves, sailing,
  shipphysics, shipframe, foam, earth, terraingen, skymath, lightrig, woodgrain,
  legends, legendfx, combat, monsters, merchants, plunder, treasure, fleet, port,
- ports, shipyard, noise; showreel's pose maths) have **no THREE/DOM imports** and
- each is guarded by a `scripts/verify-*.mjs` check.
+ ports, shipyard, noise, searoute; showreel's pose maths) have **no THREE/DOM
+ imports** and each is guarded by a `scripts/verify-*.mjs` check.
 - `src/earthdata.js` is **generated** by `scripts/build-earthdata.mjs` from Natural
   Earth (coastlines, rivers, mountain ranges) — never edit by hand.
 
@@ -23,7 +23,9 @@ assets, browser-first, deterministic, verify-gated**. Public client:
  Add a verify script with every feature; prefer testing pure modules headlessly over
  eyeballing. `scripts/live-classes.mjs` (puppeteer, needs the dev server) smoke-tests
  the seven ship classes, a long-range battle and a ramming in a real browser;
- `scripts/live-hold.mjs` does the same for below-decks and the warden's writ.
+ `scripts/live-hold.mjs` does the same for below-decks and the warden's writ;
+ `scripts/live-searoute.mjs` sails a course laid around Florida, the breakers-ahead
+ handback, and the pole-off in a real browser.
 - Dev: `npm run dev` (port 5173). `window.saltstead` is the live Game handle
   (`.ship`, `.cam`, `.aground`, `.coastDist`, `.dayStart`, `.ocean.uniforms`).
 - Marketing footage: `saltstead.showreel()` in the live console records the

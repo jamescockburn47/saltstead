@@ -7,12 +7,21 @@
 // toward on the closest close-hauled heading, tacking on a slow clock the
 // way a shorthanded watch actually would. The captain is freed for the
 // deck, the hold, the guns — the ship keeps sailing.
+//
+// THE SHEETS ARE A SECOND JOB (sheets param): one hand cannot honestly
+// steer AND trim. Alone at the wheel he lashes it, goes forward, and cleats
+// the sheet at a coarse notch — hard in, half, or eased (TRIM_NOTCH) — then
+// gets back to the helm; main.js eases his trim SLOWLY to match. A second
+// hand aboard mans the sheets full-time and trims true. So the berth ladder
+// buys real sailing: the sloop (berths 1) is always sailed shorthanded; the
+// cutter's second hand is a genuine sail-trimmer upgrade.
 
 import { IRONS, BEAT, optimalTrim, wrapAngle } from './sailing.js';
 import { dxWrap } from './earth.js';
 
 export const ARRIVE_R = 250;    // close enough: the mark is made
 export const TACK_S = 50;       // seconds a watch holds each board upwind
+export const TRIM_NOTCH = 0.5;  // the lone hand's cleats: hard in, half, eased
 const PINCH = IRONS + 0.12;     // a green hand's close-hauled — the old poor-VMG angle
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 // BEAT (sailing.js) is the VMG-optimal angle off the eye — the helmsman holds it
@@ -25,7 +34,9 @@ const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 // aboard to obey them.
 // skill [0..1]: the hand at the wheel is only as good as who you signed — a green
 // hand pinches (PINCH), a master holds the VMG-optimal beat (BEAT). Default 1.
-export function helmOrder(yaw, x, z, tx, tz, windFrom, t = 0, skill = 1) {
+// sheets: hands free to man the sheets. 0 = the helmsman is alone and cleats
+// the trim at TRIM_NOTCH steps; >= 1 = a sail-hand trims true. Default 1.
+export function helmOrder(yaw, x, z, tx, tz, windFrom, t = 0, skill = 1, sheets = 1) {
   const dxw = dxWrap(x, tx); // shortest east-west delta across the world seam
   const dist = Math.hypot(dxw, tz - z);
   if (dist <= ARRIVE_R) {
@@ -47,9 +58,11 @@ export function helmOrder(yaw, x, z, tx, tz, windFrom, t = 0, skill = 1) {
     want = eye + board * beat;
   }
   const err = wrapAngle(want - yaw);
+  const optimal = optimalTrim(wrapAngle(yaw - windFrom));
   return {
     rudder: Math.max(-1, Math.min(1, err * 1.6)),
-    trim: optimalTrim(wrapAngle(yaw - windFrom)),
+    // a manned sheet is trimmed true; the lone hand cleats the near notch
+    trim: sheets >= 1 ? optimal : Math.round(optimal / TRIM_NOTCH) * TRIM_NOTCH,
     arrived: false,
     tacking,
   };
@@ -60,7 +73,7 @@ export function helmOrder(yaw, x, z, tx, tz, windFrom, t = 0, skill = 1) {
 // already reached (except the last), then issues a helmOrder for the active leg.
 // `arrived` is true ONLY at the final waypoint; `next` is the (possibly advanced)
 // index for the caller to keep.
-export function helmRoute(ship, route, i, windFrom, t = 0, skill = 1) {
+export function helmRoute(ship, route, i, windFrom, t = 0, skill = 1, sheets = 1) {
   if (!route || route.length === 0) return { rudder: 0, trim: 0, arrived: true, tacking: false, next: 0 };
   let idx = Math.max(0, Math.min(i, route.length - 1));
   while (idx < route.length - 1) {
@@ -69,6 +82,6 @@ export function helmRoute(ship, route, i, windFrom, t = 0, skill = 1) {
     else break;
   }
   const m = route[idx];
-  const o = helmOrder(ship.yaw, ship.x, ship.z, m.x, m.z, windFrom, t, skill);
+  const o = helmOrder(ship.yaw, ship.x, ship.z, m.x, m.z, windFrom, t, skill, sheets);
   return { ...o, next: idx, arrived: o.arrived && idx === route.length - 1 };
 }

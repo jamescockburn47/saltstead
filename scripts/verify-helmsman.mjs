@@ -2,9 +2,9 @@
 // trim honest, never points into the no-go, works upwind on alternating
 // boards, and calls the arrival. Then the whole loop: a simulated voyage
 // under helm orders actually REACHES a mark that needs a beat to windward.
-import { helmOrder, helmRoute, ARRIVE_R, TACK_S } from '../src/helmsman.js';
+import { helmOrder, helmRoute, ARRIVE_R, TACK_S, TRIM_NOTCH } from '../src/helmsman.js';
 import { newShipState, stepShip, SLOOP } from '../src/shipphysics.js';
-import { IRONS, BEAT, wrapAngle, pointOfSailPower } from '../src/sailing.js';
+import { IRONS, BEAT, wrapAngle, pointOfSailPower, optimalTrim } from '../src/sailing.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -84,6 +84,45 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
   const green = helmOrder(-BEAT, 0, 0, 0, 4000, 0, 5, 0);
   ok(Math.abs(master.rudder) < Math.abs(green.rudder),
     `a master holds the optimal beat, a green hand pinches (${master.rudder.toFixed(2)} vs ${green.rudder.toFixed(2)})`);
+}
+
+// THE SHEETS ARE A SECOND JOB: with a sail-hand (sheets >= 1) the trim is the
+// exact optimum for the point of sail; alone (sheets 0) the helmsman cleats
+// the near TRIM_NOTCH — never further than half a notch off, and identical to
+// the manned trim only by coincidence of the notch
+{
+  const yaw = 2.1, windFrom = 0; // a broad-ish reach: optimum well off a notch
+  const manned = helmOrder(yaw, 0, 0, 5000 * Math.sin(yaw), 5000 * Math.cos(yaw), windFrom, 0, 1, 1);
+  const solo = helmOrder(yaw, 0, 0, 5000 * Math.sin(yaw), 5000 * Math.cos(yaw), windFrom, 0, 1, 0);
+  const opt = optimalTrim(wrapAngle(yaw - windFrom));
+  ok(Math.abs(manned.trim - opt) < 1e-9, `a sail-hand trims her true (${manned.trim.toFixed(2)} = optimal)`);
+  ok(Math.abs(solo.trim % TRIM_NOTCH) < 1e-9, `alone the sheet sits on a cleat notch (${solo.trim.toFixed(2)})`);
+  ok(Math.abs(solo.trim - opt) <= TRIM_NOTCH / 2 + 1e-9, 'and never further than half a notch off');
+  ok(Math.abs(solo.trim - opt) > 0.05, 'the notch is a real cost on this point of sail');
+}
+
+// and the sail-hand is a real UPGRADE under way: the same voyage sailed with a
+// manned sheet (crisp ease) beats the lone hand (coarse notch, slow ease)
+{
+  const sail = (sheets) => {
+    const s = newShipState(0, 0);
+    const wind = { from: 2.4, speed: 8 };
+    const mark = { x: 1800, z: -2400 };
+    let t = 0;
+    const DT = 1 / 10;
+    for (let i = 0; i < 10 * 60 * 45; i++) {
+      const o = helmOrder(s.yaw, s.x, s.z, mark.x, mark.z, wind.from, t, 1, sheets);
+      if (o.arrived) return t;
+      s.rudder = o.rudder;
+      s.trim += (o.trim - s.trim) * Math.min(1, DT * (sheets >= 1 ? 1.2 : 0.15)); // main.js ease rates
+      stepShip(s, wind, DT, SLOOP);
+      t += DT;
+    }
+    return Infinity;
+  };
+  const manned = sail(1), solo = sail(0);
+  ok(Number.isFinite(manned) && Number.isFinite(solo), 'both watches make the mark');
+  ok(manned < solo, `the sail-hand makes the passage faster (${manned.toFixed(0)}s vs ${solo.toFixed(0)}s alone)`);
 }
 
 // helmRoute follows a waypoint list: advance past a reached leg, arrive only at the last

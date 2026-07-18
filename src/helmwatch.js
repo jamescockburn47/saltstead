@@ -20,7 +20,8 @@ export const HUNT_R = 1600;  // a hunter has the wind of us and is closing
 export const PILOT_R = 600;  // inside this coast distance, harbour/shoal pilotage
 
 // s: {
-//   kraken, whale, whirlpool, stormAhead, inTriangle, aground, overLand: bool
+//   kraken, whale, whirlpool, stormAhead, inTriangle, aground, overLand,
+//   landAhead: bool
 //   coastDist: number|null, nearPort, shoal: bool
 //   hunterDist, contactDist: number|null
 // }  (any field may be absent/null)
@@ -33,6 +34,9 @@ export function decide(s = {}) {
   if (s.inTriangle) return hard('the compass is astray here — sail by eye');
   if (s.aground) return hard('she is on the sand');
   if (s.overLand) return hard('river water — pilot her yourself');
+  // the track to the next mark crosses a coastline (current set, storm
+  // drift, a stale route): round up BEFORE the sand, not on it
+  if (s.landAhead) return hard('breakers ahead — land across the course');
   if (Number.isFinite(s.coastDist) && s.coastDist < PILOT_R && (s.nearPort || s.shoal)) {
     return hard(s.nearPort ? 'harbour approach — take the helm' : 'shoal water ahead');
   }

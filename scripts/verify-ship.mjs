@@ -2,7 +2,7 @@
 // sailing model's target, the rudder answers, and buoyancy attitude stays
 // inside believable bounds (no capsizing the prototype from a maths slip).
 import {
-  newShipState, stepShip, shipAttitude, beaches, oarSpeed, SLOOP, GALLEON, SPECS,
+  newShipState, stepShip, shipAttitude, beaches, oarSpeed, poleOff, SLOOP, GALLEON, SPECS,
   BRIG,
 } from '../src/shipphysics.js';
 import { sailPower, speedTarget, optimalTrim, wrapAngle } from '../src/sailing.js';
@@ -181,5 +181,23 @@ const DT = 1 / 30;
   ok(db > da * 3.5 && db < da * 4.5, `gait 4 covers ~4x the ground (${(db / da).toFixed(2)}x)`);
 }
 
+// POLING OFF: aground on a shelving beach (ground rises with +z), the crew
+// walks her SEAWARD (down the slope), swings the bow to face the water, and
+// more hands pole faster; deterministic
+{
+  const shore = (x, z) => z * 0.02; // sea to the north (-z), sand to the south
+  const a = newShipState(0, 100); a.yaw = 0; // bow driven onto the sand (+z)
+  const b = newShipState(0, 100); b.yaw = 0;
+  for (let i = 0; i < 20 * 30; i++) { poleOff(a, DT, SLOOP, 0, shore); poleOff(b, DT, SLOOP, 8, shore); }
+  ok(a.z < 100 && b.z < 100, `poleOff walks her seaward (solo ${(100 - a.z).toFixed(0)} m, crewed ${(100 - b.z).toFixed(0)} m)`);
+  ok(b.z < a.z, 'more hands pole her off faster');
+  ok(Math.abs(wrapAngle(b.yaw - Math.PI)) < 0.6, `and the bow comes round to face the sea (yaw ${b.yaw.toFixed(2)})`);
+  ok(b.speed === 0, 'poling makes no way of her own');
+  const c = newShipState(0, 100); c.yaw = 0;
+  const d = newShipState(0, 100); d.yaw = 0;
+  for (let i = 0; i < 30; i++) { poleOff(c, DT, GALLEON, 4, shore); poleOff(d, DT, GALLEON, 4, shore); }
+  ok(c.x === d.x && c.z === d.z && c.yaw === d.yaw, 'poleOff is deterministic');
+}
+
 if (failed) { console.error(`verify-ship: ${failed} FAILED`); process.exit(1); }
-console.log('verify-ship: OK — converges, stalls in irons, rudder answers, buoyancy bounded');
+console.log('verify-ship: OK — converges, stalls in irons, rudder answers, buoyancy bounded, poles off the sand');

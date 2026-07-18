@@ -41,7 +41,9 @@ export const SEA_FACTS = [
     text: 'With a helmsman signed aboard, click the chart (M) to set a course '
       + 'and he steers her there himself — tacks and all — while the captain '
       + 'walks the deck. No helmsman, no self-steering: the sloop berths '
-      + 'exactly one hand for exactly this reason.',
+      + 'exactly one hand for exactly this reason. And one hand is one hand: '
+      + 'alone he lashes the wheel to cleat the sheets at a coarse notch. A '
+      + 'SECOND hand stands the sheets full-time and trims her true.',
   },
   {
     id: 'sweeps', topic: 'sailing',
@@ -100,8 +102,8 @@ export const SEA_FACTS = [
     text: 'Hands sign articles at any port for 60 doubloons each, up to the '
       + 'hull’s berths: the sloop sleeps one (the helmsman), the cutter '
       + 'four, the schooner eight, the brig twelve, and the ladder climbs to '
-      + 'the galleon’s thirty-six. Hands steer, quicken the reload, weigh '
-      + 'the boarding fight and crew the prizes.',
+      + 'the galleon’s thirty-six. Hands steer, trim the sheets, quicken the '
+      + 'reload, weigh the boarding fight and crew the prizes.',
   },
   {
     id: 'prizes', topic: 'trade',

@@ -3,19 +3,36 @@
 // (the acceptance scenario), short/off-lane hops sail direct (no regression),
 // and route() is deterministic.
 import { LANES, resolveMark, segmentCost, nearestNode, nearestLanePoint, route, laneNodes } from '../src/lanes.js';
-import { isLand, coastDistGame, latLonToWorld, worldToLatLon, dxWrap, WORLD_W } from '../src/earth.js';
+import { seaLeg } from '../src/searoute.js';
+import { isLand, coastDistGame, latLonToWorld, worldToLatLon, dxWrap, wrapX, WORLD_W } from '../src/earth.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
 
 // every mark is afloat; bare SEA-marks must be off the beach (ports are
-// harbours — coastal by definition — so they're exempt from the coast check)
+// harbours — coastal by definition — so they're exempt). A NARROW mark
+// (width <= 5000) is a pilotage/channel mark by construction — the Straits
+// of Florida, the mouth of Manila Bay — and need only clear the literal
+// beach (the grounding shelf dies within ~30 game m of the sand)
 for (const lane of LANES) {
   for (const mark of lane.marks) {
     const m = resolveMark(mark);
     const ll = worldToLatLon(m.x, m.z);
     ok(!isLand(ll.lat, ll.lon), `${lane.id}: a mark is afloat`);
-    if (!mark.port) ok(coastDistGame(ll.lat, ll.lon) > 300, `${lane.id}: a sea-mark is off the beach`);
+    if (!mark.port) {
+      const floor = m.width <= 5000 ? 60 : 300;
+      ok(coastDistGame(ll.lat, ll.lon) > floor, `${lane.id}: a sea-mark is off the beach`);
+    }
+  }
+}
+
+// every lane LEG is honest water end to end (ports get harbour grace): a
+// highway that crosses a cay would march the whole trade over the sand
+for (const lane of LANES) {
+  for (let i = 0; i < lane.marks.length - 1; i++) {
+    const a = resolveMark(lane.marks[i]), b = resolveMark(lane.marks[i + 1]);
+    ok(seaLeg(a.x, a.z, b.x, b.z, lane.marks[i].port ? 250 : 0, lane.marks[i + 1].port ? 250 : 0),
+      `${lane.id}: leg ${i} (${lane.marks[i].port ?? i} -> ${lane.marks[i + 1].port ?? i + 1}) is honest water`);
   }
 }
 
@@ -51,6 +68,23 @@ for (const lane of LANES) {
 {
   const a = latLonToWorld(23.2, -82.4), b = latLonToWorld(23.0, -82.0);
   ok(route(a.x, a.z, b.x, b.z).length === 1, 'a short hop sails direct');
+}
+
+// A COURSE BLOCKED BY LAND ROUTES AROUND IT — the fix for the helmsman
+// sailing through continents: Gulf of Mexico -> Atlantic must round Florida,
+// and no leg of the answer may cross land
+{
+  const a = latLonToWorld(27, -83.5), b = latLonToWorld(27, -79.5);
+  const r = route(a.x, a.z, b.x, b.z);
+  ok(r.length > 1, `a land-blocked course routes around (${r.length} legs)`);
+  let ax = a.x, az = a.z, clean = true;
+  for (let i = 0; i < r.length; i++) {
+    if (!seaLeg(ax, az, r[i].x, r[i].z, i === 0 ? 300 : 0, i === r.length - 1 ? 600 : 0)) clean = false;
+    ax = r[i].x; az = r[i].z;
+  }
+  ok(clean, 'and every leg of it is honest water');
+  const last = r[r.length - 1];
+  ok(Math.abs(dxWrap(last.x, b.x)) < 1 && Math.abs(last.z - b.z) < 1, 'ending at the click');
 }
 
 // deterministic: same inputs -> identical route

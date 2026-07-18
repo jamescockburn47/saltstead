@@ -1,7 +1,7 @@
 // Ship physics — pure, no THREE, no DOM. verify-ship.mjs guards it.
 // Convention matches shipframe.js: bow along local +z, forward = (sin yaw, cos yaw).
 
-import { sailPower, speedTarget } from './sailing.js';
+import { sailPower, speedTarget, wrapAngle } from './sailing.js';
 import { waveHeight } from './waves.js';
 
 // groundLine: the terrain elevation at which the hull stops. Positive = she
@@ -81,6 +81,34 @@ export function oarSpeed(spec = SLOOP, crew = 0) {
   const raw = 0.55 + 0.16 * rowers;
   const size = (9 / spec.length) ** 0.6;          // the unit sloop rows best
   return Math.min(1.5, raw * size);
+}
+
+// POLING OFF: hard aground, the crew sets poles against the sand (or, for
+// the hulls too proud to beach, the longboat runs the kedge anchor out and
+// the capstan heaves her off). Seaward is read from the ground itself: of
+// eight bearings around the hull, walk her along the one that shelves
+// DOWNHILL fastest, with a small sternward tie-break so on a dead-flat bank
+// she backs off the way she came on. Crew-scaled through oarSpeed — the same
+// muscle that rows her rows her off — and the bow swings to face the water
+// she is walked toward, so she floats free ready to sail. Mutates and
+// returns s. groundAt(x, z) -> terrain height at a world point.
+export function poleOff(s, dt, spec = SLOOP, crew = 0, groundAt) {
+  const R = Math.max(spec.length, 14);
+  let bx = 0, bz = 1, best = Infinity;
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const gx = Math.sin(a), gz = Math.cos(a);
+    const score = groundAt(s.x + gx * R, s.z + gz * R)
+      + 0.05 * (gx * Math.sin(s.yaw) + gz * Math.cos(s.yaw)); // sternward nudge
+    if (score < best) { best = score; bx = gx; bz = gz; }
+  }
+  const v = Math.max(0.5, oarSpeed(spec, crew));
+  s.x += bx * v * dt;
+  s.z += bz * v * dt;
+  const err = wrapAngle(Math.atan2(bx, bz) - s.yaw);
+  s.yaw += Math.max(-0.35 * dt, Math.min(0.35 * dt, err));
+  s.speed = 0;
+  return s;
 }
 
 // wind: { from, speed }. gait: open-sea distance multiplier (earth.js

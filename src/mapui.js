@@ -106,6 +106,8 @@ export class MapUI {
     // main.js owns what a course MEANS (the helmsman); the chart only
     // reports where the captain's finger landed.
     this.course = null;   // { lat, lon } while a course is set
+    this.routeLL = null;  // [{ lat, lon }, …] the LAID route (read only while course set)
+    this.routeLeg = 0;    // the ACTIVE leg (main.js syncs it) — passed marks aren't drawn
     this.onCourse = null; // main.js hangs the handler here
     this.worldCanvas.addEventListener('click', (e) => {
       if (!this.onCourse) return;
@@ -118,18 +120,47 @@ export class MapUI {
     });
   }
 
-  // the course on a chart: a dashed rhumb from the ship and a pennant at
-  // the mark (both charts carry it — that is what a chart is FOR)
+  // the course on a chart: the LAID ROUTE as a dashed line, ship through
+  // every mark — round the capes and through the straits, the road the
+  // helmsman will actually sail — with a pennant at the destination. Legs
+  // that cross the world seam are split at the chart edge, not smeared
+  // across it. (Both charts carry it — that is what a chart is FOR.)
   drawCourse(ctx, s, view, boundsN = null) {
     if (!this.course) return;
-    const c = chartXY(this.course.lat, this.course.lon, view);
-    if (boundsN !== null && (c.x < 0 || c.x >= boundsN || c.y < 0 || c.y >= boundsN)) return;
     const k = boundsN !== null ? this.mini.width / boundsN : 1;
+    // the road AHEAD, exactly as the helmsman intends it: from the active
+    // leg to the destination — marks already made are not drawn again
+    const marks = this.routeLL && this.routeLL.length
+      ? this.routeLL.slice(Math.min(this.routeLeg, this.routeLL.length - 1))
+      : [this.course];
+    // on the local window, re-seam each mark's lon about the window centre
+    const wrapLon = (lon) => view.spanDeg !== undefined
+      ? view.lonC + (((lon - view.lonC + 540) % 360) - 180)
+      : lon;
+    const P = marks.map((m) => chartXY(m.lat, wrapLon(m.lon), view));
     ctx.strokeStyle = BLOOD;
     ctx.lineWidth = 1.5;
     ctx.setLineDash([5, 4]);
-    ctx.beginPath(); ctx.moveTo(s.x * k, s.y * k); ctx.lineTo(c.x * k, c.y * k); ctx.stroke();
+    ctx.beginPath();
+    let px = s.x, py = s.y;
+    ctx.moveTo(px * k, py * k);
+    for (const q of P) {
+      if (view.spanDeg === undefined && Math.abs(q.x - px) > view.w / 2) {
+        // the short way crosses the seam: out one edge, in at the other
+        const qx = q.x - Math.sign(q.x - px) * view.w; // q unwrapped into px's frame
+        const xOut = qx < px ? 0 : view.w;
+        const t = (xOut - px) / (qx - px);
+        const ySeam = py + (q.y - py) * t;
+        ctx.lineTo(xOut * k, ySeam * k);
+        ctx.moveTo((view.w - xOut) * k, ySeam * k);
+      }
+      ctx.lineTo(q.x * k, q.y * k);
+      px = q.x; py = q.y;
+    }
+    ctx.stroke();
     ctx.setLineDash([]);
+    const c = P[P.length - 1];
+    if (boundsN !== null && (c.x < 0 || c.x >= boundsN || c.y < 0 || c.y >= boundsN)) return;
     ctx.fillStyle = BLOOD;
     ctx.beginPath();
     ctx.moveTo(c.x * k, c.y * k); ctx.lineTo(c.x * k, c.y * k - 11);

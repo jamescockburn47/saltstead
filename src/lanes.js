@@ -13,6 +13,7 @@ import { latLonToWorld, worldToLatLon, coastDistGame, gaitFactor, dxWrap, wrapX 
 import { madeGoodFactor } from './sailing.js';
 import { windAt } from './wind.js';
 import { currentAt } from './currents.js';
+import { seaRoute, seaLeg } from './searoute.js';
 import { PORTS } from './ports.js';
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -20,8 +21,12 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 export const DEFAULT_WIDTH = 8000; // generous by default (spec §1); narrow only where authored
 
 export const LANES = [
+  // Havana runs the Straits of Florida and up the channel INSIDE the Bahamas
+  // before standing east — the rhumb line to (28,-72) crosses the Bahama banks
   { id: 'treasure-fleet', name: 'The Treasure Fleet', marks: [
     { port: 'havana' },
+    { lat: 24.5, lon: -80.4, width: 4000, choke: true }, // the Straits of Florida
+    { lat: 27.5, lon: -79.2, width: 5000 },              // the channel off the banks
     { lat: 28, lon: -72, width: 12000 },
     { lat: 34, lon: -40, width: 15000 },
     { lat: 37, lon: -12, width: 4000, choke: true },
@@ -35,10 +40,18 @@ export const LANES = [
     { lat: 49, lon: -22, width: 12000, choke: true },
     { port: 'bristol' },
   ] },
+  // Manila clears her own bay, works north up Luzon's west coast, and exits
+  // the Balintang Channel — the rhumb line east crosses Luzon itself; the
+  // eastbound then dips SOUTH of Hawaii (the rhumb at 18-20N crosses it)
   { id: 'manila-galleon', name: 'The Manila Galleon', marks: [
     { port: 'manila' },
+    { lat: 14.25, lon: 120.3, width: 3000 },              // the mouth of Manila Bay
+    { lat: 15.8, lon: 119.4, width: 5000 },               // off the Zambales coast
+    { lat: 19.3, lon: 120.5, width: 5000 },               // rounding Cape Bojeador
+    { lat: 20.3, lon: 122.3, width: 4000, choke: true },  // the Balintang Channel
     { lat: 18, lon: 150, width: 14000 },
     { lat: 20, lon: -170, width: 15000 }, // crosses the dateline — wrap handles it
+    { lat: 17.4, lon: -155.2, width: 10000 },             // south about Hawaii
     { lat: 18, lon: -120, width: 8000 },
     { port: 'acapulco' },
   ] },
@@ -197,23 +210,58 @@ function dijkstra(srcId, dstId) {
 // short hops aren't dragged onto a highway (spec §1, §9).
 export const LANE_MARGIN = 0.9;
 
+// grace metres at a route's ends: the ship may lie in a harbour mouth, and
+// the captain may click a beach — the leg's ENDS may touch land, its body not
+const SHIP_GRACE = 300, CLICK_GRACE = 600;
+
+// transit time of an ordered waypoint list sailed from a start point
+function pathCost(fromX, fromZ, pts) {
+  let c = 0, ax = fromX, az = fromZ;
+  for (const p of pts) { c += segmentCost(ax, az, p.x, p.z); ax = p.x; az = p.z; }
+  return c;
+}
+
 // The one entry point main.js calls at course-set. Returns an ordered list of
-// world waypoints ending at the destination. Cheaper of: direct rhumb line, or
-// on-ramp -> lane graph -> off-ramp -> destination. (Dogleg-seek: later plan.)
+// world waypoints ending at the destination. Candidates, cheapest wins:
+// direct rhumb line (only if it is honest water), on-ramp -> lane graph ->
+// off-ramp (only if the ramps are honest water), and — whenever the rhumb
+// line crosses LAND — the searoute.js sea road around it. The old router
+// never asked the land question at all (and coastDistGame grows inland, so
+// its cost model priced a continent as blue water): the helmsman would lay
+// a course straight through Florida. (Dogleg-seek: later plan.)
 export function route(fromX, fromZ, toX, toZ) {
-  const direct = segmentCost(fromX, fromZ, toX, toZ);
+  const directClear = seaLeg(fromX, fromZ, toX, toZ, SHIP_GRACE, CLICK_GRACE);
+  const direct = directClear ? segmentCost(fromX, fromZ, toX, toZ) : Infinity;
+
+  let lanePts = null, laneCost = Infinity;
   const on = nearestNode(fromX, fromZ);
   const off = nearestNode(toX, toZ);
   if (on && off && on.id !== off.id) {
     const g = dijkstra(on.id, off.id);
-    if (g) {
+    if (g
+      && seaLeg(fromX, fromZ, NODES[on.id].x, NODES[on.id].z, SHIP_GRACE, 0)
+      && seaLeg(NODES[off.id].x, NODES[off.id].z, toX, toZ, 0, CLICK_GRACE)) {
       const onCost = segmentCost(fromX, fromZ, NODES[on.id].x, NODES[on.id].z);
       const offCost = segmentCost(NODES[off.id].x, NODES[off.id].z, toX, toZ);
-      if (onCost + g.cost + offCost < direct * LANE_MARGIN) {
-        const pts = g.path.map((id) => ({ x: NODES[id].x, z: NODES[id].z }));
-        return [...pts, { x: toX, z: toZ }];
-      }
+      lanePts = [...g.path.map((id) => ({ x: NODES[id].x, z: NODES[id].z })), { x: toX, z: toZ }];
+      laneCost = onCost + g.cost + offCost;
     }
   }
+
+  if (directClear) {
+    // today's behaviour exactly: the lane must beat the rhumb by the margin
+    if (lanePts && laneCost < direct * LANE_MARGIN) return lanePts;
+    return [{ x: toX, z: toZ }];
+  }
+
+  // the rhumb line crosses land: lay the sea road around it, and let the
+  // lane compete on honest transit time
+  const sea = seaRoute(fromX, fromZ, toX, toZ);
+  const seaCost = sea ? pathCost(fromX, fromZ, sea) : Infinity;
+  if (lanePts && laneCost < seaCost) return lanePts;
+  if (sea) return sea;
+  if (lanePts) return lanePts;
+  // no road found (a landlocked click, or the search gave up): the old rhumb
+  // line — the helm watch owns the sand, exactly as before
   return [{ x: toX, z: toZ }];
 }

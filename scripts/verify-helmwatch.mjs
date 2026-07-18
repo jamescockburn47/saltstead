@@ -13,9 +13,10 @@ ok(decide({ coastDist: 40000, contactDist: 9000 }).mode === 'none', 'a far sail 
 // each hazard hands back HARD
 for (const [flag, label] of [['kraken', 'the Kraken'], ['whale', 'a whale'],
   ['whirlpool', 'a whirlpool'], ['stormAhead', 'a storm'], ['inTriangle', 'the Triangle'],
-  ['aground', 'the sand'], ['overLand', 'a river']]) {
+  ['aground', 'the sand'], ['overLand', 'a river'], ['landAhead', 'breakers ahead']]) {
   ok(decide({ [flag]: true }).mode === 'hard', `${label} is a hard handback`);
 }
+ok(decide({ landAhead: true, contactDist: 100 }).mode === 'hard', 'breakers ahead outrank a contact');
 
 // harbour approach + shoal pilotage are hard; near a coast that is neither is not
 ok(decide({ coastDist: 300, nearPort: true }).mode === 'hard', 'a harbour approach is hard');
