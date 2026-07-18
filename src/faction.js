@@ -15,6 +15,8 @@
 //
 // Attitude matrix: what each sail on the lanes does about the player.
 
+import { isLand, worldToLatLon } from './earth.js';
+
 export const FACTIONS = {
   pirate: {
     id: 'pirate',
@@ -98,7 +100,14 @@ export function signalAnswer(sails, px, pz, range, max) {
 // the signal position (seed decorrelates repeat signals), far enough out to
 // ARRIVE rather than materialise.
 export function escortBerth(px, pz, seed = 0) {
-  const ang = (seed * 2.399963) % (Math.PI * 2); // golden-angle walk
-  const r = 1800; // minutes away under a pressed corvette, not a materialisation
-  return { x: px + Math.sin(ang) * r, z: pz + Math.cos(ang) * r };
+  // golden-angle walk, widening — and the berth must be WATER: a corvette
+  // answering a rocket inside an archipelago must not materialise in a field
+  for (let k = 0; k < 24; k++) {
+    const ang = ((seed + k) * 2.399963) % (Math.PI * 2);
+    const r = 1800 + k * 140; // minutes away under a pressed corvette, not a materialisation
+    const x = px + Math.sin(ang) * r, z = pz + Math.cos(ang) * r;
+    const ll = worldToLatLon(x, z);
+    if (!isLand(ll.lat, ll.lon)) return { x, z };
+  }
+  return { x: px + Math.sin(seed) * 1800, z: pz + Math.cos(seed) * 1800 };
 }

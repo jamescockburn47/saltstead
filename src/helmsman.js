@@ -36,13 +36,30 @@ const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 // hand pinches (PINCH), a master holds the VMG-optimal beat (BEAT). Default 1.
 // sheets: hands free to man the sheets. 0 = the helmsman is alone and cleats
 // the trim at TRIM_NOTCH steps; >= 1 = a sail-hand trims true. Default 1.
-export function helmOrder(yaw, x, z, tx, tz, windFrom, t = 0, skill = 1, sheets = 1) {
+// set: the water's own drift under her keel ({vx, vz} m/s, currents.js) and
+// speedMs her way through it. A real helmsman steers the TRACK, not the bow:
+// he AIMS OFF, up-current of the mark, by the water the set will carry him
+// over the leg — without this the Gulf Stream lands a Boston course in Nova
+// Scotia. Both speeds ride the same gait, so the raw values keep the truth.
+export function helmOrder(yaw, x, z, tx, tz, windFrom, t = 0, skill = 1, sheets = 1,
+  set = null, speedMs = 0) {
   const dxw = dxWrap(x, tx); // shortest east-west delta across the world seam
   const dist = Math.hypot(dxw, tz - z);
   if (dist <= ARRIVE_R) {
     return { rudder: 0, trim: 0, arrived: true, tacking: false };
   }
-  const bearing = Math.atan2(dxw, tz - z);
+  // the aim-off: displace the steering mark up-current by the leg's expected
+  // drift, capped so a ferocious set can never aim her backwards — she makes
+  // her best track and the next order corrects again
+  let adx = dxw, adz = tz - z;
+  if (set && (set.vx || set.vz)) {
+    const tau = Math.min(dist / Math.max(speedMs, 2), 600); // leg transit estimate
+    let ox = -set.vx * tau, oz = -set.vz * tau;
+    const om = Math.hypot(ox, oz), cap = dist * 0.6;
+    if (om > cap) { ox *= cap / om; oz *= cap / om; }
+    adx += ox; adz += oz;
+  }
+  const bearing = Math.atan2(adx, adz);
   // the eye of the wind: heading === windFrom is bow dead INTO it
   // (sailing.js convention — rel = heading - windFrom, 0 = in irons)
   const eye = windFrom;
@@ -73,7 +90,8 @@ export function helmOrder(yaw, x, z, tx, tz, windFrom, t = 0, skill = 1, sheets 
 // already reached (except the last), then issues a helmOrder for the active leg.
 // `arrived` is true ONLY at the final waypoint; `next` is the (possibly advanced)
 // index for the caller to keep.
-export function helmRoute(ship, route, i, windFrom, t = 0, skill = 1, sheets = 1) {
+export function helmRoute(ship, route, i, windFrom, t = 0, skill = 1, sheets = 1,
+  set = null, speedMs = 0) {
   if (!route || route.length === 0) return { rudder: 0, trim: 0, arrived: true, tacking: false, next: 0 };
   let idx = Math.max(0, Math.min(i, route.length - 1));
   while (idx < route.length - 1) {
@@ -82,6 +100,6 @@ export function helmRoute(ship, route, i, windFrom, t = 0, skill = 1, sheets = 1
     else break;
   }
   const m = route[idx];
-  const o = helmOrder(ship.yaw, ship.x, ship.z, m.x, m.z, windFrom, t, skill, sheets);
+  const o = helmOrder(ship.yaw, ship.x, ship.z, m.x, m.z, windFrom, t, skill, sheets, set, speedMs);
   return { ...o, next: idx, arrived: o.arrived && idx === route.length - 1 };
 }

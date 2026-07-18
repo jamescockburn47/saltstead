@@ -164,6 +164,11 @@ export const NAVY_SHOAL = -1.0;
 // bearing — the duel happens at cannon range, not at the fenders
 export const NAVY_STANDOFF = 130;
 
+// how often a sailing hull glances past her own bow for land (stepMerchant's
+// coast lookahead) — cheap enough for a worked lane, quick enough that panic
+// speed still turns two boat-lengths clear of the beach
+export const LOOK_T = 0.45;
+
 // mutates and returns m. px/pz: the QUARRY (usually the player; an
 // assisting corvette is handed her target instead — faction.js). speedMult:
 // battle damage (combat.js speedFactor) — torn sails slow her whatever her
@@ -218,6 +223,37 @@ export function stepMerchant(m, px, pz, dt, speedMult = 1, shoal = false, att = 
       // nobody to mind: cruise, and gather onto the nearest trade lane
       m.speed += (spec.cruise * speedMult - m.speed) * Math.min(1, dt * 0.3);
       laneSteer(m, laneYaw, dt);
+    }
+  }
+  // ---- the coast lookahead ----
+  // NO HULL SAILS ON LAND, whatever her orders. Every LOOK_T she glances a
+  // few boat-lengths past the bow; land there and the helm goes over for the
+  // first open board — hard about if she's boxed in a cove. This is the LAST
+  // word each frame: a fleeing trader or a hunting corvette turns off a
+  // headland before she turns for you. Throttled so a full lane of traffic
+  // costs a handful of terrain samples a second, not hundreds.
+  if (m.speed > 0.3) {
+    m.landT = (m.landT ?? 0) - dt;
+    if (m.landT <= 0) {
+      m.landT = LOOK_T;
+      const look = 120 + m.speed * 30;
+      const seaAt = (yaw) => {
+        const ll = worldToLatLon(m.x + Math.sin(yaw) * look, m.z + Math.cos(yaw) * look);
+        return !isLand(ll.lat, ll.lon);
+      };
+      if (seaAt(m.yaw)) {
+        m.avoidYaw = null;
+      } else {
+        m.avoidYaw = null;
+        for (const off of [0.7, -0.7, 1.4, -1.4, 2.1, -2.1]) {
+          if (seaAt(m.yaw + off)) { m.avoidYaw = m.yaw + off; break; }
+        }
+        if (m.avoidYaw === null) m.avoidYaw = m.yaw + Math.PI; // boxed: put about
+      }
+    }
+    if (m.avoidYaw != null) {
+      const err = wrapPi(m.avoidYaw - m.yaw);
+      m.yaw += Math.max(-TURN * 2.5 * dt, Math.min(TURN * 2.5 * dt, err));
     }
   }
   m.x += Math.sin(m.yaw) * m.speed * dt;

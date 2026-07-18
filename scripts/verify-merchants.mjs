@@ -248,5 +248,45 @@ ok(TYPES.navy.armed && !TYPES.trader.armed, 'only the navy shoots back');
 ok(TYPES.navy.crew > 0, 'boarding a corvette meets a crew');
 ok(PANIC > CRUISE, 'panic beats cruise');
 
+// THE COAST LOOKAHEAD: no hull sails on land. Self-calibrating against the
+// real coastline tables: march east across the Western Sahara shore to find
+// the water's edge, stand a trader off it heading dead at the beach, and
+// step her a long while — she must turn off the land and never touch it.
+{
+  let edgeLon = null;
+  for (let lon = -19; lon < -10 && edgeLon === null; lon += 0.02) {
+    if (isLand(23, lon)) edgeLon = lon;
+  }
+  ok(edgeLon !== null, 'the Sahara coast is where the survey put it');
+  if (edgeLon !== null) {
+    const edge = latLonToWorld(23, edgeLon);
+    const m = {
+      id: 'test-coaster', type: 'trader', role: 'traffic',
+      x: edge.x - 700, z: edge.z, yaw: Math.PI / 2, // 700 m off, bow dead east at the beach
+      speed: TYPES.trader.cruise, looted: false, routed: false, purse: 0,
+    };
+    let touched = false;
+    for (let i = 0; i < 20 * 600; i++) { // ten sim-minutes at 20 Hz
+      stepMerchant(m, m.x - 90000, m.z, 1 / 20); // quarry far over the horizon: pure cruise
+      const ll = worldToLatLon(m.x, m.z);
+      if (isLand(ll.lat, ll.lon)) { touched = true; break; }
+    }
+    ok(!touched, 'she turned off the headland and kept the sea');
+    ok(Math.abs(Math.atan2(Math.sin(m.yaw - Math.PI / 2), Math.cos(m.yaw - Math.PI / 2))) > 0.5,
+      `the helm went over (yaw now ${m.yaw.toFixed(2)})`);
+  }
+  // and far at sea the glance costs nothing: course held to the compass
+  {
+    const open = latLonToWorld(30, -40);
+    const m = {
+      id: 'test-bluewater', type: 'trader', role: 'traffic',
+      x: open.x, z: open.z, yaw: 1.1, speed: TYPES.trader.cruise,
+      looted: false, routed: false, purse: 0,
+    };
+    for (let i = 0; i < 20 * 60; i++) stepMerchant(m, m.x - 90000, m.z, 1 / 20);
+    ok(Math.abs(m.yaw - 1.1) < 1e-6, 'open ocean: the lookahead never touches the helm');
+  }
+}
+
 if (failed) { console.error(`verify-merchants: ${failed} FAILED`); process.exit(1); }
-console.log('verify-merchants: OK — lanes deterministic, four types sound, navy hunts, derelicts drift the triangle');
+console.log('verify-merchants: OK — lanes deterministic, four types sound, navy hunts, derelicts drift the triangle, and no hull sails on land');

@@ -6,7 +6,7 @@ import {
   FACTIONS, factionOf, attitude, canBoardType, signalAnswer, escortBerth,
   homeAnchorage,
 } from '../src/faction.js';
-import { isLand, coastDistGame } from '../src/earth.js';
+import { isLand, coastDistGame, latLonToWorld, worldToLatLon } from '../src/earth.js';
 import { inZone } from '../src/legendfx.js';
 
 let failed = 0;
@@ -98,6 +98,16 @@ ok(canBoardType('raider', 'navy') && canBoardType('derelict', 'navy'),
   const d1 = Math.hypot(b1.x - 500, b1.z - 500);
   ok(d1 > 1500, `she comes from a distance (${Math.round(d1)} m)`);
   ok(Math.hypot(b1.x - b2.x, b1.z - b2.z) > 100, 'repeat signals answer from new bearings');
+  // and the berth is WATER, even when the rocket goes up in an archipelago:
+  // probe from the Florida coast, where most bearings at 1800 m are dry land
+  {
+    const shore = latLonToWorld(27.5, -80.2); // just off the Florida beach
+    for (let seed = 1; seed <= 12; seed++) {
+      const b = escortBerth(shore.x, shore.z, seed);
+      const ll = worldToLatLon(b.x, b.z);
+      ok(!isLand(ll.lat, ll.lon), `an answering corvette berths afloat (seed ${seed})`);
+    }
+  }
 }
 
 if (failed) { console.error(`verify-faction: ${failed} FAILED`); process.exit(1); }

@@ -1747,8 +1747,13 @@ class Game {
       // sail-hand's crisp 1.2/s) — the berth ladder buys real sailing.
       const helmSkill = Math.max(0.6, Math.min(1, 0.55 + 0.06 * this.crew));
       const sheets = this.crew - 1;
+      // the helmsman knows his set (currents.js): he aims off, up-current of
+      // the mark, so the Gulf Stream can't carry a Boston course to Nova
+      // Scotia — rivers have no fair current, so inland he steers plain
+      const set = this.overLand ? null : currentAt(this.ship.x, this.ship.z);
       const order = helmRoute({ yaw: this.ship.yaw, x: this.ship.x, z: this.ship.z },
-        this.route, this.routeLeg, this.wind.from, t, helmSkill, sheets);
+        this.route, this.routeLeg, this.wind.from, t, helmSkill, sheets,
+        set, this.ship.speed);
       this.routeLeg = order.next;
       this.maps.routeLeg = order.next; // the chart drops marks already made
       if (order.arrived) {

@@ -125,6 +125,48 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
   ok(manned < solo, `the sail-hand makes the passage faster (${manned.toFixed(0)}s vs ${solo.toFixed(0)}s alone)`);
 }
 
+// THE SET CORRECTION (the Boston fix): a cross-current is steered AGAINST —
+// the helmsman aims off, up-current of the mark, instead of letting the
+// stream carry the track down to Nova Scotia
+{
+  // mark dead ahead down-wind, a Gulf-Stream-strength set on the beam
+  const dry = helmOrder(0, 0, 0, 0, 4000, Math.PI, 3);
+  ok(Math.abs(dry.rudder) < 1e-9, 'no set: the mark dead ahead needs no helm');
+  const wet = helmOrder(0, 0, 0, 0, 4000, Math.PI, 3, 1, 1, { vx: 2.2, vz: 0 }, 6);
+  ok(wet.rudder < -0.05, `an eastward set is crabbed against, bow up-current (${wet.rudder.toFixed(2)})`);
+  const wetW = helmOrder(0, 0, 0, 0, 4000, Math.PI, 3, 1, 1, { vx: -2.2, vz: 0 }, 6);
+  ok(wetW.rudder > 0.05, 'and a westward set the other way');
+}
+
+// closed loop: the same crossing in the same stream, sailed aware vs blind —
+// the aware watch holds the track and lands sooner
+{
+  const voyage = (aware) => {
+    const s = newShipState(0, 0);
+    const wind = { from: Math.PI, speed: 8 };
+    const cur = { vx: 2.2, vz: 0 };
+    const mark = { x: 0, z: 6000 };
+    let t = 0, offTrack = 0;
+    const DT = 1 / 10;
+    for (let i = 0; i < 10 * 60 * 40; i++) {
+      const o = helmOrder(s.yaw, s.x, s.z, mark.x, mark.z, wind.from, t, 1, 1,
+        aware ? cur : null, aware ? s.speed : 0);
+      if (o.arrived) return { t, offTrack };
+      s.rudder = o.rudder;
+      s.trim += (o.trim - s.trim) * Math.min(1, DT * 1.2);
+      stepShip(s, wind, DT, SLOOP, 1, false, 0, cur);
+      offTrack = Math.max(offTrack, Math.abs(s.x));
+      t += DT;
+    }
+    return { t: Infinity, offTrack };
+  };
+  const aware = voyage(true), blind = voyage(false);
+  ok(Number.isFinite(aware.t), `the aware watch makes the mark (${aware.t.toFixed(0)}s)`);
+  ok(aware.t <= blind.t, `and lands no later than the blind one (${aware.t.toFixed(0)}s vs ${blind.t.toFixed(0)}s)`);
+  ok(aware.offTrack < blind.offTrack * 0.5,
+    `holding less than half the blind cross-track error (${aware.offTrack.toFixed(0)} m vs ${blind.offTrack.toFixed(0)} m)`);
+}
+
 // helmRoute follows a waypoint list: advance past a reached leg, arrive only at the last
 {
   const legs = [{ x: 0, z: 500 }, { x: 0, z: 4000 }];
