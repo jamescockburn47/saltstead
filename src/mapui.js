@@ -117,11 +117,13 @@ export class MapUI {
     this.routeLL = null;  // [{ lat, lon }, …] the LAID route (read only while course set)
     this.routeLeg = 0;    // the ACTIVE leg (main.js syncs it) — passed marks aren't drawn
     this.onCourse = null; // main.js hangs the handler here
+    this.onWrit = null;   // warden only: shift-click = the far writ (teleport)
     this.worldCanvas.addEventListener('click', (e) => {
-      if (!this.onCourse || this._dragged) return;
+      if (this._dragged) return;
       const p = this.toCanvasXY(e);
       const ll = this.worldLatLonAt(p.x, p.y);
-      this.onCourse(ll.lat, ll.lon);
+      if (e.shiftKey && this.onWrit) { this.onWrit(ll.lat, ll.lon); return; }
+      if (this.onCourse) this.onCourse(ll.lat, ll.lon);
     });
 
     // ---- ZOOM AND PAN: scroll or pinch to zoom, drag to pan ----

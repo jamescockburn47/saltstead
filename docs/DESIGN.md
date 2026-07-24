@@ -279,12 +279,12 @@ next class of ship under his boots, walking the whole seven-rung ladder and
 wrapping at the top, whole and uncrippled, free. For anyone else the key is
 dead silence. It is the inspection tool: any hull, any water, no economy.
 
-**The far writ** (its sibling on **J**): with a chart mark set, J strides
-the ship to the mark; with NO mark, J opens a prompt — a port or legend
-name ("port royal", "kraken") or "lat, lon" in degrees — and drops her in
-the nearest safe water to anywhere on earth. The same tool as
-`saltstead.goTo(...)` on the console, for people who don't live in one.
-Warden only, both doors.
+**The far writ** (its sibling, on the chart): the warden **shift-clicks
+anywhere on the world chart (M)** and the ship stands there, dropped in
+the nearest safe water — the same map every captain already reads, one
+modifier deeper. The chart's own caption says so to a warden. J still
+strides to a marked course; `saltstead.goTo(lat, lon)` / `goTo('port
+royal')` remains on the console for scripts. Warden only, every door.
 
 **Collision is real** (collide.js): every hull is a capsule, contacts shoulder
 apart, and closing speed above RAM_HURT wounds both ships through the same

@@ -399,6 +399,18 @@ class Game {
       `${this.hullDef.name} \u00b7 ${this.hullDef.guns} gun${this.hullDef.guns > 1 ? 's' : ''} a side \u00b7 ${this.fac.tag}`;
 
     this.maps = new MapUI();
+    // the warden's far writ lives ON the chart: shift-click anywhere on the
+    // world map and the ship stands there in the nearest safe water — the
+    // coast-inspection tool, using the map every captain already knows
+    if (this.warden) {
+      this.maps.onWrit = (lat, lon) => {
+        if (this.goTo(lat, lon)) this.maps.toggleWorld();
+      };
+      // the warden's chart says so on its own caption
+      const cap = document.querySelector('#worldmap .cap');
+      if (cap) cap.textContent = 'click — set a course · SHIFT-CLICK — the far writ (teleport anywhere) · '
+        + 'scroll or pinch — zoom · drag — pan · M, Esc, ✕ or tap outside — close';
+    }
     // the chart SETS the helmsman's course: click the world chart with a
     // hand aboard and she sails there (helmsman.js) while you work the deck
     this.course = null;
@@ -1456,16 +1468,7 @@ class Game {
   wardenTeleport() {
     if (!this.warden || this.portui.open) return;
     if (!this.course) {
-      // no chart mark: J asks where away instead — the whole planet by name
-      // or by degrees, no console required
-      const ans = window.prompt(
-        'THE FAR WRIT — where away?\nA port or legend name ("port royal", "kraken"), or "lat, lon" in degrees:',
-        '');
-      this.keys.clear(); // the prompt swallowed any keyups
-      if (!ans || !ans.trim()) return;
-      const parts = ans.split(',').map((s) => Number(s.trim()));
-      if (parts.length === 2 && parts.every(Number.isFinite)) this.goTo(parts[0], parts[1]);
-      else this.goTo(ans);
+      this.say('Open the chart (M) and SHIFT-CLICK anywhere — the far writ takes her there', 6);
       return;
     }
     this.ship.x = wrapX(this.course.x);
