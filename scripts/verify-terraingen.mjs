@@ -5,7 +5,7 @@
 import {
   CHUNK, RES, RES_SHORE, buildChunkData, chunkWorthBuilding, chunkRes, colourFor,
 } from '../src/terraingen.js';
-import { latLonToWorld } from '../src/earth.js';
+import { latLonToWorld, coastCharacter, chalkAt } from '../src/earth.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -114,6 +114,27 @@ ok(colourFor(1, 5, 0, 0.02, 0, 100).join() !== colourFor(1, 45, 0, 0.02, 0, 100)
   'tropical river shore reads mangrove, not temperate marsh');
 ok(colourFor(1, 70, 0, 0, 0).join() !== sand, 'polar shore is ice, not sand');
 ok(colourFor(1, 45, 0, 0.9, 0).join() !== sand, 'steep ground at the waterline reads rock');
+
+// the character actually VARIES along a sailed coast (the 98%-sand
+// calibration bug): sweep the English south coast and demand real spread
+{
+  let mn = 1, mx = 0;
+  for (let lon = -4.5; lon <= 1.4; lon += 0.13) {
+    const r = coastCharacter(50.6, lon);
+    mn = Math.min(mn, r); mx = Math.max(mx, r);
+  }
+  ok(mx - mn > 0.5, `the Channel coast varies sand->cliff (spread ${(mx - mn).toFixed(2)})`);
+}
+// the authored chalk: Beachy Head gleams white and stands as cliff
+ok(chalkAt(50.74, 0.1) > 0.5, 'Beachy Head is chalk country');
+ok(coastCharacter(50.74, 0.1) > 0.55, 'the chalk coast stands as cliffs');
+{
+  const c = colourFor(1, 50.74, 0.1, 0, coastCharacter(50.74, 0.1));
+  ok(c[0] > 0.7 && c[1] > 0.7 && c[2] > 0.65, `the Seven Sisters paint white (${c.map((v) => v.toFixed(2))})`);
+  const grey = colourFor(1, 43, 7, 0, 0.8);
+  ok(grey.join() !== c.join(), 'ordinary rock stays grey — chalk is the exception');
+}
+ok(chalkAt(17.9, -76.8) === 0, 'no chalk in the Caribbean');
 
 if (failed) { console.error(`verify-terraingen: ${failed} FAILED`); process.exit(1); }
 console.log('verify-terraingen: OK — deterministic chunks, analytic normals, '

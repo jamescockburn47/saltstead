@@ -199,8 +199,8 @@ try {
   await page.screenshot({ path: join(OUT, 'shore-amazon.png') });
   console.log('  shot - media/shore-amazon.png');
 
-  // ---- 5. the English coast: oak country ----
-  await goCoast(50.32, -3.62); // off the Devon coast
+  // ---- 5. the English coast: oak country under the chalk ----
+  await goCoast(50.72, 0.12); // off Beachy Head — the Seven Sisters gleam
   await sleep(3000);
   const england = await page.evaluate(() => {
     const g = window.saltstead;

@@ -12,7 +12,7 @@
 
 import {
   elevation, worldToLatLon, coastDistGame, riverDistGame, isLand,
-  coastCharacter, mountainness, RIVER_HALF,
+  coastCharacter, chalkAt, mountainness, RIVER_HALF,
 } from './earth.js';
 import { fbm2 } from './noise.js';
 
@@ -63,6 +63,8 @@ const WETSAND = [0.72, 0.68, 0.5];
 const BEACH = [0.83, 0.76, 0.55];
 const WETROCK = [0.4, 0.41, 0.4];
 const DRYROCK = [0.56, 0.54, 0.5];
+const WETCHALK = [0.78, 0.79, 0.75];
+const DRYCHALK = [0.92, 0.92, 0.87];
 const SHINGLE = [0.62, 0.58, 0.5];
 const MARSH = [0.44, 0.5, 0.32];
 const MANGROVE = [0.2, 0.38, 0.22];
@@ -105,14 +107,22 @@ function upland(h, aLat, lon, lat) {
 // or the ground stands steep, shingle on the half-rocky stretches, reedy
 // marsh on dead-flat river ground (mangrove-dark in the tropics), ice past
 // the polar rim, sand elsewhere.
-function shoreBand(aLat, rock, slope, riverD) {
+function shoreBand(aLat, rock, slope, riverD, chalk) {
   if (aLat > 66) return [ICESHORE, ICESHORE];
-  if (rock > 0.55 || slope > 0.75) return [WETROCK, DRYROCK];
+  if (rock > 0.55 || slope > 0.75) {
+    // the authored chalk coasts gleam white; everywhere else rock is rock
+    return chalk > 0
+      ? [mix3(WETROCK, WETCHALK, chalk), mix3(DRYROCK, DRYCHALK, chalk)]
+      : [WETROCK, DRYROCK];
+  }
   if (rock > 0.32) return [mix3(WETSAND, SHINGLE, 0.7), SHINGLE];
   if (riverD < 220 && slope < 0.16) {
     return aLat < 20 ? [mix3(WETSAND, MANGROVE, 0.6), MANGROVE] : [mix3(WETSAND, MARSH, 0.6), MARSH];
   }
-  return [WETSAND, BEACH];
+  // even the sand grades: a harder stretch of coast carries greyer, coarser
+  // sand than a soft bay — the continuous rock value does the blending
+  const grit = Math.max(0, Math.min(1, (rock - 0.12) / 0.2)) * 0.55;
+  return [mix3(WETSAND, SHINGLE, grit * 0.6), mix3(BEACH, SHINGLE, grit)];
 }
 
 // height + latitude -> biome palette (RGB 0..1). Deterministic. The bands
@@ -121,13 +131,20 @@ function shoreBand(aLat, rock, slope, riverD) {
 // (optional — the mesh builder supplies them) pick the shore's CHARACTER.
 export function colourFor(h, lat = 45, lon = 0, slope = 0, rock = 0, riverD = 1e9) {
   const aLat = Math.abs(lat);
-  const [lo, hi] = shoreBand(aLat, rock, slope, riverD);
+  const chalk = rock > 0.55 ? chalkAt(lat, lon) : 0;
+  const [lo, hi] = shoreBand(aLat, rock, slope, riverD, chalk);
   if (h < -7) return DEEP;
   if (h < -5) return mix3(DEEP, lo, (h + 7) / 2);
   if (h < -0.6) return lo;
   if (h < -0.2) return mix3(lo, hi, (h + 0.6) / 0.4);
   if (h < 1.8) return hi;
   const up = upland(h, aLat, lon, lat);
+  // a CLIFF FACE wears its rock (or chalk) the whole way up — only the flat
+  // top turns green, grass over the white: the Seven Sisters silhouette
+  if (rock > 0.55 && h < 26 && slope > 0.35) {
+    const face = chalk > 0 ? mix3(DRYROCK, DRYCHALK, chalk) : DRYROCK;
+    return mix3(face, up, smt(0.55, 0.3, slope)); // steeper -> purer face
+  }
   if (h < 2.6) return mix3(hi, up, (h - 1.8) / 0.8);
   return up;
 }

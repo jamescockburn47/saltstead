@@ -1455,7 +1455,19 @@ class Game {
   // for testing the helmsman, the currents, the wrap, and the storms.
   wardenTeleport() {
     if (!this.warden || this.portui.open) return;
-    if (!this.course) { this.say('Mark a spot on the chart (M) first, then J steps you to it', 5); return; }
+    if (!this.course) {
+      // no chart mark: J asks where away instead — the whole planet by name
+      // or by degrees, no console required
+      const ans = window.prompt(
+        'THE FAR WRIT — where away?\nA port or legend name ("port royal", "kraken"), or "lat, lon" in degrees:',
+        '');
+      this.keys.clear(); // the prompt swallowed any keyups
+      if (!ans || !ans.trim()) return;
+      const parts = ans.split(',').map((s) => Number(s.trim()));
+      if (parts.length === 2 && parts.every(Number.isFinite)) this.goTo(parts[0], parts[1]);
+      else this.goTo(ans);
+      return;
+    }
     this.ship.x = wrapX(this.course.x);
     this.ship.z = this.course.z;
     this.ship.speed = 0;

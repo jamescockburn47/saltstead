@@ -272,14 +272,37 @@ const RIVER_VALLEY = 200;        // floodplain width beyond the channel
 // longboat — the El Dorado thesis in one number (galleon groundLine -3.0).
 export const RIVER_DEPTH = -3.2;
 
-// THE COAST'S CHARACTER (2026-07-24): not every shore is a beach. A slow
-// regional noise — sharpened where a mountain range meets the sea — says how
-// ROCKY this stretch of coast is: 0 reads sand and dunes, 1 reads cliffs and
-// shingle. Pure and deterministic; terraingen paints by it and elevation
-// raises a bluff by it, so the colour and the silhouette always agree.
+// THE COAST'S CHARACTER (2026-07-24): not every shore is a beach. Two noise
+// octaves — a slow regional register and a ~100 game-m headland/bay
+// alternation — sharpened where a mountain range meets the sea, say how
+// ROCKY this stretch of coast is: 0 reads sand and dunes, 1 reads cliffs
+// and shingle. Calibrated to the noise's REAL distribution (mean 0.235,
+// sd 0.06 — the first cut's 0.36 threshold made 98% of the world sand).
+// Pure and deterministic; terraingen paints by it and elevation raises a
+// bluff by it, so the colour and the silhouette always agree.
 export function coastCharacter(lat, lon) {
-  const n = fbm2(lon * 0.7 + 31, lat * 0.7 - 11);
-  return Math.max(0, Math.min(1, (n - 0.36) * 2.4 + mountainness(lat, lon) * 0.5));
+  const nR = fbm2(lon * 0.7 + 31, lat * 0.7 - 11);   // the regional register
+  const nF = fbm2(lon * 4.3 + 57, lat * 4.3 + 13);   // headlands and bays
+  return Math.max(0, Math.min(1,
+    0.42 + (nR - 0.235) * 4.2 + (nF - 0.235) * 3.4
+    + mountainness(lat, lon) * 0.5 + chalkAt(lat, lon) * 0.6));
+}
+
+// THE CHALK COASTS — authored geography, like the ranges: the famous white
+// cliffs are hand-placed so the real places really gleam. Append-only.
+export const CHALK_COASTS = [
+  { name: 'The Seven Sisters & Beachy Head', lat: 50.75, lon: 0.15, r: 1.0 },
+  { name: 'The White Cliffs of Dover', lat: 51.1, lon: 1.3, r: 0.6 },
+  { name: 'Étretat', lat: 49.7, lon: 0.2, r: 0.6 },
+  { name: 'Rügen', lat: 54.55, lon: 13.66, r: 0.45 },
+  { name: 'Møns Klint', lat: 54.97, lon: 12.55, r: 0.35 },
+];
+export function chalkAt(lat, lon) {
+  for (const c of CHALK_COASTS) {
+    const d = Math.hypot(lat - c.lat, (lon - c.lon) * Math.cos((lat * Math.PI) / 180));
+    if (d < c.r) return 1 - (d / c.r) * 0.4;
+  }
+  return 0;
 }
 
 export function elevation(lat, lon) {
@@ -293,13 +316,14 @@ export function elevation(lat, lon) {
   const ramp = 1 - Math.exp(-d / 260);
   // interior rise flattens out: plains stay plains, only ranges make mountains
   let h = 0.8 + Math.min(d, 900) * 0.012 + 24 * ramp * (0.35 + 0.65 * n);
-  // a rocky coast stands up out of the water: the bluff rises over the first
-  // ~60 m inland, so cliffs meet the sea instead of every shore shelving
-  // through the same sand. Land side only — the waterline itself never moves.
+  // a rocky coast stands up out of the water: the bluff climbs its full
+  // height over the first ~25 m inland — a FACE, not a bank — so cliffs
+  // meet the sea instead of every shore shelving through the same sand.
+  // Land side only: the waterline itself never moves.
   const rock = coastCharacter(lat, lon);
   if (rock > 0.3 && d < 400) {
-    const bluff = smooth01((d - 6) / 55) * (1 - smooth01((d - 220) / 180));
-    h += (rock - 0.3) * 18 * bluff * (0.6 + 0.4 * n);
+    const bluff = smooth01((d - 4) / 22) * (1 - smooth01((d - 220) / 180));
+    h += (rock - 0.3) * 26 * bluff * (0.6 + 0.4 * n);
   }
   const m = mountainness(lat, lon);
   if (m > 0) {
