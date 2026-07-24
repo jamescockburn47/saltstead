@@ -199,6 +199,21 @@ try {
   await page.screenshot({ path: join(OUT, 'shore-amazon.png') });
   console.log('  shot - media/shore-amazon.png');
 
+  // ---- 5. the English coast: oak country ----
+  await goCoast(50.32, -3.62); // off the Devon coast
+  await sleep(3000);
+  const england = await page.evaluate(() => {
+    const g = window.saltstead;
+    return {
+      decorMeshes: [...g.shoreDecor.cells.values()].filter((c) => c.mesh).length,
+      farWritRefused: g.goTo(0, 0) === false, // a guest holds no far writ
+    };
+  });
+  ok(england.decorMeshes > 0, `the English coast is decorated (${england.decorMeshes} cells)`);
+  ok(england.farWritRefused, 'the far writ refuses a guest');
+  await page.screenshot({ path: join(OUT, 'shore-england.png') });
+  console.log('  shot - media/shore-england.png');
+
   ok(pageErrors.length === 0,
     `no page errors (${pageErrors.length ? pageErrors.slice(0, 3).join(' | ') : 'clean'})`);
 } finally {

@@ -31,6 +31,9 @@ assets, browser-first, deterministic, verify-gated**. Public client:
  ashore mode stays retired.
 - Dev: `npm run dev` (port 5173). `window.saltstead` is the live Game handle
   (`.ship`, `.cam`, `.aground`, `.coastDist`, `.dayStart`, `.ocean.uniforms`).
+  Wardens also get `saltstead.goTo(lat, lon)` / `goTo('port royal')` /
+  `goTo('kraken')` — the far writ drops the ship in the nearest safe water to
+  any place on earth (the coast-inspection tool).
 - Marketing footage: `saltstead.showreel()` in the live console records the
   legend tour to a clean 1080p `.webm` (src/showreel.js, Moorstead's rig);
   `scripts/capture-showreel.mjs` runs the same reel headless into `media/`.

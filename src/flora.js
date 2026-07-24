@@ -45,6 +45,33 @@ const ICO_F = [
   [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
 ];
 
+// one midpoint subdivision (42 verts, 80 faces) — the crinkled-canopy mesh:
+// still low-poly flat-shaded, but the silhouette breaks into real lumps
+const SUB_V = ICO_V.map((v) => v.slice());
+const SUB_F = [];
+{
+  const mid = new Map();
+  const midpoint = (a, b) => {
+    const key = a < b ? a * 64 + b : b * 64 + a;
+    let m = mid.get(key);
+    if (m === undefined) {
+      const p = [
+        (SUB_V[a][0] + SUB_V[b][0]) / 2,
+        (SUB_V[a][1] + SUB_V[b][1]) / 2,
+        (SUB_V[a][2] + SUB_V[b][2]) / 2,
+      ];
+      const l = Math.hypot(p[0], p[1], p[2]);
+      m = SUB_V.push([p[0] / l, p[1] / l, p[2] / l]) - 1;
+      mid.set(key, m);
+    }
+    return m;
+  };
+  for (const [a, b, c] of ICO_F) {
+    const ab = midpoint(a, b), bc = midpoint(b, c), ca = midpoint(c, a);
+    SUB_F.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]);
+  }
+}
+
 // ---- the emitting builder ----
 function newBuf() {
   return { p: [], n: [], c: [], w: [] };
@@ -64,13 +91,17 @@ function tri(buf, a, b, c, col, wa, wb, wc) {
   }
 }
 
-// a jittered squashed icosahedron — the canopy blob
-function blob(buf, rng, cx, cy, cz, rx, ry, rz, jitter, col, flex) {
-  const v = ICO_V.map(([x, y, z]) => {
+// a jittered squashed icosahedron — the canopy blob. crinkled: the
+// subdivided mesh, whose per-vertex jitter breaks the silhouette into the
+// lumpy mass a real crown reads as
+function blob(buf, rng, cx, cy, cz, rx, ry, rz, jitter, col, flex, crinkled = false) {
+  const V = crinkled ? SUB_V : ICO_V;
+  const F = crinkled ? SUB_F : ICO_F;
+  const v = V.map(([x, y, z]) => {
     const j = 1 + (rng() - 0.5) * 2 * jitter;
     return [cx + x * rx * j, cy + y * ry * j, cz + z * rz * j];
   });
-  for (const [a, b, c] of ICO_F) {
+  for (const [a, b, c] of F) {
     tri(buf, v[a], v[b], v[c], col, flex, flex, flex);
   }
 }
@@ -115,8 +146,7 @@ function tube(buf, pts, r0, r1, sides, col, flexFn) {
 }
 
 // a drooping folded frond strip — palm and fern leaves
-function frond(buf, rng, bx, by, bz, az, len, width, tilt, droop, col, flexBase) {
-  const segs = 2;
+function frond(buf, rng, bx, by, bz, az, len, width, tilt, droop, col, flexBase, segs = 3) {
   const dirx = Math.sin(az), dirz = Math.cos(az);
   let px = bx, py = by, pz = bz;
   let ang = tilt; // radians above horizontal at the base
@@ -255,14 +285,62 @@ function palm(rng) {
   const trunk = growTrunk(rng, h, 5, 0.03, Math.sin(leanA) * lean, Math.cos(leanA) * lean);
   tube(buf, trunk, 0.13, 0.07, 4, BARK_PALE, (t) => 0.04 + 0.5 * t * t);
   const top = trunk[trunk.length - 1];
-  const nFr = 7 + Math.floor(rng() * 3);
+  // a full crown of long arching pinnate fronds, three tiers of pitch
+  const nFr = 9 + Math.floor(rng() * 4);
   const green = hueShift([0.15, 0.42, 0.2], rng, 0.3);
   let az = rng() * Math.PI * 2;
   for (let f = 0; f < nFr; f++) {
     az += 2.39996 + (rng() - 0.5) * 0.3; // golden angle
     frond(buf, rng, top[0], top[1] + 0.1, top[2], az,
-      1.9 + rng() * 0.9, 0.24 + rng() * 0.08,
-      0.75 - (f % 3) * 0.32, 0.5, hueShift(green, rng, 0.14), 0.85);
+      2.1 + rng() * 1.0, 0.19 + rng() * 0.07,
+      0.85 - (f % 3) * 0.38, 0.42, hueShift(green, rng, 0.14), 0.85, 3);
+  }
+  // the coconut cluster under the crown
+  for (let k = 0; k < 2 + Math.floor(rng() * 2); k++) {
+    blob(buf, rng, top[0] + (rng() - 0.5) * 0.5, top[1] - 0.18, top[2] + (rng() - 0.5) * 0.5,
+      0.13, 0.15, 0.13, 0.12, [0.32, 0.24, 0.14], 0.6);
+  }
+  return buf;
+}
+
+// the English oak: a short stout gnarled bole, heavy limbs reaching wide,
+// a crown broader than it is tall built of crinkled lumps — the temperate
+// coast's characteristic tree
+function oak(rng) {
+  const buf = newBuf();
+  const h = 3.2 + rng() * 1.8;               // the bole is SHORT
+  const leanX = (rng() - 0.5) * 0.2, leanZ = (rng() - 0.5) * 0.2;
+  const trunk = growTrunk(rng, h * 0.55, 3, 0.2, leanX, leanZ);
+  tube(buf, trunk, 0.26 + h * 0.02, 0.14, 5, BARK, (t) => 0.03 + 0.16 * t);
+  const top = trunk[trunk.length - 1];
+  const green = hueShift([0.18, 0.38, 0.14], rng, 0.3); // oak's darker leaf
+  const crownR = h * (0.85 + rng() * 0.35);   // wider than tall
+  // heavy limbs curve out and up, each ending in its own canopy lump
+  const nLimb = 3 + Math.floor(rng() * 3);
+  let az = rng() * Math.PI * 2;
+  const lumps = [];
+  for (let b = 0; b < nLimb; b++) {
+    az += (Math.PI * 2) / nLimb + (rng() - 0.5) * 0.7;
+    const reach = crownR * (0.55 + rng() * 0.4);
+    const tip = [
+      top[0] + Math.sin(az) * reach,
+      top[1] + reach * (0.35 + rng() * 0.35),
+      top[2] + Math.cos(az) * reach,
+    ];
+    const mid = [
+      top[0] + Math.sin(az + 0.3) * reach * 0.45,
+      top[1] + reach * 0.32,
+      top[2] + Math.cos(az + 0.3) * reach * 0.45,
+    ];
+    tube(buf, [top, mid, tip], 0.11, 0.04, 4, BARK, (t) => 0.12 + 0.3 * t);
+    lumps.push([tip[0], tip[1] + 0.25, tip[2], 0.8 + rng() * 0.4, false]);
+  }
+  // the crown's heart is one big crinkled mass over the bole
+  lumps.push([top[0], top[1] + h * 0.32, top[2], 1.45, true]);
+  for (const [bx, by, bz, k, crinkled] of lumps) {
+    const r = (0.8 + rng() * 0.4) * k * (h / 4.2);
+    blob(buf, rng, bx, by, bz, r * 1.15, r * 0.72, r * 1.15, 0.3,
+      hueShift(green, rng, 0.14), 0.45 + rng() * 0.3, crinkled);
   }
   return buf;
 }
@@ -281,22 +359,22 @@ function scrub(rng) {
 
 function fern(rng) {
   const buf = newBuf();
-  const n = 5 + Math.floor(rng() * 3);
+  const n = 6 + Math.floor(rng() * 4);
   const green = hueShift([0.1, 0.34, 0.14], rng, 0.3);
   let az = rng() * Math.PI * 2;
   for (let f = 0; f < n; f++) {
     az += 2.39996 + (rng() - 0.5) * 0.4;
-    frond(buf, rng, 0, 0.12, 0, az, 0.9 + rng() * 0.5, 0.14,
-      1.0, 0.85, hueShift(green, rng, 0.16), 0.9);
+    frond(buf, rng, 0, 0.12, 0, az, 0.9 + rng() * 0.5, 0.13,
+      1.05, 0.8, hueShift(green, rng, 0.16), 0.9, 2);
   }
   return buf;
 }
 
-const SPECIES = { conifer, broadleaf, palm, scrub, fern };
+const SPECIES = { conifer, broadleaf, oak, palm, scrub, fern };
 export const FLORA_KINDS = Object.keys(SPECIES);
 
 // upper bound the scene layer sizes buffers against (verify holds it)
-export const FLORA_MAX_VERTS = 900;
+export const FLORA_MAX_VERTS = 1400;
 
 // grow one plant: kind + seed -> { p, n, c, w } flat Float32Arrays
 // (positions, flat normals, colours, wind flex per vertex), origin at the

@@ -17,7 +17,7 @@ import { HARBOURED } from './harbour.js';
 
 export const DECOR_CELL = 240;  // metres square per streamed cell
 export const DECOR_MAX = 260;   // hard cap on instances per cell
-export const DECOR_KINDS = ['conifer', 'broadleaf', 'palm', 'scrub', 'fern', 'hut', 'cottage', 'church'];
+export const DECOR_KINDS = ['conifer', 'broadleaf', 'oak', 'palm', 'scrub', 'fern', 'hut', 'cottage', 'church'];
 
 const STEP = 12;                // candidate lattice spacing (jittered)
 const NPTS = DECOR_CELL / STEP; // 20 candidates per side
@@ -60,23 +60,28 @@ export function speciesFor(lat, lon, h, waterD, roll, jungle = false) {
       : roll < 0.92 ? 'fern' : 'scrub';
   }
   const desert = desertAt(lat, lon);
-  // the weights: each species' share of this latitude, blended at the seams
+  // the weights: each species' share of this latitude, blended at the seams.
+  // The temperate belt is OAK country (England's tree); tropical broadleaf
+  // hands over to it through 26-36 deg, conifers own the boreal edge.
   let wPalm = (1 - sm(20, 30, aLat)) * (waterD < 60 ? 1.3 : 0.45);
-  let wBroad = (0.25 + 0.75 * sm(8, 20, aLat)) * (1 - sm(48, 62, aLat))
+  let wBroad = (0.25 + 0.75 * sm(8, 20, aLat)) * (1 - sm(26, 36, aLat))
     + (1 - sm(14, 22, aLat)) * 0.55;
-  let wConifer = sm(25, 42, aLat) * (1 - sm(62, 70, aLat)) * 1.1;
+  let wOak = sm(24, 34, aLat) * (1 - sm(54, 64, aLat)) * 1.15;
+  let wConifer = (sm(30, 44, aLat) * 0.45 + sm(54, 62, aLat) * 0.8)
+    * (1 - sm(62, 70, aLat));
   let wScrub = 0.3;
   let wFern = jungleAdj(aLat) * 0.2;
   if (desert) {
     // the belts thin to scrub and oasis palms — noise already broke the edges
-    wBroad *= 0.08; wConifer *= 0.1; wScrub = 0.55;
+    wBroad *= 0.08; wOak *= 0.08; wConifer *= 0.1; wScrub = 0.55;
     wPalm = waterD < 55 ? 0.5 : 0.04;
     if (roll > (wScrub + wPalm) * 0.9) return null;            // bare waste
   }
-  const sum = wPalm + wBroad + wConifer + wScrub + wFern;
+  const sum = wPalm + wBroad + wOak + wConifer + wScrub + wFern;
   let r = roll * sum;
   if ((r -= wPalm) < 0) return 'palm';
   if ((r -= wBroad) < 0) return 'broadleaf';
+  if ((r -= wOak) < 0) return 'oak';
   if ((r -= wConifer) < 0) return 'conifer';
   if ((r -= wFern) < 0) return 'fern';
   return 'scrub';

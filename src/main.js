@@ -42,6 +42,7 @@ import {
 } from './flotsam.js';
 import { FlotsamLayer } from './flotsamlayer.js';
 import { LEGENDS } from './legends.js';
+import { HARBOURED } from './harbour.js';
 import { decide as helmWatch, PILOT_R } from './helmwatch.js';
 import { RESCUE_R, GRATITUDE } from './survivors.js';
 import { HULLS, hullById, nextHull, prevHull, buyHull } from './shipyard.js';
@@ -1402,6 +1403,51 @@ class Game {
       + `(${def.guns} gun${def.guns > 1 ? 's' : ''} a side, ${def.berths} berths)`, 6);
     this.logEvent(`The warden's writ raised a ${def.name} from the sea`);
     this.persist();
+  }
+
+  // The far writ: saltstead.goTo(lat, lon) \u2014 or goTo('port royal'),
+  // goTo('kraken') \u2014 drops the warden's ship in the nearest safe water to
+  // ANY place on earth. The inspection tool for any coast on the planet;
+  // console-only, warden-only, like the writ itself.
+  goTo(latOrName, lon) {
+    if (!this.warden) { this.say('The far writ is the warden\u2019s alone', 4); return false; }
+    let lat = latOrName;
+    if (typeof latOrName === 'string') {
+      const q = latOrName.trim().toLowerCase();
+      const hit = HARBOURED.find((p) => p.name.toLowerCase().includes(q))
+        || LEGENDS.find((l) => l.name.toLowerCase().includes(q) || l.id.includes(q));
+      if (!hit) { this.say(`No port or legend answers to "${latOrName}"`, 5); return false; }
+      lat = hit.lat; lon = hit.lon;
+    }
+    if (typeof lat !== 'number' || typeof lon !== 'number'
+      || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+      this.say('goTo wants (lat, lon) in degrees, or a port/legend name', 5);
+      return false;
+    }
+    const w = latLonToWorld(lat, Math.max(-180, Math.min(180, lon)));
+    // spiral out for sailable water: prefer close-in, settle for any depth
+    let spot = null;
+    outer:
+    for (let r = 0; r <= 2400 && !spot; r += 24) {
+      for (let a = 0; a < 24; a++) {
+        const ang = (a / 24) * Math.PI * 2;
+        const x = wrapX(w.x + Math.sin(ang) * r), z = w.z + Math.cos(ang) * r;
+        const ll = worldToLatLon(x, z);
+        if (elevation(ll.lat, ll.lon) < -1.5) { spot = { x, z }; break outer; }
+      }
+    }
+    if (!spot) { this.say('No sailable water within reach of that spot', 5); return false; }
+    this.ship.x = spot.x; this.ship.z = spot.z;
+    this.ship.speed = 0; this.ship.rudder = 0;
+    this.course = null; this.route = null; this.maps.course = null;
+    this.passage = null;
+    this.courseFromPilotage = false; this.handbackMode = null; this.handbackReason = '';
+    this.geoClock = 0;
+    const at = worldToLatLon(this.ship.x, this.ship.z);
+    this.say(`THE FAR WRIT \u2014 she stands at ${at.lat.toFixed(2)}\u00b0, ${at.lon.toFixed(2)}\u00b0`, 6);
+    this.logEvent(`The warden's far writ moved the ship to ${at.lat.toFixed(2)}, ${at.lon.toFixed(2)}`);
+    this.persist();
+    return true;
   }
 
   // Y's sibling: J steps the warden to wherever the chart is marked. Set a course

@@ -263,8 +263,8 @@ function ridged(x, z) {
   return 1 - Math.abs(2 * valueNoise2(x, z) - 1);
 }
 
-export const RIVER_HALF = 40;    // game metres: half-width of a river channel
-const RIVER_VALLEY = 130;        // valley shoulder width
+export const RIVER_HALF = 60;    // game metres: half-width of a river channel
+const RIVER_VALLEY = 200;        // floodplain width beyond the channel
 // channel depth at the centreline, in game metres BELOW WATER — an absolute
 // cut, not ground-relative, so the Mississippi is as wet in high country as
 // the Amazon at its mouth. Deep enough for every beaching hull with ease, a
@@ -308,8 +308,14 @@ export function elevation(lat, lon) {
   }
   const rv = riverDistGame(lat, lon);
   if (rv < RIVER_VALLEY) {
-    const vt = 1 - rv / RIVER_VALLEY;             // valley shoulders
-    h *= 1 - 0.55 * vt * vt;
+    // the FLOODPLAIN (2026-07-24): a great river runs at land level through
+    // flat low banks — the Amazon is a plain of water, not a gouged gulley.
+    // The ground SETTLES onto a low bank surface toward the channel (never
+    // raised, only lowered), so from the deck you see over the bank into
+    // the country instead of up two walls.
+    const t = smooth01(1 - rv / RIVER_VALLEY);    // 0 at the plain -> 1 at the water
+    const plain = 1.8 + (1 - t) * 3.0;            // the bank: ~1.8 m at the edge
+    h = h * (1 - t) + Math.min(h, plain) * t;
     if (rv < RIVER_HALF) {
       const ct = 1 - rv / RIVER_HALF;             // 1 at the centreline
       const s = ct * ct * (3 - 2 * ct);           // smooth shelving banks

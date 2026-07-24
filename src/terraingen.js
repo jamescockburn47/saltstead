@@ -45,11 +45,13 @@ export function chunkWorthBuilding(cx, cz) {
 
 // the waterline chunks earn the fine grid; a chunk whose centre is farther
 // from the coast than this can never touch the h=0 crossing (half-diagonal
-// is 68 m), so it keeps the cheap inland grid
+// is 68 m), so it keeps the cheap inland grid. River corridors carry their
+// own waterline, so they earn it too.
 export function chunkRes(cx, cz) {
   const half = CHUNK / 2;
   const { lat, lon } = worldToLatLon(cx * CHUNK + half, cz * CHUNK + half);
-  return coastDistGame(lat, lon) < CHUNK * 1.6 ? RES_SHORE : RES;
+  if (coastDistGame(lat, lon) < CHUNK * 1.6) return RES_SHORE;
+  return riverDistGame(lat, lon) < CHUNK * 1.4 ? RES_SHORE : RES;
 }
 
 const mix3 = (a, b, t) => [

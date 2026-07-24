@@ -80,12 +80,17 @@ for (let roll = 0.05; roll < 1; roll += 0.1) {
     for (let roll = 0.005; roll < 1; roll += 0.01) s.add(speciesFor(lat, 5, 4, 100, roll));
     return s;
   };
-  const seam35 = at(35); // conifers arriving, broadleaf still strong
-  ok(seam35.has('conifer') && seam35.has('broadleaf'),
-    'the 35-deg seam grows both conifer and broadleaf');
-  const seam25 = at(25); // palms not yet gone, broadleaf arrived
+  const seam35 = at(35); // oak country, conifers arriving, broadleaf leaving
+  ok(seam35.has('conifer') && seam35.has('oak'),
+    'the 35-deg seam grows both conifer and oak');
+  const seam30 = at(30); // the broadleaf/oak handover
+  ok(seam30.has('broadleaf') && seam30.has('oak'),
+    'the 30-deg seam grows both broadleaf and oak');
+  const seam25 = at(25); // palms not yet gone, broadleaf still strong
   ok(seam25.has('palm') && seam25.has('broadleaf'),
     'the 25-deg seam grows both palm and broadleaf');
+  const england = at(51); // the English coast is oak country
+  ok(england.has('oak'), 'England grows oaks');
   const seam66 = at(66); // the polar fade thins conifers, never a wall
   ok(seam66.has('conifer') || seam66.has('scrub'), 'the 66-deg seam still grows');
 }
