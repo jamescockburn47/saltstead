@@ -12,7 +12,8 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 - `src/` modules are small and single-purpose; pure logic modules (waves, sailing,
  shipphysics, shipframe, foam, earth, terraingen, shoredecor, flora, skymath,
  lightrig, woodgrain, legends, legendfx, combat, monsters, merchants, plunder,
- treasure, fleet, port, ports, shipyard, noise, searoute; showreel's pose maths)
+ treasure, fleet, port, ports, shipyard, noise, searoute, shanties; showreel's
+ pose maths)
  have **no THREE/DOM imports** and each is guarded by a `scripts/verify-*.mjs`
  check (flora is guarded inside verify-shoredecor).
 - `src/earthdata.js` is **generated** by `scripts/build-earthdata.mjs` from Natural
@@ -20,7 +21,7 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 
 ## Build & verify
 
-- `npm run verify` — the headless gate (59 checks). **Must be green before deploy.**
+- `npm run verify` — the headless gate (60 checks). **Must be green before deploy.**
  Add a verify script with every feature; prefer testing pure modules headlessly over
  eyeballing. `scripts/live-classes.mjs` (puppeteer, needs the dev server) smoke-tests
  the seven ship classes, a long-range battle and a ramming in a real browser;

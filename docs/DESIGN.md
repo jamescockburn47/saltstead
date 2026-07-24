@@ -88,7 +88,31 @@ attitude to the player (hunt / flee / neutral) follows the attitude matrix in
 faction.js; merchants.js stays faction-blind and takes the attitude as an input.
 The flag rides the save; every pre-faction save reads as a pirate.
 
-## Sea battles (BUILT — combat.js, verify-combat)
+## The ship's music (BUILT — shanties.js + shantybox.js, verify-shanties)
+
+Background music, synthesised — zero assets, like everything else. The split is
+history, not flavour: the Royal Navy banned singing at work (orders must be
+heard), so **the King's music** is composed and instrumental — Heart of Oak,
+Rule Britannia, Lillibullero, Portsmouth, the Keel Row, Spanish Ladies — fife,
+drum, brass and the wardroom fiddle, major-key and on the beat. **The black
+flag's music** is the merchant canon the navy never sang: work shanties and
+forebitters (Drunken Sailor, Lowlands Away, Randy Dandy-O, Boney in phrygian,
+Stormalong, the Wellerman…), modal and call-and-response, on fiddle,
+concertina, whistle and a droned open fifth. Shared water keeps the ballads —
+Henry Martin, High Barbary, Greensleeves. 28 tunes, all traditional and out
+of copyright, transcribed as note data (`shanties.js`) from collected sources
+(Hugill / Oxford Book of Sea Songs ABC mirrors).
+
+The musical MIND is pure and deterministic (verify-gated): a day-seeded
+rotation (carols.js law — same order for every deck that shares the seed), a
+per-rendition arrangement plan (lead instrument, transposition, tempo, drone,
+harmony-in-thirds, drum, cut-note density, call-and-response across passes),
+and a mood policy — music is a **visitor**: short renditions, long silences,
+fullest at anchor and in harbour, barely-there at sea, quieter by night, and
+stood down entirely for guns, gales and groundings. `shantybox.js` renders
+the scores in WebAudio (two-clocks lookahead, decaying-noise convolution
+air, a bus lowpass the weather closes) behind the first-gesture unlock.
+**I** strikes the band up or stands it down; the choice is remembered.
 
 Broadsides on F (R swaps round/chain shot), damage-as-states on both sides,
 navy corvettes that hunt and shoot back, sinking + floating salvage, the

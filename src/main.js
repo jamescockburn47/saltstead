@@ -116,6 +116,8 @@ import { LegendLayer } from './legendlayer.js';
 import { unit2 } from './noise.js';
 import { installKiosk } from './kiosk.js';
 import { gatherContext, submitFeedback } from './feedback.js';
+import { moodFor } from './shanties.js';
+import { ShantyBox } from './shantybox.js';
 import { TitleScene } from './titlescene.js';
 import { runShowreel, stopShowreel } from './showreel.js';
 
@@ -332,6 +334,16 @@ class Game {
     this.showreel = (opts) => runShowreel(this, opts);
     this.showreelStop = () => stopShowreel(this);
 
+    // THE SHIP'S BAND (shanties.js decides, shantybox.js plays): the crew's
+    // own music, synthesised — the repertoire follows the flag. The context
+    // unlocks inside the first gesture (the autoplay law); unlock() is
+    // idempotent, so whichever of the two listeners fires second is a no-op.
+    this.music = new ShantyBox();
+    this.hostileDist = Infinity; // refreshed where the hunter block looks about
+    const unlockMusic = () => this.music.unlock();
+    addEventListener('keydown', unlockMusic, { once: true });
+    addEventListener('pointerdown', unlockMusic, { once: true });
+
     this.keys = new Set();
     addEventListener('keydown', (e) => {
       if (typingInField()) return; // the feedback box eats its own keystrokes
@@ -352,6 +364,7 @@ class Game {
       if (e.code === 'KeyK' && !e.repeat) this.startDrill();
       if (e.code === 'KeyP' && !e.repeat) this.toggleLines();
       if (e.code === 'KeyU' && !e.repeat) this.heaveChipLog();
+      if (e.code === 'KeyI' && !e.repeat) this.toggleMusic();
       if (e.code === 'Digit1' && !e.repeat) this.callDispute(1);
       if (e.code === 'Digit2' && !e.repeat) this.callDispute(2);
     });
@@ -1266,6 +1279,14 @@ class Game {
     this.gfxWatch.frames.length = 0; this.gfxWatch.span = 0;
     try { localStorage['saltstead-gfx2'] = next; } catch { /* private mode */ }
     this.say(`Graphics: ${next.toUpperCase()} — your choice, remembered (V to change back)`, 5);
+  }
+
+  // I — the ship's band, struck up or stood down; the choice is remembered
+  toggleMusic() {
+    const m = !this.music.muted;
+    this.music.setMuted(m);
+    this.say(m ? 'The band stands down — a quiet ship (I strikes them up again)'
+      : 'The crew strikes up — the flag picks the tunes (I for a quiet ship)', 5);
   }
 
   // the fps watchdog (gfxprobe.js): after the opening settle, judge each
@@ -2344,6 +2365,7 @@ class Game {
     // the raiders at a King's ship — whoever she is, she shoots FIRST
     {
       const hostile = this.merchants.nearestHostile(this.ship.x, this.ship.z, this.fac.hostileType);
+      this.hostileDist = hostile ? hostile.dist : Infinity; // the band reads the danger too
       for (const [id, cool] of this.navyCool) {
         this.navyCool.set(id, cool - dt);
       }
@@ -3136,6 +3158,20 @@ class Game {
       this.renderer.toneMappingExposure +=
         (exposureTarget(sol.dayness) - this.renderer.toneMappingExposure) * Math.min(1, dt * 0.4);
     }
+
+    // the ship's band: shanties.js reads the deck's state and sets the mood
+    // (stood down for guns, gales and groundings); the box plays the day's
+    // rotation for the flag — fo'c's'le fiddle for the black, fife and drum
+    // for the King. skyT/DAY_LENGTH is the shared day-seed, carols.js law.
+    this.music.update(dt, moodFor({
+      hostileDist: this.hostileDist,
+      storm: this.weatherState === 'storm',
+      swell: this.swell,
+      portDist: this.port ? this.port.dist : Infinity,
+      anchored: !!this.anchorDown,
+      nightness: sol.nightness,
+      aground: !!this.aground,
+    }), this.faction, Math.floor(skyT / DAY_LENGTH));
 
     // the planisphere tracks the live sky while it's open
     if (this.starchart.open) {
