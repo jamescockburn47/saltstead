@@ -6,28 +6,70 @@
 import * as THREE from 'three';
 import { waveHeight } from './waves.js';
 import {
-  ambientSpecies, porpoiseY, porpoisePitch, circlePos, flapAngle, podStation,
+  ambientSpecies, porpoiseY, porpoisePitch, circlePos, birdBeat, podStation,
   frenzyPos, FRENZY_FINS, FRENZY_S, whaleState, WHALE_PERIOD,
 } from './wildlife.js';
 
 const GREY = new THREE.MeshPhongMaterial({ color: 0x8fa3ad, flatShading: true });
 const DARK = new THREE.MeshPhongMaterial({ color: 0x4a5860, flatShading: true });
-const WHITE = new THREE.MeshPhongMaterial({ color: 0xe8ecef, flatShading: true });
-const BROWN = new THREE.MeshPhongMaterial({ color: 0x6b5a48, flatShading: true });
+const WHITE = new THREE.MeshPhongMaterial({ color: 0xe8ecef, flatShading: true, side: THREE.DoubleSide });
+const BROWN = new THREE.MeshPhongMaterial({ color: 0x6b5a48, flatShading: true, side: THREE.DoubleSide });
+const BEAK = new THREE.MeshPhongMaterial({ color: 0xd9a13b, flatShading: true });
 
-// a bird: cone body + two hinged wing planes; scale sets gull vs albatross
-function buildBird(span, bodyMat, wingMat) {
+// one tapered wing membrane: x out along the span, z the chord, a touch of
+// sweep pulling the tip aft — the dragon's wingPanel idea at bird scale
+function birdPanel(len, rootC, tipC, sweep, mat) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+    0, 0, rootC * 0.45,
+    len, 0, tipC * 0.45 - sweep,
+    len, 0, -tipC * 0.55 - sweep,
+    0, 0, -rootC * 0.55,
+  ]), 3));
+  g.setIndex([0, 1, 2, 0, 2, 3]);
+  g.computeVertexNormals();
+  return new THREE.Mesh(g, mat);
+}
+
+// a bird with a BODY: slim fuselage, head and beak, fan tail, and the
+// dragon's articulated two-panel wings (inner arm + outer hand) shrunk to
+// bird scale — the outer hinge is what makes both the beat and the gliding
+// gull's M-silhouette read. slim stretches the wing for the albatross.
+function buildBird(span, bodyMat, wingMat, slim = 1) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.ConeGeometry(span * 0.07, span * 0.45, 5), bodyMat);
-  body.rotation.x = Math.PI / 2;
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 6, 5), bodyMat);
+  body.scale.set(span * 0.13, span * 0.12, span * 0.42);
   g.add(body);
-  const wingGeo = new THREE.PlaneGeometry(span * 0.5, span * 0.16);
-  wingGeo.translate(span * 0.25, 0, 0); // hinge at the root
-  const wl = new THREE.Mesh(wingGeo, wingMat), wr = new THREE.Mesh(wingGeo, wingMat);
-  wl.material.side = THREE.DoubleSide;
-  wr.rotation.y = Math.PI;
-  g.add(wl, wr);
-  return { group: g, wl, wr };
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.5, 5, 4), bodyMat);
+  head.scale.setScalar(span * 0.1);
+  head.position.set(0, span * 0.05, span * 0.24);
+  g.add(head);
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(span * 0.022, span * 0.11, 4), BEAK);
+  beak.rotation.x = Math.PI / 2;
+  beak.position.set(0, span * 0.045, span * 0.31);
+  g.add(beak);
+  const tailGeo = new THREE.PlaneGeometry(span * 0.13, span * 0.17);
+  tailGeo.rotateX(-Math.PI / 2);
+  tailGeo.translate(0, span * 0.02, -span * 0.3);
+  g.add(new THREE.Mesh(tailGeo, bodyMat));
+  // the wings: chord narrows and span stretches as slim rises (an albatross
+  // is all span and no chord — that IS the silhouette)
+  const innerLen = span * 0.2 * slim, outerLen = span * 0.3 * slim;
+  const rootC = (span * 0.17) / slim, midC = (span * 0.12) / slim, tipC = span * 0.02;
+  const wings = [];
+  for (const side of [1, -1]) {
+    const inner = new THREE.Group();
+    inner.position.set(side * span * 0.05, span * 0.04, span * 0.05);
+    inner.add(birdPanel(innerLen, rootC, midC, innerLen * 0.08, wingMat));
+    const outer = new THREE.Group();
+    outer.position.x = innerLen;
+    outer.add(birdPanel(outerLen, midC, tipC, outerLen * 0.3, wingMat));
+    inner.add(outer);
+    if (side < 0) inner.scale.x = -1; // mirror the port wing
+    g.add(inner);
+    wings.push({ inner, outer, side });
+  }
+  return { group: g, wings };
 }
 
 // a dolphin: squashed low-poly sphere + dorsal fin
@@ -82,8 +124,9 @@ export class WildlifeLayer {
       scene.add(b.group);
       this.gulls.push(b);
     }
-    // white body, dark upper wing — how a real albatross reads from the deck
-    this.alba = buildBird(3.0, WHITE, BROWN);
+    // white body, dark upper wing, all span and no chord — how a real
+    // albatross reads from the deck (slim stretches the two-panel wing)
+    this.alba = buildBird(3.0, WHITE, BROWN, 1.5);
     scene.add(this.alba.group);
     this.pod = [];
     for (let i = 0; i < POD; i++) {
@@ -138,7 +181,10 @@ export class WildlifeLayer {
       f.rotation.y = p.heading;
     }
 
-    // gulls wheel about the masthead — land is close
+    // gulls wheel about the masthead — land is close. Bouts of beating,
+    // stretches of soaring on flared wings (wildlife.js birdBeat), and each
+    // bird banks INTO her circle, harder while she glides — the flare-and-
+    // soar that makes a wheeling bird read as flight, not clockwork
     for (let i = 0; i < GULLS; i++) {
       const b = this.gulls[i];
       b.group.visible = spec.gulls;
@@ -146,19 +192,32 @@ export class WildlifeLayer {
       const c = circlePos(t, 7 + i * 2.5, 0.5 + i * 0.07, i * 1.9);
       b.group.position.set(sx + c.x, mastTop + 2 + Math.sin(t * 0.7 + i) * 1.5, sz + c.z);
       b.group.rotation.set(0, c.heading, 0);
-      const f = flapAngle(t, 9, i);
-      b.wl.rotation.z = f; b.wr.rotation.z = -f;
+      const bb = birdBeat(t, i);
+      b.group.rotateZ(0.18 + 0.2 * bb.glide); // the bank into the wheel
+      // the articulated beat (the dragon's sign convention): the hand
+      // over-swings the arm on the downstroke and folds DOWN in the glide —
+      // the gliding gull's M-silhouette
+      for (const w of b.wings) {
+        w.inner.rotation.z = w.side * -bb.angle;
+        w.outer.rotation.z = -(bb.angle * 0.6 + 0.38 * bb.glide);
+      }
     }
 
-    // the albatross soars a wide slow circle, banked into the turn
+    // the albatross lives at the soaring end of the same rhythm: locked
+    // wings for long minutes, the rare unhurried bout
     this.alba.group.visible = spec.albatross;
     if (spec.albatross) {
       const c = circlePos(t, 42, 0.09, 3.3);
       this.alba.group.position.set(sx + c.x, 9 + Math.sin(t * 0.23) * 3.5, sz + c.z);
       this.alba.group.rotation.set(0, c.heading, 0);
-      this.alba.group.rotateZ(0.35); // the bank
-      const f = flapAngle(t, 0.9); // locked wings, the rare unhurried beat
-      this.alba.wl.rotation.z = f * 0.3; this.alba.wr.rotation.z = -f * 0.3;
+      const bb = birdBeat(t, 0, 0.85);
+      this.alba.group.rotateZ(0.28 + 0.12 * bb.glide); // the soaring bank
+      // locked-out wings: barely any hand droop — the albatross glides FLAT,
+      // a plank of a bird riding the wind (the M belongs to the gulls)
+      for (const w of this.alba.wings) {
+        w.inner.rotation.z = w.side * -bb.angle;
+        w.outer.rotation.z = -(bb.angle * 0.5 + 0.08 * bb.glide);
+      }
     }
 
     // dolphins ride the bow wave when you're making way offshore — stationed

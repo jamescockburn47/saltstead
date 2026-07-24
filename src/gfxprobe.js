@@ -41,12 +41,27 @@ export function decideTier(sig = {}) {
   if (Number.isFinite(sig.cores) && sig.cores <= 2) {
     return { tier: 'plain', why: 'few-cores' };
   }
+  if (isRealGPU(sig.rendererStr)) {
+    // the WebGL renderer string NAMES the silicon: recognised discrete or
+    // modern integrated graphics is fine-capable whatever the WebGPU probe
+    // says (blocklists and slow adapter answers lie; the hardware doesn't)
+    return { tier: 'fine', why: 'real-gpu' };
+  }
   if (sig.touchPrimary) {
     return { tier: 'plain', why: 'touch' };           // tablets open easy
   }
   if (sig.webgpu === true) return { tier: 'fine', why: 'webgpu' };
   if (sig.webgpu === false) return { tier: 'plain', why: 'no-webgpu' };
   return { tier: 'fine', why: 'unprobed' }; // optimistic until the adapter answers
+}
+
+// silicon that carries the fine tier on its name alone: NVIDIA's gaming
+// lines, AMD's RX/Radeon Graphics APUs, Intel Arc, Apple M-series, and the
+// stronger mobile parts. Old integrated (Intel HD/UHD) deliberately absent —
+// those are exactly the machines the plain tier exists for.
+export function isRealGPU(rendererStr) {
+  return /geforce|rtx|gtx|quadro|radeon (rx|8\d{3}|pro)|intel arc|apple m\d|adreno 7|mali-g7/i
+    .test(rendererStr || '');
 }
 
 // the software renderers that mean "no GPU": SwiftShader (Chrome's CPU

@@ -10,6 +10,7 @@ import {
   STAR_CATALOGUE, raDecToEq, starField,
 } from './skymath.js';
 import { moonBrightness, moonlitNight } from './lightrig.js';
+import { unit2 } from './noise.js';
 
 const DOME_R = 560, STAR_R = 480;
 
@@ -109,13 +110,37 @@ void main() {
     this.dome.frustumCulled = false;
     scene.add(this.dome);
 
-    // sun + moon discs
-    this.sunDisc = new THREE.Mesh(
-      new THREE.CircleGeometry(16, 20),
-      new THREE.MeshBasicMaterial({ color: 0xfff4cc, fog: false }));
-    this.moonDisc = new THREE.Mesh(
-      new THREE.CircleGeometry(11, 20),
-      new THREE.MeshBasicMaterial({ color: 0xdde4f0, fog: false, transparent: true }));
+    // sun + moon — SPRITES with drawn faces, the Moorstead idiom (sky.js
+    // there): the flat grey circles read as punched holes (James's eye,
+    // 2026-07-24). The sun is a blinding core inside a long warm skirt; the
+    // moon is PHASE-AWARE — lit limb + terminator ellipse redrawn as the
+    // month turns, seeded maria clipped to the lit shape, a whisper of
+    // earthshine so the new moon reads as a dark presence, not a hole.
+    const sc = document.createElement('canvas');
+    sc.width = sc.height = 128;
+    {
+      const x = sc.getContext('2d');
+      const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+      g.addColorStop(0.0, 'rgba(255,252,240,1)');    // the blinding core
+      g.addColorStop(0.16, 'rgba(255,246,214,1)');
+      g.addColorStop(0.24, 'rgba(255,236,180,0.55)'); // the corona shoulder
+      g.addColorStop(0.5, 'rgba(255,220,150,0.16)');  // the long warm skirt
+      g.addColorStop(1.0, 'rgba(255,210,140,0)');
+      x.fillStyle = g;
+      x.fillRect(0, 0, 128, 128);
+    }
+    this.sunDisc = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(sc), fog: false, transparent: true, depthWrite: false,
+    }));
+    this.sunDisc.scale.set(88, 88, 1); // the skirt is most of the sprite
+    this._moonCanvas = document.createElement('canvas');
+    this._moonCanvas.width = this._moonCanvas.height = 64;
+    this._moonTex = new THREE.CanvasTexture(this._moonCanvas);
+    this.moonDisc = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this._moonTex, fog: false, transparent: true, depthWrite: false,
+    }));
+    this.moonDisc.scale.set(26, 26, 1);
+    this._moonPhaseDrawn = -1;
     scene.add(this.sunDisc, this.moonDisc);
 
     // stars: catalogue first, then the seeded background — one Points object
@@ -199,20 +224,23 @@ void main() {
     this.scene.fog.color.copy(this._bg);
     this.scene.background = this._bg;
 
-    // discs ride the arcs, parked around the camera
+    // the discs ride the arcs, parked around the camera (sprites: no lookAt)
     this.sunDisc.position.set(
       center.x + sol.dir[0] * (DOME_R - 30),
       center.y + sol.dir[1] * (DOME_R - 30),
       center.z + sol.dir[2] * (DOME_R - 30));
-    this.sunDisc.lookAt(center);
     this.sunDisc.visible = sol.sunAlt > -0.1;
+    // golden hour warms the disc itself; gloom stands cloud before it
+    this.sunDisc.material.color.setHex(0xffffff).lerp(GOLD, sol.golden * 0.55);
+    this.sunDisc.material.opacity = 1 - 0.75 * gloom;
+    const phase = moonPhase(t);
+    if (Math.abs(phase - this._moonPhaseDrawn) > 0.004) this._drawMoonPhase(phase);
     this.moonDisc.position.set(
       center.x + lun.dir[0] * (DOME_R - 40),
       center.y + lun.dir[1] * (DOME_R - 40),
       center.z + lun.dir[2] * (DOME_R - 40));
-    this.moonDisc.lookAt(center);
     this.moonDisc.visible = lun.alt > -0.1;
-    this.moonDisc.material.opacity = 0.35 + 0.65 * sol.nightness;
+    this.moonDisc.material.opacity = (0.35 + 0.65 * sol.nightness) * (1 - 0.6 * gloom);
 
     // the star wheel: spin about the celestial pole, then tilt the pole to
     // the observer's latitude — the whole navigation trick in two rotations.
@@ -226,5 +254,45 @@ void main() {
     this.starMat.opacity = Math.max(0, sol.nightness - 0.25) * 1.33 * (1 - gloom);
 
     this.dome.position.copy(center);
+  }
+
+  // the phase-aware face (Moorstead sky.js _drawMoonPhase, ported): lit
+  // limb semicircle + terminator half-ellipse, seeded maria clipped to the
+  // lit shape so they wax and wane with it, earthshine under everything.
+  // phase: skymath moonPhase — 0 new, 0.5 full, 1 new again.
+  _drawMoonPhase(phase) {
+    this._moonPhaseDrawn = phase;
+    const x = this._moonCanvas.getContext('2d');
+    x.clearRect(0, 0, 64, 64);
+    const k = Math.cos(phase * Math.PI * 2); // +1 new … -1 full
+    const waxing = phase < 0.5;
+    // earthshine: the unlit moon is a dark presence, never a hole
+    x.fillStyle = 'rgba(150,160,175,0.12)';
+    x.beginPath(); x.arc(32, 32, 26, 0, Math.PI * 2); x.fill();
+    x.beginPath();
+    if (waxing) {
+      x.arc(32, 32, 26, -Math.PI / 2, Math.PI / 2, false);
+      x.ellipse(32, 32, 26 * Math.abs(k), 26, 0, Math.PI / 2, -Math.PI / 2, k > 0);
+    } else {
+      x.arc(32, 32, 26, Math.PI / 2, -Math.PI / 2, false);
+      x.ellipse(32, 32, 26 * Math.abs(k), 26, 0, -Math.PI / 2, Math.PI / 2, k > 0);
+    }
+    x.closePath();
+    x.save(); x.clip();
+    x.fillStyle = '#dde5ee';
+    x.fillRect(0, 0, 64, 64);
+    // seeded maria, well inboard of the limb (a mare at the edge reads as a
+    // bite out of the moon — Moorstead's lesson), soft grey, deterministic
+    x.fillStyle = 'rgba(146,156,176,0.34)';
+    for (let i = 0; i < 5; i++) {
+      const a = unit2(i * 7.3, 11.7) * Math.PI * 2;
+      const d = unit2(i * 3.9, 5.1) * 9;
+      const r = 3 + unit2(i * 5.7, 9.3) * 4.5;
+      x.beginPath();
+      x.arc(32 + Math.cos(a) * d, 32 + Math.sin(a) * d, r, 0, Math.PI * 2);
+      x.fill();
+    }
+    x.restore();
+    this._moonTex.needsUpdate = true;
   }
 }

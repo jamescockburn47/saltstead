@@ -146,28 +146,33 @@ const DT = 1 / 30;
     'the rear throws the root out');
 }
 
-// the wing beat: bounded, the OUTER panel lags and over-swings the inner
-// (the whip that reads as flight), the stoop folds hard back, and the
-// circling fire bursts arrive and pass
+// the wing beat: bounded, the OUTER panel over-swings the inner (the whip
+// that reads as flight), circling is BURST-AND-GLIDE (real locked-wing
+// stretches between flapping bouts), the climb out is all power, the stoop
+// folds hard back, and the circling fire bursts arrive and pass
 {
-  let maxIn = 0, maxOut = 0;
-  for (let t = 0; t < 30; t += 0.02) {
+  let maxIn = 0, maxOut = 0, glide = 0, flap = 0, maxClimbOut = 0;
+  for (let t = 0; t < 60; t += 0.02) {
     const w = wingBeat(t);
     for (const v of [w.inner, w.outer, w.tail, w.neck]) {
       ok(Math.abs(v) <= 1, `beat bounded at t=${t.toFixed(2)}`);
     }
     maxIn = Math.max(maxIn, Math.abs(w.inner));
     maxOut = Math.max(maxOut, Math.abs(w.outer));
+    if (Math.abs(w.outer) < 0.15 && Math.abs(w.neck) < 0.02) glide++;
+    if (Math.abs(w.outer) > 0.5) flap++;
+    const c = wingBeat(t, 'climb');
+    ok(Math.abs(c.inner) <= 1 && Math.abs(c.outer) <= 1, `climb beat bounded at t=${t.toFixed(2)}`);
+    maxClimbOut = Math.max(maxClimbOut, Math.abs(c.outer));
   }
   ok(maxOut > maxIn, `the hand over-swings the arm (${maxOut.toFixed(2)} vs ${maxIn.toFixed(2)})`);
-  // the lag: the outer's phase trails by the design offset (0.7 rad of the
-  // 2.4 rad/s clock) — sample where inner peaks, outer must still be rising
-  const tPeak = (Math.PI / 2) / 2.4;
-  const atPeak = wingBeat(tPeak);
-  ok(Math.abs(atPeak.inner - 0.5) < 1e-6 && atPeak.outer < 0.85 * 0.999,
-    'the outer panel LAGS the inner');
+  ok(glide > 200, `she GLIDES between bouts (${glide} locked samples)`);
+  ok(flap > 300, `and still beats in earnest (${flap} driving samples)`);
+  ok(maxClimbOut > maxOut, `the climb out-powers the wheel (${maxClimbOut.toFixed(2)} vs ${maxOut.toFixed(2)})`);
   const stoop = wingBeat(3.3, true);
   ok(stoop.outer < -0.5 && stoop.inner > 0, 'the stoop folds the hand hard back');
+  const stoopStr = wingBeat(3.3, 'stoop');
+  ok(stoopStr.outer === stoop.outer, 'stoop answers to the state string too');
   let burst = 0, quiet = 0;
   for (let t = 0; t < 30; t += 0.05) {
     const f = circleFire(t);

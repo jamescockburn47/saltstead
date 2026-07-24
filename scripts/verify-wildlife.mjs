@@ -2,7 +2,8 @@
 // land, the albatross means blue water, the fin means warm shallows — and
 // the motion maths stays inside its envelopes.
 import {
-  ambientSpecies, porpoiseY, porpoisePitch, circlePos, flapAngle, podStation,
+  ambientSpecies, porpoiseY, porpoisePitch, circlePos, flapAngle, birdBeat,
+  flockGate, podStation,
   frenzyPos, FRENZY_FINS, FRENZY_S, whaleState, WHALE_PERIOD,
 } from '../src/wildlife.js';
 
@@ -102,5 +103,33 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
   ok(flapAngle(1, 9, 0) !== flapAngle(1, 9, 1), 'birds beat out of phase');
 }
 
+// the real rhythm: bouts of beating, real stretches of soaring on flared
+// wings; the albatross lives at the soaring end; birds decorrelate
+{
+  let glideG = 0, flapG = 0, glideA = 0, mx = 0;
+  for (let t = 0; t < 120; t += 0.05) {
+    const g = birdBeat(t, 0);
+    const a = birdBeat(t, 0, 0.85);
+    mx = Math.max(mx, Math.abs(g.angle), Math.abs(a.angle));
+    if (g.glide > 0.85) glideG++;
+    if (g.glide < 0.15) flapG++;
+    if (a.glide > 0.85) glideA++;
+    ok(g.glide >= 0 && g.glide <= 1, `glide bounded at t=${t.toFixed(2)}`);
+  }
+  ok(mx <= 0.7, `beat envelope bounded (${mx.toFixed(2)})`);
+  ok(glideG > 200, `gulls truly soar between bouts (${glideG} locked samples)`);
+  ok(flapG > 300, `and beat in earnest (${flapG} driving samples)`);
+  ok(glideA > glideG * 1.5, `the albatross soars far more than a gull (${glideA} vs ${glideG})`);
+  ok(birdBeat(1, 0).angle !== birdBeat(1, 1).angle, 'birds ride separate bout clocks');
+}
+
+// the inshore flock gate: a navigation instrument — nothing in blue water,
+// gathering from ~1400 m, the full flock close in
+ok(flockGate(3000) === 0, 'no flock in blue water');
+ok(flockGate(1500) === 0, 'silence beyond the gathering line');
+ok(flockGate(900) > 0.3 && flockGate(900) < 0.8, 'the flock gathers as land nears');
+ok(flockGate(350) === 1 && flockGate(0) === 1, 'the full clamour close inshore');
+ok(flockGate(800) > flockGate(1200), 'monotonic toward the coast');
+
 if (failed) { console.error(`verify-wildlife: ${failed} FAILED`); process.exit(1); }
-console.log('verify-wildlife: OK — species read the waters, porpoise arc sane, circles tangent, flaps bounded');
+console.log('verify-wildlife: OK — species read the waters, porpoise arc sane, circles tangent, birds soar and beat in bouts, the flock gathers inshore');

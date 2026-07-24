@@ -94,3 +94,27 @@ export function flapAngle(t, rate, i = 0) {
   const beat = Math.sin(t * rate + i * 1.7);
   return beat * 0.55;
 }
+
+// THE REAL RHYTHM — no seabird flaps like a metronome. Flight is bouts of
+// beating and stretches of SOARING with the wings flared in a shallow
+// breathing V. Each bird carries its own bout clock (two incommensurate
+// sines, phase-split by i), and soarBias slides the whole rhythm toward
+// the soaring end: a gull glides often, an albatross almost always.
+// Returns { angle, glide }: angle in radians for the wing hinge (bounded),
+// glide 0..1 — how locked-out the wings are this instant (the layer banks
+// harder on the glide, as a real bird does).
+export function birdBeat(t, i = 0, soarBias = 0) {
+  const cycle = Math.sin(t * 0.42 + i * 2.6) + Math.sin(t * 0.19 + i * 1.1);
+  const bout = Math.min(1, Math.max(0, cycle * 0.8 + 0.7 - soarBias * 1.2));
+  const flap = Math.sin(t * (9 - soarBias * 7.5) + i * 1.7) * 0.55;
+  const flare = 0.22 + 0.06 * Math.sin(t * 1.9 + i * 0.9); // the soaring V, alive
+  return { angle: flap * bout + flare * (1 - bout), glide: 1 - bout };
+}
+
+// THE INSHORE FLOCK — a wheeling cloud of small gulls that gathers as the
+// land nears (flocklayer.js gives it bodies, Moorstead's murmuration idiom).
+// The gate is the navigation instrument: nothing in blue water, first birds
+// from ~1400 m off the coast, the full clamouring flock by ~350 m.
+export function flockGate(coastDist) {
+  return Math.min(1, Math.max(0, (1400 - coastDist) / (1400 - 350)));
+}

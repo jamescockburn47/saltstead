@@ -59,6 +59,8 @@ import { logVisit, logPlay } from './telemetry.js';
 import { loadGame, saveGame, snapshotSave } from './save.js';
 import { MerchantLayer } from './merchantlayer.js';
 import { WildlifeLayer } from './wildlifelayer.js';
+import { FlockLayer } from './flocklayer.js';
+import { flockGate } from './wildlife.js';
 import { FleetLayer } from './fleetlayer.js';
 import { canTakePrize, START_CREW, PRIZE_CREW, MIN_CREW, FLEET_MAX } from './fleet.js';
 import { canBoard, lootRoll, chestRoll } from './plunder.js';
@@ -240,6 +242,7 @@ class Game {
     this.merchants = new MerchantLayer(this.scene);
     this.hailed = new Set(); // ships the lookout has already sung out
     this.wildlife = new WildlifeLayer(this.scene);
+    this.flock = new FlockLayer(this.scene);
     this.flotsam = new FlotsamLayer(this.scene); // the sea's own post (flotsam.js)
     this.fleet = new FleetLayer(this.scene);
     this.fleet.restore(this.savedFleet, this.ship.x, this.ship.z, this.ship.yaw);
@@ -474,8 +477,21 @@ class Game {
     // ignored — it recorded the old default, not a choice.
     this.gfxWatch = { t: 0, frames: [], span: 0, manual: false, pixelDropped: false };
     const gfxSig = {
-      stored: ['fine', 'plain', 'auto-plain'].includes(localStorage['saltstead-gfx2'])
-        ? localStorage['saltstead-gfx2'] : null,
+      // a hand-chosen tier is forever; the watchdog's auto-plain EXPIRES
+      // after 3 days (stored as auto-plain@<epoch-day>) — one bad session
+      // (battery saver, a background tab, an old build's compile stall)
+      // must not brand a fast machine for life. A legacy bare 'auto-plain'
+      // counts as expired: the machine gets a fresh trial.
+      stored: (() => {
+        const raw = localStorage['saltstead-gfx2'];
+        if (raw === 'fine' || raw === 'plain') return raw;
+        if (typeof raw === 'string' && raw.startsWith('auto-plain@')) {
+          const day = parseInt(raw.slice(11), 10);
+          const today = Math.floor(Date.now() / 86400000);
+          if (Number.isFinite(day) && today - day < 3) return 'auto-plain';
+        }
+        return null;
+      })(),
       touchPrimary: typeof matchMedia === 'function'
         ? matchMedia('(pointer: coarse)').matches : false,
       webgpu: null,
@@ -491,14 +507,30 @@ class Game {
     };
     const opening = decideTier(gfxSig);
     this.applyQuality(opening.tier);
+    // an auto-chosen plain tier is SAID, once she's under way — the player
+    // must know the full sea exists and that V is the key to it
+    if (opening.tier === 'plain' && opening.why !== 'chosen') {
+      const why = {
+        'remembered-slow': 'a past session lagged',
+        'software-gl': 'no GPU found',
+        'low-memory': 'low memory',
+        'few-cores': 'few cores',
+        touch: 'touch device',
+        'no-webgpu': 'old graphics drivers',
+      }[opening.why] || 'detected';
+      setTimeout(() => this.say(
+        `PLAIN graphics (${why}) — V tries the full sea, and your choice is kept`, 8), 5000);
+    }
     // the WebGPU adapter answers async — refine ONLY the optimistic default
-    // (a stored choice or a hard signal already settled it)
+    // (a stored choice or a hard signal already settled it). Only an
+    // EXPLICIT null adapter may downgrade: a slow answer on a busy load is
+    // not evidence of old metal (the 1.5 s timeout-as-verdict misjudged
+    // fast machines with crowded browsers — 2026-07-24). If the promise
+    // never resolves we stay optimistic and the fps watchdog stands guard.
     if (opening.why === 'unprobed' && navigator.gpu?.requestAdapter) {
-      Promise.race([
-        navigator.gpu.requestAdapter(),
-        new Promise((r) => setTimeout(() => r(null), 1500)),
-      ]).then((adapter) => {
-        const v = decideTier({ ...gfxSig, webgpu: !!adapter });
+      navigator.gpu.requestAdapter().then((adapter) => {
+        if (adapter) return; // fine confirmed — nothing to change
+        const v = decideTier({ ...gfxSig, webgpu: false });
         if (v.tier !== this.gfxQuality) this.applyQuality(v.tier);
       }).catch(() => {});
     }
@@ -1180,8 +1212,12 @@ class Game {
       s.camera.updateProjectionMatrix();
       if (s.map) { s.map.dispose(); s.map = null; }
     }
+    // Plain keeps the CHEAP beauty: analytic swell normals, fresnel to the
+    // sky, and the wake-map foam (texture reads, no fbm). Only the noisy
+    // extras park at 0 — the plain sea must read as SEA, never a flat sheet
+    // (the 2026-07-24 verdict from the Solent).
     this.ocean.glitterScale = fine ? 1 : 0;
-    this.ocean.uniforms.uFresnel.value = fine ? 0.45 : 0;
+    this.ocean.uniforms.uFresnel.value = fine ? 0.45 : 0.28;
     this.ocean.mesh.receiveShadow = fine; // the ship's shadow rides the sea
     this.terrain.setShadows(fine);
     this.shipGroup.traverse((o) => {
@@ -1224,7 +1260,9 @@ class Game {
     gw.frames.length = 0; gw.span = 0;
     if (verdict === 'drop-plain' && !gw.manual) {
       this.applyQuality('plain');
-      try { localStorage['saltstead-gfx2'] = 'auto-plain'; } catch { /* private mode */ }
+      try {
+        localStorage['saltstead-gfx2'] = `auto-plain@${Math.floor(Date.now() / 86400000)}`;
+      } catch { /* private mode */ }
       this.say('The sea eases off for this ship’s timbers — graphics dropped to PLAIN (V to override)', 8);
       this.logEvent('Graphics eased to plain — the frame could not hold');
     } else if (verdict === 'drop-pixels' && !gw.pixelDropped) {
@@ -2384,6 +2422,9 @@ class Game {
         this.shipGroup.position.y + 11, this.ship.speed, this.coastDist, Math.abs(wll.lat),
         this.ship.yaw, this.shipFrame.scale, this.merchants.wrecks(),
         !!(this.zone && this.zone.legend.id === 'white-whale'));
+      // the inshore flock gathers as the land nears (flockGate is the
+      // instrument; the layer is Moorstead's murmuration put to sea)
+      this.flock.update(t, dt, this.ship.x, this.ship.z, flockGate(this.coastDist));
     }
     // the sea's post rides the waves (flotsamlayer.js) — and a crate within
     // a boathook's reach comes aboard by itself
@@ -3308,6 +3349,7 @@ class Game {
     this.foam.wakeMesh.visible = topside;
     this.foam.fleckMesh.visible = topside;
     if (!topside) this.skyfx.rain.visible = false; // rain wraps the lens — not in here
+    if (!topside) this.flock.points.visible = false; // no gulls in the hold
 
     this.hud.toast.style.display = t < this.toast.until ? 'block' : 'none';
     if (t < this.toast.until) this.hud.toast.textContent = this.toast.text;

@@ -333,8 +333,9 @@ export class MonsterLayer {
 
     // THE ARTICULATED BEAT (monsters.js wingBeat, verify-gated): the outer
     // panels lag and over-swing the inner — the whip that reads as FLIGHT.
-    // The port wing is built mirrored (scale.x = -1), so one sign serves.
-    const wb = wingBeat(t, dragon.state === 'stoop');
+    // The full state goes in: circling is burst-and-glide, the climb out of
+    // the stoop is all power. The port wing is mirrored (scale.x = -1).
+    const wb = wingBeat(t, dragon.state);
     for (const w of this.dragon.wings) {
       w.inner.rotation.z = w.side * -wb.inner;
       w.outer.rotation.z = -wb.outer; // in the mirrored frame the sign carries

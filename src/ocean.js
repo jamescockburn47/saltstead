@@ -136,14 +136,21 @@ float oWakeIn(vec2 uv) {
   float oCrest = clamp(0.5 + 0.5 * oH / max(0.2, uSwell * O_MAXH), 0.0, 1.0);
   // froth. Whitecaps only when the wind has the sea up (weather.js drives
   // uSwell): fbm patches pick WHICH crests break — never a uniform dusting.
+  // froth on EVERY tier: the wake's churn is a texture read, so even Plain
+  // keeps her white road (flat-toned there). Fine adds the whitecaps and
+  // the streaky fbm lace.
   float oFoam = 0.0;
-  if (uDetailAmp > 0.001) {
-    float wcGate = smoothstep(1.05, 1.75, uSwell);
-    float wcPatch = smoothstep(0.48, 0.78, oFbm(vWPos.xz * 0.13 + uTime * 0.03));
-    float oWc = smoothstep(0.72, 0.95, oCrest) * wcGate * wcPatch;
-    // churned texture inside any foam: streaky lace, alive — high-contrast
-    // fine fbm so heavy churn still reads as WATER torn white, not paint
-    float oRag = 0.40 + 0.60 * oFbm(vWPos.xz * 1.9 + uTime * vec2(0.11, 0.07));
+  {
+    float oWc = 0.0;
+    float oRag = 0.72;
+    if (uDetailAmp > 0.001) {
+      float wcGate = smoothstep(1.05, 1.75, uSwell);
+      float wcPatch = smoothstep(0.48, 0.78, oFbm(vWPos.xz * 0.13 + uTime * 0.03));
+      oWc = smoothstep(0.72, 0.95, oCrest) * wcGate * wcPatch;
+      // churned texture inside any foam: streaky lace, alive — high-contrast
+      // fine fbm so heavy churn still reads as WATER torn white, not paint
+      oRag = 0.40 + 0.60 * oFbm(vWPos.xz * 1.9 + uTime * vec2(0.11, 0.07));
+    }
     oFoam = clamp((oWkHF.y * 0.85 + oWc) * oRag, 0.0, 1.0);
   }
   // crests pass light: looking through high water toward the sun finds

@@ -44,15 +44,34 @@ export function tentacleSpine(t, i, grip = 0.7, slam = 0) {
 // the inner by a fixed phase and over-swings it: that whip is what reads as
 // flight instead of a flapping board. Stooping folds both panels hard back.
 // Everything bounded (|angle| < 1 rad); tail and neck ride the same clock.
-export function wingBeat(t, stooping = false) {
-  if (stooping) {
+// state: false/'circling' | true/'stoop' | 'climb'. Big soarers do not
+// flap like metronomes: circling is BURST-AND-GLIDE (bouts of beats, then
+// wings locked out in a shallow breathing dihedral), the downstroke drives
+// faster than the upstroke recovers (the skewed wave), and climbing out of
+// the stoop is all power — deeper, quicker strokes, no glide at all.
+export function wingBeat(t, state = false) {
+  if (state === true || state === 'stoop') {
     return { inner: 0.5, outer: -0.95, tail: Math.sin(t * 3.1) * 0.12, neck: -0.28 };
   }
+  const climb = state === 'climb';
+  // the bout gate: two slow incommensurate sines — irregular flapping
+  // bouts with real glides between (clamped, so glides are truly locked)
+  const bout = climb ? 1
+    : Math.min(1, Math.max(0, (Math.sin(t * 0.37) + Math.sin(t * 0.23 + 1.3)) * 0.9 + 0.5));
+  const rate = climb ? 3.1 : 2.4;
+  const amp = climb ? 0.58 : 0.5;
+  // the skewed stroke: sin(ph + k·sin ph) falls fast, recovers slow
+  const ph = t * rate;
+  const s = Math.sin(ph + 0.42 * Math.sin(ph));
+  const sLag = Math.sin(ph - 0.7 + 0.42 * Math.sin(ph - 0.7));
+  // the glide pose: wings out in a shallow dihedral that breathes
+  const glideIn = 0.14 + 0.04 * Math.sin(t * 0.9);
+  const glideOut = -0.06 + 0.05 * Math.sin(t * 0.7 + 0.5);
   return {
-    inner: Math.sin(t * 2.4) * 0.5,
-    outer: Math.sin(t * 2.4 - 0.7) * 0.85,
+    inner: s * amp * bout + glideIn * (1 - bout),
+    outer: sLag * amp * 1.6 * bout + glideOut * (1 - bout),
     tail: Math.sin(t * 1.1) * 0.22,
-    neck: Math.sin(t * 2.4 + 0.4) * 0.12,
+    neck: Math.sin(ph + 0.4) * 0.12 * bout,
   };
 }
 

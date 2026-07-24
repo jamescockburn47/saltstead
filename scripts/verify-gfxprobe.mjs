@@ -2,7 +2,7 @@
 // always wins, software GL is a hard floor, WebGPU is the capability
 // signal, and the watchdog only ever eases DOWN.
 import {
-  decideTier, isSoftwareGL, fpsVerdict, median,
+  decideTier, isSoftwareGL, isRealGPU, fpsVerdict, median,
   SETTLE_S, WINDOW_S, SLOW_FINE, SLOW_PLAIN,
 } from '../src/gfxprobe.js';
 
@@ -38,6 +38,22 @@ ok(decideTier({ webgpu: false, rendererStr: 'Intel HD Graphics 3000' }).tier ===
   'no WebGPU in 2026 means old metal — open easy');
 ok(decideTier({}).tier === 'fine' && decideTier({}).why === 'unprobed',
   'optimistic while the adapter is still answering');
+
+// the silicon's own name outranks a lying WebGPU probe — an RTX with a slow
+// or blocklisted adapter answer is still an RTX (the Solent misjudgement,
+// 2026-07-24: a quick machine opened plain)
+ok(decideTier({ webgpu: false, rendererStr: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11)' }).tier === 'fine',
+  'a named RTX is fine whatever WebGPU claims');
+ok(decideTier({ touchPrimary: true, rendererStr: 'AMD Radeon RX 7800 XT' }).tier === 'fine',
+  'real silicon outranks a touch screen');
+ok(decideTier({ rendererStr: 'Apple M3 Pro' }).tier === 'fine', 'Apple silicon is fine');
+ok(decideTier({ rendererStr: 'ANGLE (AMD Radeon 8060S Graphics)' }).tier === 'fine',
+  'the EVO class APU is fine');
+ok(!isRealGPU('Intel HD Graphics 3000') && !isRealGPU('Intel UHD Graphics 620'),
+  'old integrated stays plain — that is who plain is FOR');
+ok(!isRealGPU('Google SwiftShader') && !isRealGPU(null), 'software and silence are not silicon');
+ok(decideTier({ rendererStr: 'Google SwiftShader', webgpu: true }).tier === 'plain',
+  'the software floor still beats every fine signal');
 
 // the watchdog: eases down, never up, and holds inside the envelopes
 ok(fpsVerdict('fine', SLOW_FINE - 1) === 'drop-plain', 'a stuttering fine drops to plain');
