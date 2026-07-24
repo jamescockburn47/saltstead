@@ -6,11 +6,22 @@
 //
 // Pure module: no THREE, no DOM — safe for the headless gate.
 
+// THE GRATING LESSON (2026-07-24): the old table's single dominant swell
+// (len 46, amp 0.55 — over half the whole sea) was a diffraction grating:
+// one set of identical crest lines marching one diagonal forever, and every
+// downstream reader of the surface (specular banding, the whitecap mask)
+// inherited the stripes. The swell energy now spreads across THREE spread
+// components on non-commensurate wavelengths (63/52/39, headings fanned
+// ~±20°), plus cross-sea and chop — same total height, no single grating:
+// crests knot and vanish the way a real sea's do.
 export const WAVES = [
-  { dirX: 1.0,   dirZ: 0.18,  len: 46,  amp: 0.55, speed: 5.2 },
-  { dirX: 0.71,  dirZ: 0.71,  len: 23,  amp: 0.28, speed: 3.9 },
-  { dirX: -0.32, dirZ: 0.95,  len: 11,  amp: 0.12, speed: 2.6 },
-  { dirX: 0.94,  dirZ: -0.34, len: 5.5, amp: 0.05, speed: 1.9 },
+  { dirX: 0.99,  dirZ: -0.14,  len: 63,  amp: 0.24, speed: 6.1 },
+  { dirX: 0.966, dirZ: 0.259,  len: 52,  amp: 0.20, speed: 5.5 },
+  { dirX: 0.86,  dirZ: 0.51,   len: 39,  amp: 0.15, speed: 4.7 },
+  { dirX: 0.71,  dirZ: 0.71,   len: 23,  amp: 0.13, speed: 3.9 },
+  { dirX: 0.549, dirZ: -0.836, len: 17,  amp: 0.10, speed: 3.3 },
+  { dirX: -0.32, dirZ: 0.95,   len: 11,  amp: 0.08, speed: 2.6 },
+  { dirX: 0.94,  dirZ: -0.34,  len: 5.5, amp: 0.05, speed: 1.9 },
 ];
 
 const TAU = Math.PI * 2;

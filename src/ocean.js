@@ -33,7 +33,7 @@
 import * as THREE from 'three';
 import {
   glslWaveSum, glslWaveGrad, glslShore, MAX_WAVE_HEIGHT, MAX_SHORE_HEIGHT,
-  SHORE_SHADE,
+  SHORE_SHADE, SEA_STATE_MAX,
 } from './waves.js';
 import { WAKEMAP_METRES } from './wakemaplayer.js';
 import { COASTMAP_METRES } from './coastmaplayer.js';
@@ -199,7 +199,13 @@ vec2 oCoastGradW(vec2 p) {
     float oRag = 0.72;
     if (uDetailAmp > 0.001) {
       float wcGate = smoothstep(1.05, 1.75, uSwell);
-      float wcPatch = smoothstep(0.48, 0.78, oFbm(vWPos.xz * 0.13 + uTime * 0.03));
+      // WHICH crests break: two independent fbm masks at well-separated
+      // scales. One mask at one scale still let every crest of a wave row
+      // break inside a patch — rows of identical blobs marching in step
+      // (the storm rings, 2026-07-24). The broad mask breaks the rows: a
+      // crest must win both lotteries, and the winners scatter.
+      float wcPatch = smoothstep(0.50, 0.80, oFbm(vWPos.xz * 0.05 + uTime * 0.02))
+        * smoothstep(0.33, 0.58, oFbm(vWPos.xz * 0.013 - uTime * 0.008 + 7.3));
       oWc = smoothstep(0.72, 0.95, oCrest) * wcGate * wcPatch;
       // churned texture inside any foam: streaky lace, alive — high-contrast
       // fine fbm so heavy churn still reads as WATER torn white, not paint
@@ -246,6 +252,22 @@ vec2 oCoastGradW(vec2 p) {
       float oDAmp = 0.16 * uDetailAmp * oDF * (0.55 + 0.45 * uSwell) * (1.0 + 1.5 * oWkHF.y);
       oWG += vec2(oDx - oD0, oDz - oD0) / oDe * oDAmp;
     }
+    // THE FAR FIELD (2026-07-24): past the fine band's 120 m the normals were
+    // the bare wave sum — periodic, and periodic normals under a low sun are
+    // stripes to the horizon. A BROAD isotropic band (features ~20-80 m,
+    // supra-pixel at any distance the grid can show) tilts the far normals
+    // too. No distance fade: its features never go sub-pixel, so the shimmer
+    // law that fades the fine band has no claim on it.
+    {
+      float oDe2 = 3.0;
+      vec2 oQ1 = vWPos.xz * 0.045 + uTime * vec2(0.020, -0.013);
+      vec2 oQ2 = vWPos.xz * 0.012 - uTime * vec2(0.008, 0.011) + 41.7;
+      float oB0 = oFbm(oQ1) * 0.5 + oFbm(oQ2) * 0.5;
+      float oBx = oFbm(oQ1 + vec2(oDe2 * 0.045, 0.0)) * 0.5 + oFbm(oQ2 + vec2(oDe2 * 0.012, 0.0)) * 0.5;
+      float oBz = oFbm(oQ1 + vec2(0.0, oDe2 * 0.045)) * 0.5 + oFbm(oQ2 + vec2(0.0, oDe2 * 0.012)) * 0.5;
+      float oBAmp = 0.10 * uDetailAmp * (0.6 + 0.4 * uSwell);
+      oWG += vec2(oBx - oB0, oBz - oB0) / oDe2 * oBAmp;
+    }
   }
   vec3 oNw = normalize(vec3(-oWG.x, 1.0, -oWG.y));
   normal = normalize((viewMatrix * vec4(oNw, 0.0)).xyz);`)
@@ -264,7 +286,7 @@ vec2 oCoastGradW(vec2 p) {
   outgoingLight += uSparkle * oGl * oTw * vec3(1.0, 0.95, 0.85) * (1.0 - oFoam);
 #include <opaque_fragment>`);
     };
-    mat.customProgramCacheKey = () => 'saltstead-ocean-shore';
+    mat.customProgramCacheKey = () => 'saltstead-ocean-farfield';
     this.step = SIZE / SEG;
     this.glitterScale = 1; // the tier lever: parked at 0 under Plain (invariant 5)
     this.mesh = new THREE.Mesh(geo, mat);
@@ -287,7 +309,11 @@ vec2 oCoastGradW(vec2 p) {
   // wakeC: the wake map's snapped centre (wakemaplayer.update's return)
   update(t, cx, cz, camPos, glit, horizon, swell = 1, zen = null, wakeC = null) {
     this.uniforms.uTime.value = t;
-    this.uniforms.uSwell.value = swell;
+    // clamped to the SAME cap the CPU applies (waves.js setSeaState): a storm's
+    // seaScale can push main's raw swell far past it, and an unclamped uniform
+    // drew a sea the hull wasn't feeling — overdriven crests, whitecap gate
+    // slammed wide open (the 2026-07-24 storm stripes had this in them)
+    this.uniforms.uSwell.value = Math.min(swell, SEA_STATE_MAX);
     const sx = Math.round(cx / this.step) * this.step;
     const sz = Math.round(cz / this.step) * this.step;
     this.mesh.position.set(sx, 0, sz);
