@@ -9,10 +9,14 @@ The ledger UI and the mint/revoke endpoints never leave the house.
 Deployed at ~/saltstead/dash/app.py on the EVO (repo copy: tools/dash-app.py).
 """
 import hashlib
+import hmac
 import json
+import os
 import re
 import secrets
+import threading
 import time
+import urllib.request
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -27,6 +31,17 @@ VISITS_F = DASH / "visits.json"
 FEEDBACK_F = DASH / "feedback.json"
 FEEDBACK_RATE_F = DASH / "feedback_rate.json"
 VISIT_RATE_F = DASH / "visit_rate.json"
+INSIDERS_F = DASH / "insiders.json"   # uids James has tagged as his own
+
+# clean numbers: partition every browser real (pub) / house (James) / bot.
+STEADS_SECRET = os.environ.get("STEADS_WEBHOOK_SECRET", "")
+CLAWD_URL = os.environ.get("CLAWD_URL", "http://127.0.0.1:3000")
+HOUSE_IPS = set(x.strip() for x in os.environ.get("HOUSE_IPS", "").split(",") if x.strip())
+BOT_UA_RE = re.compile(
+    r"bot|crawl|spider|slurp|bing|google|yandex|baidu|duckduck|facebookexternal|"
+    r"embedly|preview|monitor|headless|phantom|lighthouse|python-requests|curl/|"
+    r"wget|axios|node-fetch|okhttp|semrush|ahrefs|petalbot", re.I)
+BOT_IP_PREFIXES = ("66.249.", "66.102.", "64.233.", "40.77.", "157.55.", "207.46.", "17.58.", "54.236.")
 
 VISIT_SITES = ("saltstead", "marsstead")
 SEEN_KEEP_DAYS = 45      # per-day dedupe sets kept this long; day totals kept forever
@@ -58,6 +73,57 @@ def _save(p, data):
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=1))
     tmp.replace(p)
+
+
+def _is_local_ip(ip):
+    ip = (ip or "").strip()
+    if not ip:
+        return False
+    if ip == "::1" or ip.startswith("127."):
+        return True
+    if ip.startswith("10.") or ip.startswith("192.168."):
+        return True
+    m = re.match(r"^172\.(\d+)\.", ip)
+    if m and 16 <= int(m.group(1)) <= 31:
+        return True
+    t = re.match(r"^100\.(\d+)\.", ip)
+    if t and 64 <= int(t.group(1)) <= 127:
+        return True
+    return False
+
+
+def _classify(uid, ip, ua):
+    """real stranger (pub) / James (house) / crawler (bot). Insider tag wins."""
+    if uid in set(_load(INSIDERS_F, [])):
+        return "house"
+    if BOT_UA_RE.search(ua or "") or any((ip or "").startswith(p) for p in BOT_IP_PREFIXES):
+        return "bot"
+    if _is_local_ip(ip) or (ip in HOUSE_IPS):
+        return "house"
+    return "pub"
+
+
+def _class_of(ever, uid):
+    e = ever.get(uid)
+    return e[3] if e and len(e) > 3 and e[3] in ("pub", "house", "bot") else "pub"
+
+
+def _emit_clint(type_, extra=None):
+    """Fire-and-forget HMAC-signed event to Clawd (the WhatsApp agent)."""
+    if not STEADS_SECRET:
+        return
+    body = json.dumps({"game": "saltstead", "type": type_, "ts": time.time(), **(extra or {})}).encode()
+    sig = hmac.new(STEADS_SECRET.encode(), body, hashlib.sha256).hexdigest()
+
+    def _go():
+        try:
+            req = urllib.request.Request(
+                CLAWD_URL + "/api/steads-event", data=body,
+                headers={"Content-Type": "application/json", "x-steads-signature": sig})
+            urllib.request.urlopen(req, timeout=2).read()
+        except Exception:
+            pass
+    threading.Thread(target=_go, daemon=True).start()
 
 
 def _mint_code(warden=False):
@@ -212,6 +278,7 @@ async def feedback(req: Request):
     log = _load(FEEDBACK_F, [])
     log.append(entry)
     _save(FEEDBACK_F, log[-1000:])
+    _emit_clint("bug" if kind == "bug" else "feedback", {"name": name, "message": message})
     return {"ok": True, "msg": "Noted on the harbourmaster's ledger — thank you."}
 
 
@@ -225,7 +292,7 @@ def _visit_uid(pid, ip, ua):
     return hashlib.sha1(basis.encode()).hexdigest()[:12]
 
 
-def _record_visit(site, kind, uid):
+def _record_visit(site, kind, uid, cls="pub"):
     day = str(_utc_day())
     data = _load(VISITS_F, {})
     s = data.setdefault(site, {"days": {}, "seen": {}, "ever": {}})
@@ -233,17 +300,21 @@ def _record_visit(site, kind, uid):
     seen = s["seen"].setdefault(day, {})
     bit = 1 if kind == "visit" else 2
     prev = int(seen.get(uid, 0))
+    new = not (prev & bit)
     if kind == "visit":
         rec["v"] += 1
-        if not prev & 1:
+        if new:
             rec["uv"] += 1
     else:
         rec["p"] += 1
-        if not prev & 2:
+        if new:
             rec["up"] += 1
     seen[uid] = prev | bit
-    e = s["ever"].get(uid) or [int(day), int(day), 0]
+    e = s["ever"].get(uid) or [int(day), int(day), 0, cls]
+    if len(e) < 4:
+        e.append(cls)
     e[1] = int(day)
+    e[3] = cls
     if kind == "play":
         e[2] += 1
     s["ever"][uid] = e
@@ -253,6 +324,7 @@ def _record_visit(site, kind, uid):
     cutoff = _utc_day() - SEEN_KEEP_DAYS
     s["seen"] = {d: m for d, m in s["seen"].items() if int(d) >= cutoff}
     _save(VISITS_F, data)
+    return new
 
 
 @app.post("/visit")
@@ -272,7 +344,13 @@ async def visit(req: Request):
     if kind not in ("visit", "play"):
         kind = "visit"
     pid = str(d.get("pid", ""))[:40].lower()
-    _record_visit(site, kind, _visit_uid(pid, ip, req.headers.get("user-agent", "")))
+    ua = req.headers.get("user-agent", "")
+    uid = _visit_uid(pid, ip, ua)
+    cls = _classify(uid, ip, ua)
+    new = _record_visit(site, kind, uid, cls)
+    # Clint: ping James for a real stranger (once per browser per UTC day)
+    if site == "saltstead" and cls == "pub" and new:
+        _emit_clint("play" if kind == "play" else "visit")
     return {"ok": True}
 
 
@@ -288,13 +366,40 @@ def visits_summary():
         days = s.get("days", {})
         seen = s.get("seen", {})
         ever = s.get("ever", {})
-        t = days.get(str(today), {})
 
+        def uniques_over(day_list):
+            vis = {"pub": set(), "house": set(), "bot": set()}
+            play = {"pub": set(), "house": set(), "bot": set()}
+            for d in day_list:
+                for u, b in (seen.get(d) or {}).items():
+                    c = _class_of(ever, u)
+                    if b & 1:
+                        vis[c].add(u)
+                    if b & 2:
+                        play[c].add(u)
+            return vis, play
+
+        def pack(vis, play):
+            return {
+                "uniques": sum(len(vis[c]) for c in vis),
+                "playUniques": sum(len(play[c]) for c in play),
+                "real": {"uniques": len(vis["pub"]), "playUniques": len(play["pub"])},
+                "house": {"uniques": len(vis["house"]), "playUniques": len(play["house"])},
+                "bot": {"uniques": len(vis["bot"]), "playUniques": len(play["bot"])},
+            }
+
+        today_days = [str(today)]
         week_days = [str(d) for d in range(today - 6, today + 1)]
-        wv = sum(days.get(d, {}).get("v", 0) for d in week_days)
-        wp = sum(days.get(d, {}).get("p", 0) for d in week_days)
-        wuv = len({u for d in week_days for u, b in (seen.get(d) or {}).items() if b & 1})
-        wup = len({u for d in week_days for u, b in (seen.get(d) or {}).items() if b & 2})
+        tvis, tplay = uniques_over(today_days)
+        wvis, wplay = uniques_over(week_days)
+        raw = lambda dl, k: sum(days.get(d, {}).get(k, 0) for d in dl)
+
+        ec = {"pub": {"browsers": 0, "players": 0}, "house": {"browsers": 0, "players": 0}, "bot": {"browsers": 0, "players": 0}}
+        for u, e in ever.items():
+            c = _class_of(ever, u)
+            ec[c]["browsers"] += 1
+            if len(e) > 2 and e[2] > 0:
+                ec[c]["players"] += 1
 
         recent = []
         for d in range(today - 13, today + 1):
@@ -303,13 +408,13 @@ def visits_summary():
                 recent.append({"date": time.strftime("%Y-%m-%d", time.gmtime(d * 86400)),
                                **{k: r.get(k, 0) for k in ("v", "uv", "p", "up")}})
         out[site] = {
-            "today": {"visits": t.get("v", 0), "uniques": t.get("uv", 0),
-                      "plays": t.get("p", 0), "playUniques": t.get("up", 0)},
-            "week": {"visits": wv, "uniques": wuv, "plays": wp, "playUniques": wup},
+            "today": {"visits": raw(today_days, "v"), "plays": raw(today_days, "p"), **pack(tvis, tplay)},
+            "week": {"visits": raw(week_days, "v"), "plays": raw(week_days, "p"), **pack(wvis, wplay)},
             "ever": {"visits": sum(r.get("v", 0) for r in days.values()),
                      "plays": sum(r.get("p", 0) for r in days.values()),
                      "browsers": len(ever),
-                     "players": sum(1 for e in ever.values() if len(e) > 2 and e[2] > 0)},
+                     "players": sum(1 for e in ever.values() if len(e) > 2 and e[2] > 0),
+                     "real": ec["pub"], "house": ec["house"], "bot": ec["bot"]},
             "recentDays": recent,
         }
     return {"visits": out}
