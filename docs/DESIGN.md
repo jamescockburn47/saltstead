@@ -63,8 +63,8 @@ spend on ship, crew, repairs → bigger targets → notoriety raises navy/coastg
 
 **All income originates at sea**: plunder, salvage, fishing, cargo running. Land is
 where money is *spent* — taverns (recruit crew, buy rumours/treasure maps), shipwrights
-(upgrades/repairs), hideouts (stash loot). On-foot exploration supports the sea game;
-it never pays directly.
+(upgrades/repairs), hideouts (stash loot). The land is worked by longboat from the
+deck — the captain never goes ashore; it never pays directly.
 
 ## The two flags (BUILT — faction.js + livery.js, verify-faction / verify-livery)
 
@@ -294,14 +294,51 @@ pulled-back captain's view at the helm (pulling further back as ships get bigger
 Interaction is proximity + soft-lock, not crosshair. The captain needs a readable
 procedural character model with cosmetic progression (hats).
 
-## Shore leave
+## Shore leave — RETIRED (2026-07-24)
 
-Anchor near a beach (or run her aground) and E puts the captain ashore by
-longboat; the crew holds the ship. On foot you walk the real terrain — climb
-for a view, find the X, dig with your own spade (same chest as sending the
-crew, but you were THERE). E rows you back. Land still pays nothing directly
-(the chest's gold originated at sea); ports, taverns and shipwrights hang off
-this mode later.
+The on-foot ashore mode is gone: the captain never leaves the ship. Every
+land verb is a longboat verb worked from the deck — the crew rows in to dig
+the X, the longboat climbs to the dragon's crag, ports open their panel at
+anchor. The land is scenery the ship sails PAST, not a walkable level: the
+shore now carries procedural vegetation and settlements (shoredecor.js),
+readable from the sea, entered never. Land still pays nothing directly (the
+chest's gold originated at sea).
+
+The scenery's laws (shoredecor.js + terraingen.js + earth.js):
+
+- **Every plant is GROWN, not stamped** (flora.js — the Spire roof garden
+  lesson): a wandering trunk with lean, branches with droop, jittered
+  canopy blobs, folded palm fronds — every instance unique from its seed,
+  free because the cell merges into one draw call anyway. The canopy SWAYS:
+  per-vertex flex weights drive a wind shader (lean ∝ strength², a
+  per-plant natural frequency, gusts scale amplitude only — the Spire wind
+  laws). Buildings stand still.
+- **Latitude picks the growth, and the zones BLEND**: species are a
+  weighted mix whose weights ramp over several degrees — palms fade out
+  through 20-30°, conifers fade in through 25-42° and out toward the rim,
+  ferns creep from the jungle into the wet subtropics; the terrain palette
+  blends its own seams the same way (tropics→temperate green, green→moor,
+  the polar whitening 62-70°). Scrub owns the noise-broken desert belts
+  (oasis palms by water); nothing past the polar rim or above the snowline.
+- **Rivers grow their own fringe**, and a TROPICAL river corridor is closed
+  jungle — the Amazon reads as El Dorado's country: dense canopy, wider
+  band, and **no settlements ever** on a tropical river bank.
+- **Settlements are 1700s-true**: palm-thatch and adobe huts in the hot
+  belts, chimneyed cottages in the temperate/northern ones, a church at the
+  heart of any hamlet of five cottages, nothing past 70° — and never inside
+  a real harbour's own ground.
+- **Shores have CHARACTER** (earth.js coastCharacter): a regional noise,
+  sharpened where mountains meet the sea, turns a stretch rocky — cliffs
+  rise out of the water (elevation's bluff term) and paint as wet rock and
+  shingle; dead-flat river ground reads marsh (mangrove-dark in the
+  tropics); the polar rim reads ice; only the rest is sand.
+- **Unseeable land is never built**: with the captain confined to the ship,
+  any visible chunk sits within the terrain ring of a waterline, so the
+  interior beyond INLAND_KEEP (~800 m) of every coast and river is skipped
+  like the deep sea — the Sahara, the Gobi and the Outback cost nothing.
+  EXCEPT the mountains: a range within 2.6 km of the coast keeps its chunks
+  (mountainness > 0.35), so the silhouette behind a shore survives the cull
+  and is already building if the view distance ever grows.
 
 ## Real weather, real wind (the Moorstead weather-live pattern)
 
@@ -464,7 +501,8 @@ boarding.
   boarding + autobattle, loot, fencing, repairs, the legends live. ✓ DONE except
   the first upgrade tier ← *we are here: the shipwright is the next rung*
 - **Phase 3 — crew and land**: hire/manage crew ✓ (hire/prizes), brain integration,
-  taverns, rumours, on-foot exploration ✓ (shore leave, digs, the hoard).
+  taverns, rumours, longboat land verbs ✓ (digs, the hoard — shore leave itself
+  retired 2026-07-24; the captain stays aboard).
 - **Phase 4 — multiplayer**: relay integration, ships as networked entities, co-op
   crewing.
 - **Phase 5 — progression**: the era ladder, notoriety/heat, economy balance.

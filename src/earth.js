@@ -272,6 +272,16 @@ const RIVER_VALLEY = 130;        // valley shoulder width
 // longboat — the El Dorado thesis in one number (galleon groundLine -3.0).
 export const RIVER_DEPTH = -3.2;
 
+// THE COAST'S CHARACTER (2026-07-24): not every shore is a beach. A slow
+// regional noise — sharpened where a mountain range meets the sea — says how
+// ROCKY this stretch of coast is: 0 reads sand and dunes, 1 reads cliffs and
+// shingle. Pure and deterministic; terraingen paints by it and elevation
+// raises a bluff by it, so the colour and the silhouette always agree.
+export function coastCharacter(lat, lon) {
+  const n = fbm2(lon * 0.7 + 31, lat * 0.7 - 11);
+  return Math.max(0, Math.min(1, (n - 0.36) * 2.4 + mountainness(lat, lon) * 0.5));
+}
+
 export function elevation(lat, lon) {
   const d = signedCoastGame(lat, lon);
   const n = fbm2(lon * 3.1, lat * 3.1);
@@ -283,6 +293,14 @@ export function elevation(lat, lon) {
   const ramp = 1 - Math.exp(-d / 260);
   // interior rise flattens out: plains stay plains, only ranges make mountains
   let h = 0.8 + Math.min(d, 900) * 0.012 + 24 * ramp * (0.35 + 0.65 * n);
+  // a rocky coast stands up out of the water: the bluff rises over the first
+  // ~60 m inland, so cliffs meet the sea instead of every shore shelving
+  // through the same sand. Land side only — the waterline itself never moves.
+  const rock = coastCharacter(lat, lon);
+  if (rock > 0.3 && d < 400) {
+    const bluff = smooth01((d - 6) / 55) * (1 - smooth01((d - 220) / 180));
+    h += (rock - 0.3) * 18 * bluff * (0.6 + 0.4 * n);
+  }
   const m = mountainness(lat, lon);
   if (m > 0) {
     const r = ridged(lon * 5.7, lat * 5.7);

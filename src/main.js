@@ -49,6 +49,7 @@ import { sailPower, wrapAngle, optimalTrim, tackSign, IRONS, crewRudder } from '
 import { waveHeight } from './waves.js';
 import { TerrainLayer } from './terrain.js';
 import { HarbourLayer } from './harbourlayer.js';
+import { ShoreDecorLayer } from './shoredecorlayer.js';
 import { Sky } from './sky.js';
 import { DAY_LENGTH, solarState, lunarState, moonPhase } from './skymath.js';
 import { EXPOSURE_BASE, exposureTarget, glitterSource, moonBrightness, bioGlow } from './lightrig.js';
@@ -70,7 +71,8 @@ import {
   encounterGait, ENCOUNTER_FAR, isLand, wrapX, dxWrap,
 } from './earth.js';
 import { windProfile, seaStateFor, skyDressing } from './weather.js';
-import { setSeaState, RIVER_STATE } from './waves.js';
+import { setSeaState, RIVER_STATE, setShoreSampler } from './waves.js';
+import { CoastMapLayer } from './coastmaplayer.js';
 import { WAKE_MAX } from './wake.js';
 import { WakeMapLayer } from './wakemaplayer.js';
 import { cineEligible, cineShot, cinePose, CINE_RANGE } from './cinecam.js';
@@ -161,6 +163,7 @@ class Game {
     this.skyfx = new SkyFx(this.scene); // the VISIBLE weather: clouds + rain
     this.terrain = new TerrainLayer(this.scene);
     this.harbours = new HarbourLayer(this.scene);
+    this.shoreDecor = new ShoreDecorLayer(this.scene); // trees + hamlets by latitude
 
     // each side weighs anchor in its own home waters (faction.js): the
     // black flag off Port Royal, the King's commission out of Bristol
@@ -232,6 +235,12 @@ class Game {
     });
     this.coastDist = COAST_CAP;
     this.overLand = false;
+    // the shore-aware sea: the coast map bakes signedCoastGame around the
+    // ship; the ocean shader and the CPU wave evaluator read the SAME field
+    // (calming + shore-parallel waves, waves.js)
+    this.coastMap = new CoastMapLayer(this.ship.x, this.ship.z);
+    setShoreSampler(this.coastMap.sampler);
+    this.ocean.setCoastMap(this.coastMap);
     this.oars = false; // sweeps out: the wind-proof crawl (O)
     this.shoalWater = false;
     this.geoClock = 0;
@@ -304,7 +313,7 @@ class Game {
     this.captain.group.position.set(this.cap.x, this.shipFrame.deck.y, this.cap.z);
     this.shipGroup.add(this.captain.group);
 
-    this.mode = 'walk'; // 'walk' | 'helm' | 'below' | 'ashore'
+    this.mode = 'walk'; // 'walk' | 'helm' | 'below'
     this.wind = { from: 2.3, speed: 7 };
     // wind direction + strength now come from the procedural field (wind.js),
     // sampled at the ship each frame; the live Open-Meteo layer was retired for
@@ -721,7 +730,7 @@ class Game {
     this.scene.add(this.shipGroup);
     this.riseMastLight();
     this.riseHoldLight(def);
-    if (this.mode !== 'ashore') this.shipGroup.add(this.captain.group);
+    this.shipGroup.add(this.captain.group);
     const p = clampToDeck(this.cap.x, this.cap.z, 0.2, this.shipFrame.deck);
     this.cap.x = p.x; this.cap.z = p.z;
     this.hud.shipname.textContent =
@@ -885,7 +894,7 @@ class Game {
   // the anchor — she cannot row against her own cable. AGROUND, the same
   // muscle poles her off the sand instead (the deep hulls kedge by longboat).
   toggleOars() {
-    if (this.mode === 'ashore' || this.mode === 'below') return;
+    if (this.mode === 'below') return;
     if (!this.oars && this.anchorDown) { this.say('Weigh anchor first — she cannot row against her own cable', 5); return; }
     this.oars = !this.oars;
     if (this.oars && this.aground) {
@@ -905,7 +914,7 @@ class Game {
   // (crewchat.js) grounds every answer in the ship's real ledgers.
   hailCrew() {
     if (this.crewChat.open) { this.closeCrewChat(); return; }
-    if (this.mode === 'ashore' || this.mode === 'below') return;
+    if (this.mode === 'below') return;
     if (this.crew < 1) { this.say('No hands aboard — sign a helmsman at any port', 5); return; }
     let hand = 0;
     if (this.mode !== 'helm' && this.crew > 1) {
@@ -1143,7 +1152,6 @@ class Game {
     const spot = this.findAnchorage(w.x, w.z) || w;
     this.ship.x = spot.x; this.ship.z = spot.z;
     this.ship.speed = 0; this.ship.rudder = 0;
-    if (this.mode === 'ashore') this.boardShip();
     this.navyCool.clear();
     this.lastPrizeId = null;
     this.geoClock = 0; // resample the geography at the new anchorage now
@@ -1220,6 +1228,8 @@ class Game {
     this.ocean.uniforms.uFresnel.value = fine ? 0.45 : 0.28;
     this.ocean.mesh.receiveShadow = fine; // the ship's shadow rides the sea
     this.terrain.setShadows(fine);
+    this.shoreDecor.setShadows(fine);
+    this.shoreDecor.setQuality(q);
     this.shipGroup.traverse((o) => {
       if (o.isMesh) { o.castShadow = fine; o.receiveShadow = fine; }
     });
@@ -1281,7 +1291,7 @@ class Game {
     if (this.portui.open) this.portui.hide();
     if (this.mode === 'helm') { this.mode = 'walk'; this.cam.targetDist = 8; return; }
     if (this.mode === 'below') this.goUp();
-    if (this.mode !== 'walk') return; // ashore: the tiller is back on the ship
+    if (this.mode !== 'walk') return;
     this.mode = 'helm';
     this.cap.x = this.shipFrame.helm.x; this.cap.z = this.shipFrame.helm.z + 0.6;
     this.cap.facing = 0; // face the bow
@@ -1290,8 +1300,8 @@ class Game {
     this.cam.targetDist = 15 + this.spec.length * 1.3;
   }
 
-  // E is the DOING key — board, capture, dig, dive, bank, step ashore, put
-  // in at port. The tiller lives on T alone, so E can never trap you off it.
+  // E is the DOING key — board, capture, dig, dive, bank, put in at port.
+  // The tiller lives on T alone, so E can never trap you off it.
   onE() {
     if (this.portui.open) { this.portui.hide(); return; }
     if (this.mode === 'below') {
@@ -1313,16 +1323,6 @@ class Game {
       }
       this.goUp(); return; // the hold has one door
     }
-    if (this.mode === 'ashore') {
-      if (this.hoardReady) { this.lootHoard(); return; }
-      if (this.digReady && this.digTimer <= 0) {
-        this.digTimer = DIG_TIME;
-        this.say('You drive the spade into the sand\u2026');
-        return;
-      }
-      this.boardShip(); // the longboat ferries you back from any beach
-      return;
-    }
     if (this.dutchmanBoardable) { this.boardDutchman(); return; }
     if (this.rescueReady && this.rescueReady.length) { this.rescueSurvivors(); return; }
     // the passage layer's E-verbs: a taken line ranks first (its clock runs),
@@ -1336,6 +1336,7 @@ class Game {
     }
     if (this.boardable) { this.boardPrize(); return; }
     if (this.captureable) { this.takePrize(); return; }
+    if (this.hoardReady) { this.lootHoard(); return; }
     if (this.digReady && this.digTimer <= 0) {
       this.digTimer = DIG_TIME;
       this.say('The longboat pulls for the shore\u2026');
@@ -1355,7 +1356,6 @@ class Game {
     if (this.bankReady) { this.bankTreasure(); return; }
     if (this.port && inAnchorage(this.port.dist, this.ship.speed)) { this.putIn(); return; }
     if (this.canGoBelow()) { this.goBelow(); return; }
-    if (this.canStepAshore()) { this.goAshore(); return; }
   }
 
   // ---- below decks (shipframe.js holdFor, ship.js buildBelowDecks) ----
@@ -1392,7 +1392,6 @@ class Game {
   // for everyone else the key does nothing at all.
   wardenMaterialise() {
     if (!this.warden || this.portui.open) return;
-    if (this.mode === 'ashore') { this.say('Come back aboard first, Warden', 3); return; }
     const i = HULLS.findIndex((h) => h.id === this.hullId);
     const def = HULLS[(i + 1) % HULLS.length];
     this.setHull(def);
@@ -1410,7 +1409,6 @@ class Game {
   // for testing the helmsman, the currents, the wrap, and the storms.
   wardenTeleport() {
     if (!this.warden || this.portui.open) return;
-    if (this.mode === 'ashore') { this.say('Come back aboard first, Warden', 3); return; }
     if (!this.course) { this.say('Mark a spot on the chart (M) first, then J steps you to it', 5); return; }
     this.ship.x = wrapX(this.course.x);
     this.ship.z = this.course.z;
@@ -1520,7 +1518,7 @@ class Game {
 
   // X — the jettison bargain (chase.js): gold for the sea, sprint for the ship
   jettisonCargo() {
-    if (this.mode === 'ashore' || this.portui.open) return;
+    if (this.portui.open) return;
     if (!this.chaseId) { this.say('Nothing astern worth bribing — the cargo stays aboard', 4); return; }
     const plan = jettisonPlan(this.gold);
     if (!plan) { this.say('The chest is too bare to interest her — sail or fight', 5); return; }
@@ -1536,7 +1534,7 @@ class Game {
 
   // P — the handlines (fishing.js)
   toggleLines() {
-    if (this.mode === 'ashore' || this.mode === 'below' || this.portui.open) return;
+    if (this.mode === 'below' || this.portui.open) return;
     if (this.lines) {
       this.lines = false;
       this.lineState = null;
@@ -1567,7 +1565,7 @@ class Game {
 
   // K — gun drill (gundrill.js): dry-fire the batteries between fights
   startDrill() {
-    if (this.mode === 'ashore' || this.mode === 'below' || this.portui.open) return;
+    if (this.mode === 'below' || this.portui.open) return;
     if (this.crew < 1) { this.say('Gun drill needs hands at the guns — sign crew at a port', 5); return; }
     if (this.drillT > 0) return;
     if (this.t < this.drillCool) { this.say('The hands are still getting their breath — a minute between drills', 4); return; }
@@ -1580,7 +1578,7 @@ class Game {
 
   // U — the chip log (reckoning.js): departure, casts, and the book
   heaveChipLog() {
-    if (this.mode === 'ashore' || this.mode === 'below' || this.portui.open) return;
+    if (this.mode === 'below' || this.portui.open) return;
     const cast = chipLog(this.castSeed++, this.ship.speed);
     if (!this.reckoning) {
       this.reckoning = castReckoning(newReckoning(this.ship.x, this.ship.z), cast.estMs);
@@ -1702,7 +1700,7 @@ class Game {
   // and not too much way on her; riding to it she stops dead over the
   // ground and swings head to wind. The one honest way to PARK at sea.
   toggleAnchor() {
-    if (this.mode === 'ashore' || this.portui.open) return;
+    if (this.portui.open) return;
     if (this.anchorDown) {
       this.anchorDown = false;
       this.setAnchor(false);
@@ -1745,7 +1743,7 @@ class Game {
   }
 
   fireGuns() {
-    if (this.mode === 'ashore' || this.portui.open) return;
+    if (this.portui.open) return;
     if (this.gunCool > 0) return; // the crew is still at the reload dance
 
     // the Kraken's arms are ON the hull — every gun bears
@@ -1859,56 +1857,6 @@ class Game {
       this.say(`A hit on the waterline (hull ${(lastDmg.hull * 100).toFixed(0)}%)`
         + (hits > 1 ? ` \u2014 ${hits} balls told` : ''), 4);
     }
-  }
-
-  // ---- shore leave ----
-  canStepAshore() {
-    return this.mode === 'walk' && this.ship.speed < 1
-      && (this.aground || this.coastDist < 300);
-  }
-
-  // nearest dry ground within longboat reach of a point — the reach is long
-  // enough for a deep hull anchored off the shoal, not just a beached sloop
-  findLanding(cx, cz) {
-    for (let r = 5; r <= 700; r += 8) {
-      for (let a = 0; a < 16; a++) {
-        const ang = (a / 16) * Math.PI * 2;
-        const x = cx + Math.sin(ang) * r, z = cz + Math.cos(ang) * r;
-        const ll = worldToLatLon(x, z);
-        if (elevation(ll.lat, ll.lon) > 0.15) return { x, z };
-      }
-    }
-    return null;
-  }
-
-  goAshore() {
-    // with a treasure map in hand and the X in reach, the longboat rows for
-    // the X's own beach — no swimming lagoons to reach your own dig
-    let cx = this.ship.x, cz = this.ship.z;
-    if (this.treasureMap && digDist(this.ship.x, this.ship.z, this.treasureMap) < DIG_RADIUS) {
-      const w = latLonToWorld(this.treasureMap.lat, this.treasureMap.lon);
-      cx = w.x; cz = w.z;
-    }
-    const land = this.findLanding(cx, cz);
-    if (!land) { this.say('No safe landing here \u2014 find a beach.'); return; }
-    this.mode = 'ashore';
-    this.shore = { x: land.x, z: land.z, facing: 0 };
-    this.scene.add(this.captain.group); // reparent out of the ship
-    this.cam.targetDist = 8;
-    this.say(this.crew > 0
-      ? 'The longboat puts you ashore. The crew holds the ship.'
-      : 'You row yourself ashore. She lies to her anchor.', 5);
-    this.logEvent(this.crew > 0
-      ? 'The captain went ashore by longboat; the crew holds the ship'
-      : 'The captain rowed ashore; she lies to her anchor');
-  }
-
-  boardShip() {
-    this.mode = 'walk';
-    this.shipGroup.add(this.captain.group);
-    this.cap.x = 0; this.cap.z = -2.2; this.cap.facing = 0;
-    this.cam.targetDist = 8;
-    this.say('The longboat brings you back aboard.', 4);
   }
 
   boardPrize() {
@@ -2032,13 +1980,14 @@ class Game {
     this.persist();
   }
 
-  // the dragon's crag: follow her ashore and the hoard is yours
+  // the dragon's crag: heave to under Snowdon and the longboat climbs to it
   lootHoard() {
     this.won.push('dragons-wales');
     this.gold += HOARD_GOLD;
     this.hoardReady = false;
-    this.say(`THE HOARD \u2014 ${HOARD_GOLD} doubloons of sea-plunder, piled in her crag!`, 8);
-    this.logEvent(`Looted the dragon's hoard in Snowdonia \u2014 ${HOARD_GOLD} doubloons`);
+    this.say(`THE HOARD \u2014 the longboat returns heaped with ${HOARD_GOLD} doubloons `
+      + 'of sea-plunder from her crag!', 8);
+    this.logEvent(`The longboat looted the dragon's hoard in Snowdonia \u2014 ${HOARD_GOLD} doubloons`);
     this.persist();
   }
 
@@ -2200,9 +2149,6 @@ class Game {
       const relNow = wrapAngle(this.ship.yaw - this.wind.from);
       this.ship.rudder += (crewRudder(relNow) - this.ship.rudder) * Math.min(1, dt * 2);
     }
-    // with the captain ashore the crew heaves to and HOLDS her
-    if (this.mode === 'ashore') this.ship.speed = 0;
-
     // autosave the voyage every 20 s
     this.saveClock -= dt;
     if (this.saveClock <= 0) { this.saveClock = 20; this.persist(); }
@@ -2624,8 +2570,7 @@ class Game {
       } else this.reefWarned = false;
       // the navigator's book (reckoning.js): heading and logged speed, only
       // while she's genuinely under way (the port panel furls her sails)
-      if (this.reckoning && !this.anchorDown && !this.aground && this.mode !== 'ashore'
-        && !this.portui.open) {
+      if (this.reckoning && !this.anchorDown && !this.aground && !this.portui.open) {
         stepReckoning(this.reckoning, this.ship.yaw, dt, gait);
       }
     }
@@ -2720,23 +2665,18 @@ class Game {
       }
     }
 
-    // the dig: from the deck the crew rows in and does the shovel work; on
-    // foot you stand on the X yourself and dig
+    // the dig: heave to on the X and the crew rows in to do the shovel work
     this.digReady = false;
     if (this.treasureMap) {
-      if (this.mode === 'ashore') {
-        this.digReady = digDist(this.shore.x, this.shore.z, this.treasureMap) < 30;
-      } else {
-        const dd = digDist(this.ship.x, this.ship.z, this.treasureMap);
-        this.digReady = dd < DIG_RADIUS && this.ship.speed < 1;
-      }
+      const dd = digDist(this.ship.x, this.ship.z, this.treasureMap);
+      this.digReady = dd < DIG_RADIUS && this.ship.speed < 1;
       if (this.digTimer > 0) {
         this.digTimer -= dt;
         if (this.digTimer <= 0) {
           const pay = chestRoll(this.treasureMap.seed);
           this.gold += pay;
           this.treasureMap = null;
-          this.say(this.mode === 'ashore' || this.crew === 0
+          this.say(this.crew === 0
             ? `The spade strikes wood \u2014 a chest of ${pay} doubloons!`
             : `The crew strikes wood \u2014 a chest of ${pay} doubloons!`, 8);
           this.logEvent(`Dug at the X \u2014 a chest of ${pay} doubloons raised`);
@@ -2746,7 +2686,7 @@ class Game {
     }
 
     // ---- the legends' own E-verbs: dive, expedition, the vault, the hoard ----
-    const heaveTo = this.ship.speed < 1 && this.mode !== 'ashore';
+    const heaveTo = this.ship.speed < 1;
     this.diveReady = DIVE_ZONES.includes(zoneId) && heaveTo;
     if (this.diveTimer > 0) {
       this.diveTimer -= dt;
@@ -2810,12 +2750,13 @@ class Game {
     } else {
       this.whaleRamT = 0;
     }
-    // the dragon's crag: she fled there wounded; step ashore under Snowdon
+    // the dragon's crag: she fled there wounded; heave to under Snowdon and
+    // the longboat climbs to the hoard
     this.hoardReady = false;
-    if (this.mode === 'ashore' && this.dragon && dragonGone(this.dragon)
-      && !this.won.includes('dragons-wales')) {
+    if (this.dragon && dragonGone(this.dragon) && !this.won.includes('dragons-wales')) {
       const crag = zoneOf('dragons-wales');
-      this.hoardReady = Math.hypot(this.shore.x - crag.x, this.shore.z - crag.z) < HOARD_REACH;
+      this.hoardReady = this.ship.speed < 1
+        && Math.hypot(this.ship.x - crag.x, this.ship.z - crag.z) < HOARD_REACH;
     }
 
     const px = this.ship.x, pz = this.ship.z;
@@ -2910,17 +2851,19 @@ class Game {
         }
       } else this.aground = false;
     } else this.aground = false;
-    // the moment she fetches up, say OUT LOUD how you get ashore from here
-    // \u2014 and how you get OFF: O mans the poles (the deep hulls run the kedge)
+    // the moment she fetches up, say OUT LOUD how you get OFF: O mans the
+    // poles (the deep hulls run the kedge)
     if (this.aground && !this.wasAgroundSay) {
       this.say(beaches(this.spec)
-        ? 'The bow takes the sand \u2014 O poles her off \u00b7 E steps you ashore'
-        : 'She draws too much to beach \u2014 O runs the kedge out \u00b7 E sends the longboat ashore', 8);
+        ? 'The bow takes the sand \u2014 O poles her off'
+        : 'She draws too much to beach \u2014 O runs the kedge out', 8);
     }
     this.wasAgroundSay = this.aground;
 
     this.terrain.update(this.ship.x, this.ship.z);
     this.harbours.update(this.ship.x, this.ship.z);
+    this.shoreDecor.update(this.ship.x, this.ship.z);
+    this.shoreDecor.setWind(t, this.wind.from, this.wind.speed);
     this.refreshHands(); // the muster stands its stations (cheap when unchanged)
     this.refreshOarFx(); // sweeps ship and stow with the O key
     // inshore the hull rides the sea floor where it shoals past the keel
@@ -3012,7 +2955,7 @@ class Game {
       this.camera.updateProjectionMatrix();
     }
 
-    // captain: walk the deck (ship-local) or the shore (world terrain)
+    // captain: walk the deck (ship-local)
     this.cap.moving = false;
     const ix = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
     const iz = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
@@ -3032,25 +2975,7 @@ class Game {
       this.cap.facing = Math.atan2(lx, lz);
       this.cap.moving = true;
     }
-    if (this.mode === 'ashore') {
-      if (ix || iz) {
-        const fwd = new THREE.Vector3();
-        this.camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
-        const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0));
-        const dir = new THREE.Vector3().addScaledVector(fwd, iz).addScaledVector(right, ix).normalize();
-        const nx = this.shore.x + dir.x * 3.4 * dt, nz = this.shore.z + dir.z * 3.4 * dt;
-        const nll = worldToLatLon(nx, nz);
-        if (elevation(nll.lat, nll.lon) > -0.6) { // wade to the chest, no deeper
-          this.shore.x = nx; this.shore.z = nz;
-          this.shore.facing = Math.atan2(dir.x, dir.z);
-          this.cap.moving = true;
-        }
-      }
-      const sll = worldToLatLon(this.shore.x, this.shore.z);
-      this.captain.group.position.set(
-        this.shore.x, Math.max(elevation(sll.lat, sll.lon), -0.3), this.shore.z);
-      this.captain.group.rotation.y = this.shore.facing;
-    } else {
+    {
       const floorY = this.mode === 'below' ? this.holdFrame.y : this.shipFrame.deck.y;
       this.captain.group.position.set(this.cap.x, floorY, this.cap.z);
       this.captain.group.rotation.y = this.cap.facing;
@@ -3091,7 +3016,7 @@ class Game {
     // the camera steps back for the wide establishing shot — both hulls,
     // both wakes, the weather over them. Any key hands the frame straight
     // back; combat and below-decks never trigger it.
-    if (!this.cine && !this.photoCam && this.mode !== 'below' && this.mode !== 'ashore'
+    if (!this.cine && !this.photoCam && this.mode !== 'below'
       && this.gunCool <= 0 && !this.aground) {
       const near = this.merchants.wakeSources(this.ship.x, this.ship.z, 1, CINE_RANGE)[0];
       if (near && cineEligible(this.cineEnd ?? -1e9, t, near.d, sp, near.speed)) {
@@ -3132,6 +3057,7 @@ class Game {
     // the weather made visible: cumulus drifting downwind, rain on the lens
     this.skyfx.update(t, dt, this.ship.x, this.ship.z, this.camera.position,
       this.wind.from, this.weatherState, gloomEff, sol.dayness);
+    this.coastMap.update(this.ship.x, this.ship.z); // amortized shore-field bake
     this.ocean.update(t, this.ship.x, this.ship.z, this.camera.position, glit,
       this.sky.domeUniforms.uHor.value, this.swell,
       this.sky.domeUniforms.uZen.value, this.wakeC);
@@ -3267,14 +3193,6 @@ class Game {
     const hintText = this.mode === 'below'
       ? (this.seamsOpen > 0 ? seamHint()
         : 'THE HOLD \u2014 WASD to walk her \u00b7 E \u2014 up the ladder \u00b7 T \u2014 straight to the tiller')
-      : this.mode === 'ashore'
-      ? (this.hoardReady
-        ? 'E \u2014 THE DRAGON\u2019S HOARD'
-        : this.digTimer > 0
-        ? 'Digging\u2026'
-        : this.digReady
-          ? 'E \u2014 dig for the treasure'
-          : 'WASD \u2014 explore ashore \u00b7 E \u2014 back to the ship')
       : this.kraken && this.kraken.state === 'gripping'
         ? `THE KRAKEN \u2014 F blast an arm (${this.kraken.arms} grip her) \u00b7 the crew hacks \u00b7 or run for SHALLOWS`
       : this.dragon && !dragonGone(this.dragon)
@@ -3298,6 +3216,8 @@ class Game {
           : this.prizeShorthanded
           ? `Her hull is yours for the taking \u2014 but a prize crew is ${PRIZE_CREW} hands `
             + `(${this.crew} aboard). Sign hands on at a haven.`
+          : this.hoardReady
+          ? 'E \u2014 send the longboat up to THE DRAGON\u2019S HOARD'
           : this.digTimer > 0
           ? (this.crew > 0 ? 'The crew is digging\u2026' : 'Digging\u2026')
           : this.digReady
@@ -3321,19 +3241,15 @@ class Game {
                 ? `ANCHORAGE \u2014 T to leave the tiller, E to put in at ${this.port.haven.name}`
                 : this.aground
                 ? (beaches(this.spec)
-                  ? 'BEACHED \u2014 O poles her off \u00b7 A/D swings her \u00b7 T leaves the tiller, E steps ashore'
-                  : 'ANCHORED OFF \u2014 O runs the kedge out \u00b7 T, then E to send the longboat ashore')
+                  ? 'BEACHED \u2014 O poles her off \u00b7 A/D swings her \u00b7 T leaves the tiller'
+                  : 'HARD AGROUND \u2014 O runs the kedge out \u00b7 T leaves the tiller')
                 : 'A/D — steer · W/S — sheet · F — fire · R — shot · Q — anchor · T — leave the tiller · M — chart · U — the log')
               : anchored
                 ? `E \u2014 put in at ${this.port.haven.name} \u00b7 T \u2014 take the tiller`
-                : this.canStepAshore()
-                  ? (beaches(this.spec)
-                    ? 'E \u2014 step ashore \u00b7 T \u2014 take the tiller'
-                    : 'E \u2014 send the longboat ashore \u00b7 T \u2014 take the tiller')
-                  : this.aground
+                : this.aground
                     ? (beaches(this.spec)
-                      ? 'BEACHED \u2014 O poles her off \u00b7 E to step ashore \u00b7 T to take the tiller'
-                      : 'ANCHORED OFF \u2014 O runs the kedge out \u00b7 E sends the longboat ashore \u00b7 T to take the tiller')
+                      ? 'BEACHED \u2014 O poles her off \u00b7 T to take the tiller'
+                      : 'HARD AGROUND \u2014 O runs the kedge out \u00b7 T to take the tiller')
                     : this.canGoBelow()
                       ? 'E \u2014 go below \u00b7 T \u2014 take the tiller \u00b7 WASD \u2014 walk the deck'
                     : this.anchorDown

@@ -31,8 +31,11 @@
 //    water is matte.
 
 import * as THREE from 'three';
-import { glslWaveSum, glslWaveGrad, MAX_WAVE_HEIGHT } from './waves.js';
+import {
+  glslWaveSum, glslWaveGrad, glslShore, MAX_WAVE_HEIGHT, MAX_SHORE_HEIGHT,
+} from './waves.js';
 import { WAKEMAP_METRES } from './wakemaplayer.js';
+import { COASTMAP_METRES } from './coastmaplayer.js';
 
 const SIZE = 720, SEG = 180;
 
@@ -73,6 +76,10 @@ export class Ocean {
       uDetailAmp: { value: 1 }, // the tier lever: plain parks it at 0
       uWakeMap: { value: blank },              // wakemaplayer.js render target
       uWakeC: { value: new THREE.Vector2() },  // the map's snapped centre
+      uCoastMap: { value: blank },             // coastmaplayer.js data texture
+      // parked far away until the first bake lands: everywhere reads as
+      // outside the map, i.e. open sea — never "on the beach"
+      uCoastC: { value: new THREE.Vector2(1e9, 1e9) },
     };
     const mat = new THREE.MeshPhongMaterial({
       color: 0x175a7d,
@@ -92,10 +99,22 @@ float oWakeIn(vec2 uv) {
   vec2 e = abs(uv - 0.5);
   return step(max(e.x, e.y), 0.5);
 }`;
+      // the coast map (coastmaplayer.js): signed coast distance per pixel.
+      // Outside the map (or before the first bake) sd reads deep blue water,
+      // so the shore terms vanish and the open sum is untouched.
+      const coastSample = /* glsl */`
+vec2 oCoastUv(vec2 p) { return (p - uCoastC) / ${COASTMAP_METRES.toFixed(1)} + 0.5; }
+float oCoastSd(vec2 p) {
+  vec2 uv = oCoastUv(p);
+  vec2 e = abs(uv - 0.5);
+  float inM = step(max(e.x, e.y), 0.5);
+  return mix(-10000.0, texture2D(uCoastMap, uv).r, inM);
+}` + glslShore();
       sh.vertexShader = 'uniform float uTime;\nuniform vec2 uOrigin;\nuniform float uSwell;\n'
         + 'uniform sampler2D uWakeMap;\nuniform vec2 uWakeC;\n'
+        + 'uniform sampler2D uCoastMap;\nuniform vec2 uCoastC;\n'
         + 'varying vec3 vWPos;\nvarying float vVDist;\n'
-        + wakeSample + '\n'
+        + wakeSample + '\n' + coastSample + '\n'
         + sh.vertexShader
           .replace('#include <begin_vertex>',
             '#include <begin_vertex>\n'
@@ -103,7 +122,8 @@ float oWakeIn(vec2 uv) {
             + '  float wz = position.z + uOrigin.y;\n'
             + '  vec2 wWUv = oWakeUv(vec2(wx, wz));\n'
             + '  float wWakeH = texture2D(uWakeMap, wWUv).r * oWakeIn(wWUv);\n'
-            + `  transformed.y += uSwell * (${glslWaveSum()}) + wWakeH;\n`
+            + '  float wSd = oCoastSd(vec2(wx, wz));\n'
+            + `  transformed.y += uSwell * (oShoreAtten(wSd) * (${glslWaveSum()}) + oShoreSum(wSd)) + wWakeH;\n`
             + '  vWPos = vec3(wx, transformed.y, wz);')
           .replace('#include <project_vertex>',
             '#include <project_vertex>\n'
@@ -112,9 +132,11 @@ float oWakeIn(vec2 uv) {
         + 'uniform vec3 uSunDirW;\nuniform float uSparkle;\nuniform float uScatter;\n'
         + 'uniform float uFresnel;\nuniform vec3 uHor;\nuniform vec3 uZen;\nuniform float uDetailAmp;\n'
         + 'uniform sampler2D uWakeMap;\nuniform vec2 uWakeC;\n'
+        + 'uniform sampler2D uCoastMap;\nuniform vec2 uCoastC;\n'
         + 'varying vec3 vWPos;\nvarying float vVDist;\n'
         + `const float O_MAXH = ${MAX_WAVE_HEIGHT.toFixed(4)};\n`
-        + O_FBM + wakeSample + '\n'
+        + `const float O_MAXSH = ${MAX_SHORE_HEIGHT.toFixed(4)};\n`
+        + O_FBM + wakeSample + '\n' + coastSample + '\n'
         + sh.fragmentShader
           .replace('#include <color_fragment>', `#include <color_fragment>
   // ---- the water's own colour work (main-scope: later passes read these)
@@ -129,9 +151,23 @@ float oWakeIn(vec2 uv) {
   vec2 oWkG = vec2(
     texture2D(uWakeMap, oWUv + vec2(oWTexUv, 0.0)).r - oWkHF.x,
     texture2D(uWakeMap, oWUv + vec2(0.0, oWTexUv)).r - oWkHF.x) / oWTexel * oWIn;
-  // exact per-pixel surface height and gradient from the wave table
-  float oH = uSwell * (${glslWaveSum()});
-  vec2 oWG = uSwell * (${glslWaveGrad()}) + oWkG;
+  // exact per-pixel surface height and gradient from the wave table — the
+  // shore field folded in exactly as the CPU folds it (waves.js waveHeight)
+  float oSd = oCoastSd(vWPos.xz);
+  float oSAtt = oShoreAtten(oSd);
+  float oSEnv = oShoreEnv(oSd);
+  vec2 oCDir = vec2(0.0);
+  {
+    float oCTexUv = 1.0 / 128.0;
+    vec2 oCUv = oCoastUv(vWPos.xz);
+    vec2 oCG = vec2(
+      texture2D(uCoastMap, oCUv + vec2(oCTexUv, 0.0)).r - texture2D(uCoastMap, oCUv - vec2(oCTexUv, 0.0)).r,
+      texture2D(uCoastMap, oCUv + vec2(0.0, oCTexUv)).r - texture2D(uCoastMap, oCUv - vec2(0.0, oCTexUv)).r);
+    float oCLen = length(oCG);
+    if (oCLen > 1e-4) oCDir = oCG / oCLen;
+  }
+  float oH = uSwell * (oSAtt * (${glslWaveSum()}) + oShoreSum(oSd));
+  vec2 oWG = uSwell * (oSAtt * (${glslWaveGrad()}) + oShoreGradMag(oSd) * oCDir) + oWkG;
   // crest measure: -1 trough -> +1 highest possible crest at this sea state
   float oCrest = clamp(0.5 + 0.5 * oH / max(0.2, uSwell * O_MAXH), 0.0, 1.0);
   // froth. Whitecaps only when the wind has the sea up (weather.js drives
@@ -151,7 +187,14 @@ float oWakeIn(vec2 uv) {
       // fine fbm so heavy churn still reads as WATER torn white, not paint
       oRag = 0.40 + 0.60 * oFbm(vWPos.xz * 1.9 + uTime * vec2(0.11, 0.07));
     }
-    oFoam = clamp((oWkHF.y * 0.85 + oWc) * oRag, 0.0, 1.0);
+    // breakers: the shore set's own crests whiten as they close the beach —
+    // foam lines that lie parallel to the shore because the crests do
+    float oBrk = 0.0;
+    if (oSEnv > 0.02) {
+      float oSC = clamp(0.5 + 0.5 * oShoreSum(oSd) / max(0.05, oSEnv * O_MAXSH), 0.0, 1.0);
+      oBrk = smoothstep(0.62, 0.92, oSC) * smoothstep(0.06, 0.5, oSEnv);
+    }
+    oFoam = clamp((oWkHF.y * 0.85 + oWc + oBrk * 0.8) * oRag, 0.0, 1.0);
   }
   // crests pass light: looking through high water toward the sun finds
   // green glass (cheap subsurface scatter — reads huge, costs nothing)
@@ -198,7 +241,7 @@ float oWakeIn(vec2 uv) {
   outgoingLight += uSparkle * oGl * oTw * vec3(1.0, 0.95, 0.85) * (1.0 - oFoam);
 #include <opaque_fragment>`);
     };
-    mat.customProgramCacheKey = () => 'saltstead-ocean-smooth';
+    mat.customProgramCacheKey = () => 'saltstead-ocean-shore';
     this.step = SIZE / SEG;
     this.glitterScale = 1; // the tier lever: parked at 0 under Plain (invariant 5)
     this.mesh = new THREE.Mesh(geo, mat);
@@ -208,6 +251,13 @@ float oWakeIn(vec2 uv) {
 
   // hand over the live wake map (wakemaplayer.js render target)
   setWakeMap(texture) { this.uniforms.uWakeMap.value = texture; }
+
+  // hand over the coast map (coastmaplayer.js). The layer owns uvCenter —
+  // parked far away until the first bake lands, then the live snapped centre.
+  setCoastMap(layer) {
+    this.uniforms.uCoastMap.value = layer.texture;
+    this.uniforms.uCoastC.value = layer.uvCenter;
+  }
 
   // glit: { ax, az, low, amp } from lightrig.glitterSource
   // zen: zenith colour for the fresnel sky gradient (falls back near uHor)

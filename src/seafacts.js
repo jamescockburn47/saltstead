@@ -77,8 +77,8 @@ export const SEA_FACTS = [
     keywords: ['dorado', 'gold', 'gilded', 'city', 'amazon', 'expedition'],
     text: 'They say El Dorado lies far up the Amazon, near Manaus — follow '
       + 'the blue river road inland from the Atlantic mouth at about three '
-      + 'degrees south. Shallow draft only; anchor and mount the expedition '
-      + 'ashore (E) when the legend names itself on the HUD.',
+      + 'degrees south. Shallow draft only; heave to and mount the expedition '
+      + '(E) when the legend names itself on the HUD.',
   },
   {
     id: 'ports', topic: 'trade',
@@ -157,7 +157,7 @@ export const SEA_FACTS = [
     id: 'treasure', topic: 'legends',
     keywords: ['treasure', 'map', 'dig', 'spade', 'buried', 'chest'],
     text: 'Treasure maps mark a real X on real land near a shore — both '
-      + 'charts carry it. Anchor close, step ashore, and dig at the spot; '
+      + 'charts carry it. Anchor close and E sends the longboat in to dig; '
       + 'the chest beats any single purse on the lanes.',
   },
   {
@@ -211,8 +211,8 @@ export const SEA_FACTS = [
     id: 'anchoring', topic: 'ship',
     keywords: ['anchor', 'cable', 'swing', 'holding', 'moor'],
     text: 'Q lets go the anchor — the cable knows its depth, snubs her '
-      + 'way off, and she swings her head to wind like a real ship. Anchor '
-      + 'before you step ashore or the tide of business drifts her.',
+      + 'way off, and she swings her head to wind like a real ship. The '
+      + 'one honest way to park at sea.',
   },
   {
     id: 'ladder', topic: 'ship',

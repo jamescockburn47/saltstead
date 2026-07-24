@@ -41,7 +41,7 @@ you find a sail at night.
   **W/S** sheet in / ease the sails.
 - Trim matters: the mainsheet bar glows green when your trim suits your point of
   sail. In irons you stall; a beam reach is king. A good sailor outruns a bad one.
-- **E** is the doing key: board, capture, dig, dive, bank, step ashore, put in at
+- **E** is the doing key: board, capture, dig, dive, bank, put in at
   port. **F** fires the broadside, **R** swaps round/chain shot.
 - **M** world chart, **L** ship's log, **N** star chart, **H** help book.
 

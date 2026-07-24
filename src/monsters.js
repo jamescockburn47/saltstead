@@ -8,7 +8,7 @@
 //   Y DDRAIG GOCH (dragons-wales) — a dragon circles high over the Irish
 //   Sea and stoops on your rig. She is only in cannon reach DURING the
 //   stoop: wound her three times and she flees to her crag in Snowdonia —
-//   follow her ashore and the hoard is yours.
+//   heave to under Snowdon and the longboat brings down the hoard.
 //
 // Both machines are deterministic given their inputs (invariant 6).
 
@@ -152,7 +152,7 @@ export const DRAGON_HIT = 0.75;    // a laid gun mostly tells at her wingspan
 export const DRAGON_HIGH = 60;     // circling altitude (visual)
 export const DRAGON_LOW = 9;       // she bottoms out at masthead height
 export const HOARD_GOLD = 2000;    // the crag's hoard — sea plunder, re-buried
-export const HOARD_REACH = 500;    // game m ashore of the crag to loot it
+export const HOARD_REACH = 500;    // game m off the crag for the longboat party
 
 export function newDragon() {
   return { state: 'circling', t: 0, hp: DRAGON_HP, raked: false };

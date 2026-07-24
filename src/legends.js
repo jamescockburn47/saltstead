@@ -18,9 +18,9 @@ export const LEGENDS = [
     id: 'dragons-wales', kind: 'boss', phase: 2,
     name: 'Y Ddraig Goch', lat: 53.07, lon: -4.08, radius: 45,
     pitch: 'Dragons nest on Snowdonia. They stoop on ships in the Irish Sea; '
-      + 'wound one and it retreats to its crag — follow it ashore to finish '
-      + 'the job and loot the hoard. The land fight pays in treasure already '
-      + 'plundered from the sea, so the land-earns-nothing rule holds.',
+      + 'wound one and it retreats to its crag — heave to under Snowdon and '
+      + 'the longboat climbs to loot the hoard. The crag pays in treasure '
+      + 'already plundered from the sea, so the land-earns-nothing rule holds.',
   },
   {
     id: 'bermuda-triangle', kind: 'anomaly', phase: 1,
