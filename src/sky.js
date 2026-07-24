@@ -30,19 +30,80 @@ export class Sky {
     this.moonLight = new THREE.DirectionalLight(0xbfd0e8, 0);
     scene.add(this.hemi, this.sun, this.sun.target, this.moonLight, this.moonLight.target);
 
-    // gradient dome: two colours lerped by view height, fog band at horizon
+    // gradient dome with PER-PIXEL clouds — the family verdict from
+    // Marsstead's sky stands here too: no blimps, no instanced puff fleets.
+    // Cumulus is an fbm coverage field projected on the cloudbase plane,
+    // sun-shaded by a coverage sample taken a step toward the light; cirrus
+    // is the Mars port verbatim — thin streaks, high and stretched downwind.
     this.domeUniforms = {
       uZen: { value: new THREE.Color() },
       uHor: { value: new THREE.Color() },
+      uT: { value: 0 },                       // drift clock (wrapped)
+      uCloud: { value: 0 },                   // skyDressing cover 0..1
+      uGloom: { value: 0 },
+      uDayC: { value: 1 },                    // cloud brightness: day + moonlit lift
+      uWindTo: { value: new THREE.Vector2(0, -1) },
+      uSunDirW: { value: new THREE.Vector3(0, 1, 0) },
+      uSunCol: { value: new THREE.Color(0xfff2d8) },
     };
     const domeMat = new THREE.ShaderMaterial({
       side: THREE.BackSide, depthWrite: false, fog: false,
       uniforms: this.domeUniforms,
       vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position);'
         + ' gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-      fragmentShader: 'uniform vec3 uZen; uniform vec3 uHor; varying vec3 vDir;'
-        + ' void main(){ float t = smoothstep(0.0, 0.45, max(vDir.y, 0.0));'
-        + ' gl_FragColor = vec4(mix(uHor, uZen, t), 1.0); }',
+      fragmentShader: /* glsl */`
+precision highp float;
+uniform vec3 uZen, uHor, uSunDirW, uSunCol;
+uniform vec2 uWindTo;
+uniform float uT, uCloud, uGloom, uDayC;
+varying vec3 vDir;
+float sH21(vec2 p){ p = fract(p * vec2(234.34, 435.345));
+  p += dot(p, p + 34.23); return fract(p.x * p.y); }
+float sVnoise(vec2 p){ vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(sH21(i), sH21(i + vec2(1,0)), f.x),
+             mix(sH21(i + vec2(0,1)), sH21(i + vec2(1,1)), f.x), f.y); }
+float sFbm(vec2 p){ float a = .5, s = 0.;
+  for (int i = 0; i < 4; i++){ s += a * sVnoise(p); p *= 2.03; a *= .5; }
+  return s; }
+void main() {
+  vec3 d = normalize(vDir);
+  vec3 sky = mix(uHor, uZen, smoothstep(0.0, 0.45, max(d.y, 0.0)));
+  // cumulus: coverage field on the cloudbase plane, drifting downwind
+  if (uCloud > 0.01 && d.y > 0.012) {
+    vec2 sheet = d.xz / (d.y + 0.18) * 0.34;
+    vec2 drift = uWindTo * uT * 0.008;
+    float cov = sFbm(sheet + drift + 7.0);
+    // the plane projection flattens to a constant at the zenith — give the
+    // cap its own variation so overcast can CLOSE overhead
+    cov += (sFbm(d.xz * 2.2 + drift + 41.0) - 0.5) * 0.55 * smoothstep(0.35, 0.8, d.y);
+    float edge = sFbm(sheet * 2.7 + drift * 1.4 + 31.0);
+    float th = 0.96 - uCloud * 0.72;
+    float cu = smoothstep(th, th + 0.22, cov + (edge - 0.5) * 0.4);
+    // sun-side shading: the coverage sampled a step toward the light —
+    // bright tops on the sun side, slate bases in their own shadow
+    vec2 toSun = normalize(uSunDirW.xz + vec2(1e-5, 0.0)) * 0.05;
+    float shade = clamp((sFbm(sheet + drift + 7.0 + toSun) - cov) * 6.0, -1.0, 1.0);
+    float hFade = smoothstep(0.012, 0.06, d.y); // melt into the horizon haze
+    vec3 lit = mix(vec3(1.02, 1.00, 0.97), vec3(0.52, 0.55, 0.60), uGloom);
+    vec3 base = mix(vec3(0.50, 0.55, 0.63), vec3(0.22, 0.25, 0.30), uGloom);
+    vec3 cCol = mix(lit, base, clamp(0.5 + shade * 0.5 + uGloom * 0.25, 0.0, 1.0));
+    cCol *= (0.10 + 0.90 * uDayC) * mix(vec3(1.0), uSunCol, 0.35);
+    sky = mix(sky, cCol, cu * hFade * 0.94);
+  }
+  // cirrus: thin ice streaks, high and stretched downwind — fair skies own
+  // them; heavy cover buries them (the Mars port, water world palette)
+  if (uCloud > 0.01 && uCloud < 0.6 && d.y > 0.03) {
+    vec2 sheet = vec2(d.x / (d.y + 0.22), d.z / (d.y + 0.22));
+    vec2 wAxis = vec2(uWindTo.y, -uWindTo.x); // across the wind
+    vec2 sc = vec2(dot(sheet, uWindTo) * 0.5 + uT * 0.004, dot(sheet, wAxis) * 2.6);
+    float streak = sFbm(sc + 13.0);
+    float mask = smoothstep(0.04, 0.16, d.y) * smoothstep(0.75, 0.35, d.y);
+    float cir = pow(max(0.0, streak - 0.52) * 2.1, 1.6) * mask * (1.0 - uCloud);
+    sky += uSunCol * cir * 0.5 * (0.15 + 0.85 * uDayC);
+  }
+  gl_FragColor = vec4(sky, 1.0);
+}`,
     });
     this.dome = new THREE.Mesh(new THREE.SphereGeometry(DOME_R, 24, 12), domeMat);
     this.dome.frustumCulled = false;
@@ -91,10 +152,17 @@ export class Sky {
   }
 
   // t: world seconds; latDeg: observer latitude; center: camera position;
-  // gloom [0..1]: real weather's overcast/rain/storm weight
-  update(t, latDeg, center, gloom = 0) {
+  // gloom [0..1]: real weather's overcast/rain/storm weight;
+  // cloud [0..1]: skyDressing cover; windFrom: wind bearing (rad) — the
+  // dome's per-pixel clouds drift downwind on driftT (defaults to t)
+  update(t, latDeg, center, gloom = 0, cloud = 0, windFrom = 0, driftT = null) {
     const sol = solarState(t);
     const lun = lunarState(t);
+    this.domeUniforms.uCloud.value = cloud;
+    this.domeUniforms.uGloom.value = gloom;
+    this.domeUniforms.uT.value = (driftT === null ? t : driftT) % 4096;
+    this.domeUniforms.uWindTo.value.set(-Math.sin(windFrom), -Math.cos(windFrom));
+    this.domeUniforms.uSunDirW.value.set(sol.dir[0], sol.dir[1], sol.dir[2]);
 
     // lights (targets track the camera so direction holds anywhere on Earth)
     this.sun.position.set(sol.dir[0] * 100, sol.dir[1] * 100, sol.dir[2] * 100).add(center);
@@ -110,12 +178,16 @@ export class Sky {
     this.hemi.intensity = (0.2 + 0.7 * sol.dayness) * (1 - 0.3 * gloom)
       + ml.hemiLift * (1 - 0.7 * gloom);
 
-    // golden hour warms the sun
+    // golden hour warms the sun — the clouds take the same light
     this.sun.color.setHex(0xfff2d8).lerp(GOLD, sol.golden * 0.7);
+    this.domeUniforms.uSunCol.value.copy(this.sun.color);
 
     // dome + fog + background; gloom greys the day (scaled by dayness so a
     // stormy NIGHT stays black, not grey)
     const domeLift = ml.domeLift * (1 - gloom);
+    // cloud brightness: full day, or the moon's lift by night — a moonlit
+    // scud is faintly there, a new-moon night swallows the sky whole
+    this.domeUniforms.uDayC.value = Math.min(1, sol.dayness + ml.domeLift * 0.45);
     this.domeUniforms.uZen.value.copy(NIGHT_ZENITH).lerp(MOONLIT_ZENITH, domeLift)
       .lerp(DAY_ZENITH, sol.dayness)
       .lerp(GLOOM_ZENITH, gloom * sol.dayness);

@@ -8,13 +8,18 @@
 //
 // Still deliberately worldless — no terrain, no HUD; the four hulls, the
 // sea, and the weather ARE the pitch. The canvas stays hidden for the
-// first few frames: the ocean/sky uniforms need one pass before they are
-// honest, and the half-initialised first frame read as an inverted-colour
-// flash on slower machines.
+// first few frames while the shaders compile their first honest pass.
+// (The long-lived "inverted colours on load" was NOT half-initialised
+// uniforms: boltT starts at -3 as the first-stroke delay, and the stroke
+// envelope handed that to the lightning as intensity -62 — a NEGATIVE
+// directional light, which ACES tone-maps to a white sea for the first
+// three seconds. The envelope is clamped now; a bolt can only add light.)
 
 import * as THREE from 'three';
 import { Sky } from './sky.js';
 import { Ocean } from './ocean.js';
+import { WAKE_MAX } from './wake.js';
+import { WakeMapLayer } from './wakemaplayer.js';
 import { FoamLayer } from './foamlayer.js';
 import { CombatLayer } from './combatlayer.js';
 import { buildShip, buildHand } from './ship.js';
@@ -50,8 +55,7 @@ export class TitleScene {
     this.renderer.setSize(innerWidth, innerHeight);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = EXPOSURE_BASE;
-    // hidden until the uniforms have had a frame to settle (the inverted-
-    // colour flash on load was the half-initialised first frame)
+    // hidden for the first shader-compile frames, then a soft fade-in
     this.renderer.domElement.style.opacity = '0';
     this.renderer.domElement.style.transition = 'opacity 0.5s';
     mount.appendChild(this.renderer.domElement);
@@ -63,6 +67,8 @@ export class TitleScene {
 
     this.sky = new Sky(this.scene);
     this.ocean = new Ocean(this.scene);
+    this.wakemap = new WakeMapLayer(this.renderer);
+    this.ocean.setWakeMap(this.wakemap.rt.texture);
     this.ocean.uniforms.uFresnel.value = 0.45;
     this.foam = new FoamLayer(this.scene);
     this.combat = new CombatLayer(this.scene);
@@ -183,14 +189,29 @@ export class TitleScene {
     const strokeAt = 6 + 5 * Math.abs(Math.sin(this.gunN * 2.7));
     if (this.boltT > strokeAt) this.boltT = -0.12;
     if (this.boltT < 0) {
-      this.bolt.intensity = 2.6 * (1 - Math.abs(this.boltT) / 0.12);
+      // the envelope is only valid inside the two-frame stroke window
+      // [-0.12, 0]. boltT STARTS at -3 (the first-stroke delay) and this
+      // branch used to hand that straight to the formula: intensity -62, a
+      // NEGATIVE directional light that drove the sea's radiance negative,
+      // which ACES tone-maps to saturated WHITE — the "inverted colours"
+      // on load, fading over 3 s as boltT climbed. Clamp: a bolt can only
+      // ADD light.
+      this.bolt.intensity = 2.6 * Math.max(0, 1 - Math.abs(this.boltT) / 0.12);
       this.bolt.position.set(this.fleet[0].state.x - 120, 140, this.fleet[0].state.z + 80);
       this.bolt.target.position.set(this.fleet[0].state.x, 0, this.fleet[0].state.z);
     } else {
       this.bolt.intensity = 0;
     }
 
-    this.foam.update(t, dt, this.fleet[0].state.x, this.fleet[0].state.z, FLEET_SPEED, emitters);
+    // the water draws the squadron's own Kelvin wakes (wake.js sources),
+    // each V opening at its ship's stem
+    const wakes = this.fleet.slice(0, WAKE_MAX).map((f) => {
+      const fx = Math.sin(f.yaw), fz = Math.cos(f.yaw);
+      const stem = f.row.def.spec.length * 0.5;
+      return { x: f.state.x + fx * stem, z: f.state.z + fz * stem, fx, fz, speed: FLEET_SPEED };
+    });
+    this.foam.update(t, dt, this.fleet[0].state.x, this.fleet[0].state.z, FLEET_SPEED, emitters, wakes);
+    const wakeC = this.wakemap.update(this.fleet[0].state.x, this.fleet[0].state.z, wakes);
 
     // the camera stands off the fight, high enough to read both lines; the
     // battle rides the LEFT third, clear of the login box
@@ -211,9 +232,10 @@ export class TitleScene {
     const sol = solarState(skyT);
     const lun = lunarState(skyT);
     const glit = glitterSource(sol, lun, moonBrightness(moonPhase(skyT)));
-    this.sky.update(skyT, 32, this.camera.position, GLOOM);
+    this.sky.update(skyT, 32, this.camera.position, GLOOM, 0.8, WIND_FROM, t);
     this.ocean.update(t, this.fleet[0].state.x, this.fleet[0].state.z, this.camera.position, glit,
-      this.sky.domeUniforms.uHor.value, SEA_STATE);
+      this.sky.domeUniforms.uHor.value, SEA_STATE,
+      this.sky.domeUniforms.uZen.value, wakeC);
     this.foam.setLight(sol.dayness * (1 - GLOOM * 0.5));
 
     this.renderer.render(this.scene, this.camera);
@@ -231,6 +253,7 @@ export class TitleScene {
         mm.dispose();
       }
     });
+    this.wakemap.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

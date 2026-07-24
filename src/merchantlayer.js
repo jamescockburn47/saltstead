@@ -218,6 +218,23 @@ export class MerchantLayer {
     return out;
   }
 
+  // the n nearest under-way hulls as wake sources (wake.js shape) — the
+  // water itself draws their wakes (ocean.js), so a merchant crossing your
+  // bow drags the same road you do. Sinking ships have stopped making way.
+  wakeSources(px, pz, n, range = 200) {
+    const out = [];
+    for (const e of this.live.values()) {
+      if (e.sinkT !== null || e.m.speed < 1.5) continue;
+      const d = Math.hypot(e.m.x - px, e.m.z - pz);
+      if (d > range) continue;
+      // source at the bow (half a typical hull forward): the V opens at the stem
+      const fx = Math.sin(e.m.yaw), fz = Math.cos(e.m.yaw);
+      out.push({ d, x: e.m.x + fx * 7, z: e.m.z + fz * 7, fx, fz, speed: e.m.speed });
+    }
+    out.sort((a, b) => a.d - b.d);
+    return out.slice(0, n);
+  }
+
   // swimmers within reach of the rail (not already being taken)
   survivorsNear(px, pz, r) {
     return this.swimmers.filter((w) => w.sinkT === undefined

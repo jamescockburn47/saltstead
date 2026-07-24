@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { flecksAround, newWake, stepWake, wakeAlpha, wakeSize, FLECK_CELL } from './foam.js';
 import { waveHeight } from './waves.js';
+import { wakeSum } from './wake.js';
 
 const MAX_FLECKS = 900;
 
@@ -98,16 +99,16 @@ export class FoamLayer {
   setGlow(g) { this.glow = Math.max(0, Math.min(1, g || 0)); }
 
   // emitters: [{ x, z, size }] world-space foam sources (stern, bow)
-  update(t, dt, cx, cz, speed, emitters) {
+  // wakes: wake.js sources — patches ride the Kelvin humps the water draws
+  update(t, dt, cx, cz, speed, emitters, wakes = null) {
     stepWake(this.wake, dt, speed, emitters);
     for (let q = 0; q < this.wake.cap; q++) {
       const s = this.wake.slots[q];
       const a = wakeAlpha(s);
       const half = wakeSize(s) / 2;
-      // ride well proud of the surface: the faceted ocean mesh interpolates
-      // ABOVE the analytic height between its vertices and would swallow a
-      // patch laid flush
-      const y = a > 0 ? waveHeight(s.x, s.z, t) + 0.38 : -10;
+      // ride proud of the surface: the ocean mesh interpolates chord-wise
+      // between its vertices and would swallow a patch laid flush
+      const y = a > 0 ? waveHeight(s.x, s.z, t) + wakeSum(s.x, s.z, wakes) + 0.38 : -10;
       // the patch lies ALONG the course it was dropped on, elongated by its
       // emitter's stretch — the trail reads as churned water, not tiles
       const sw = Math.sin(s.rot), cw = Math.cos(s.rot);
@@ -135,8 +136,8 @@ export class FoamLayer {
     for (let i = 0; i < this.flecks.length; i++) {
       const f = this.flecks[i];
       this.fleckPos[i * 3] = f.x;
-      this.fleckPos[i * 3 + 1] = waveHeight(f.x, f.z, t) + 0.04
-        + 0.03 * Math.sin(t * 1.7 + f.phase);
+      this.fleckPos[i * 3 + 1] = waveHeight(f.x, f.z, t) + wakeSum(f.x, f.z, wakes)
+        + 0.04 + 0.03 * Math.sin(t * 1.7 + f.phase);
       this.fleckPos[i * 3 + 2] = f.z;
     }
     this.fleckGeo.attributes.position.needsUpdate = true;

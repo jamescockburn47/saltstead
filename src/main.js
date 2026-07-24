@@ -67,8 +67,11 @@ import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
   encounterGait, ENCOUNTER_FAR, isLand, wrapX, dxWrap,
 } from './earth.js';
-import { windProfile, seaStateFor } from './weather.js';
+import { windProfile, seaStateFor, skyDressing } from './weather.js';
 import { setSeaState, RIVER_STATE } from './waves.js';
+import { WAKE_MAX } from './wake.js';
+import { WakeMapLayer } from './wakemaplayer.js';
+import { cineEligible, cineShot, cinePose, CINE_RANGE } from './cinecam.js';
 import { makeEntry, pushEntry, acceptLog, fmtPos } from './shiplog.js';
 import { crewPersona, crewContext } from './crewchat.js';
 import { talkCrew } from './brainclient.js';
@@ -150,6 +153,8 @@ class Game {
     this.dayStart = DAY_LENGTH * 0.35; // spawn mid-morning
 
     this.ocean = new Ocean(this.scene);
+    this.wakemap = new WakeMapLayer(this.renderer);
+    this.ocean.setWakeMap(this.wakemap.rt.texture);
     this.foam = new FoamLayer(this.scene, 220); // four emitters need the slots
     this.skyfx = new SkyFx(this.scene); // the VISIBLE weather: clouds + rain
     this.terrain = new TerrainLayer(this.scene);
@@ -2931,12 +2936,27 @@ class Game {
     const bow = localToWorld(this.ship, 0, 0, this.shipFrame.deck.maxZ + 0.9);
     const shoulderL = localToWorld(this.ship, -this.spec.beam * 0.45, 0, this.shipFrame.deck.maxZ * 0.7);
     const shoulderR = localToWorld(this.ship, this.spec.beam * 0.45, 0, this.shipFrame.deck.maxZ * 0.7);
+    // the wakes the WATER draws (ocean.js: Kelvin displacement + churn road,
+    // wake.js maths): the player's hull fills the first shader slot, the
+    // nearest under-way merchants take the rest. The source sits at the BOW —
+    // the Kelvin V opens where the stem first parts the water, so the arms
+    // bracket the hull instead of sprouting amidships
+    this.wakeSources = [
+      { x: bow.x, z: bow.z,
+        fx: Math.sin(this.ship.yaw), fz: Math.cos(this.ship.yaw), speed: sp },
+      ...this.merchants.wakeSources(this.ship.x, this.ship.z, WAKE_MAX - 1),
+    ];
+    // render the wake field into its map (wakemaplayer.js) for this frame
+    this.wakeC = this.wakemap.update(this.ship.x, this.ship.z, this.wakeSources);
     this.foam.update(t, dt, this.ship.x, this.ship.z,
       sp * Math.min(this.lastGait || 1, 3), // gait tightens the drop cadence
-      [{ x: stern.x, z: stern.z, size: 1.0 + 0.3 * sp, yaw: this.ship.yaw, stretch: 2.0 + 0.14 * sp },
-        { x: bow.x, z: bow.z, size: 0.45 + 0.12 * sp, yaw: this.ship.yaw, stretch: 1.2 },
-        { x: shoulderL.x, z: shoulderL.z, size: 0.4 + 0.11 * sp, yaw: this.ship.yaw - 1.15, stretch: 3.2 },
-        { x: shoulderR.x, z: shoulderR.z, size: 0.4 + 0.11 * sp, yaw: this.ship.yaw + 1.15, stretch: 3.2 }]);
+      // sprites are TEXTURE now, not structure — the shader's churn road and
+      // arm-crest foam (wake.js) carry the shape, so the blobs shrink
+      [{ x: stern.x, z: stern.z, size: 0.7 + 0.15 * sp, yaw: this.ship.yaw, stretch: 2.0 + 0.14 * sp },
+        { x: bow.x, z: bow.z, size: 0.35 + 0.08 * sp, yaw: this.ship.yaw, stretch: 1.2 },
+        { x: shoulderL.x, z: shoulderL.z, size: 0.3 + 0.07 * sp, yaw: this.ship.yaw - 1.15, stretch: 3.2 },
+        { x: shoulderR.x, z: shoulderR.z, size: 0.3 + 0.07 * sp, yaw: this.ship.yaw + 1.15, stretch: 3.2 }],
+      this.wakeSources);
 
     // the fighting layers breathe
     this.gunCool = Math.max(0, this.gunCool - dt);
@@ -3026,6 +3046,28 @@ class Game {
     }
     this.camera.lookAt(target);
 
+    // the meeting lens (cinecam.js): when another sail closes on open water
+    // the camera steps back for the wide establishing shot — both hulls,
+    // both wakes, the weather over them. Any key hands the frame straight
+    // back; combat and below-decks never trigger it.
+    if (!this.cine && !this.photoCam && this.mode !== 'below' && this.mode !== 'ashore'
+      && this.gunCool <= 0 && !this.aground) {
+      const near = this.merchants.wakeSources(this.ship.x, this.ship.z, 1, CINE_RANGE)[0];
+      if (near && cineEligible(this.cineEnd ?? -1e9, t, near.d, sp, near.speed)) {
+        this.cine = { shot: cineShot(this.ship.x, this.ship.z, near.x, near.z, Math.floor(t)), t0: t };
+      }
+    }
+    if (this.cine) {
+      const u = t - this.cine.t0;
+      if (u > this.cine.shot.dur || this.keys.size > 0 || this.mode === 'below') {
+        this.cine = null;
+        this.cineEnd = t;
+        this.photoCam = null;
+      } else {
+        this.photoCam = cinePose(this.cine.shot, u);
+      }
+    }
+
     // the showreel's pinned lens (showreel.js): while a reel runs, the photo
     // camera owns the frame — orbit maths and drag input both yield
     if (this.photoCam) {
@@ -3044,12 +3086,14 @@ class Game {
       : STORM_ZONES.includes(zoneId)
         ? Math.max(this.gloom, STORM_GLOOM) // the Horn is never kind
         : this.gloom;
-    this.sky.update(skyT, skyLL.lat, this.camera.position, gloomEff);
+    this.sky.update(skyT, skyLL.lat, this.camera.position, gloomEff,
+      skyDressing(this.weatherState).cloud, this.wind.from, t);
     // the weather made visible: cumulus drifting downwind, rain on the lens
     this.skyfx.update(t, dt, this.ship.x, this.ship.z, this.camera.position,
       this.wind.from, this.weatherState, gloomEff, sol.dayness);
     this.ocean.update(t, this.ship.x, this.ship.z, this.camera.position, glit,
-      this.sky.domeUniforms.uHor.value, this.swell);
+      this.sky.domeUniforms.uHor.value, this.swell,
+      this.sky.domeUniforms.uZen.value, this.wakeC);
     // bioluminescence: on a dark warm-water night the wake burns green
     this.foam.setGlow(bioGlow(sol.nightness, Math.abs(skyLL.lat),
       moonBrightness(moonPhase(skyT)), lun.alt, gloomEff));

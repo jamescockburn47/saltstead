@@ -51,3 +51,28 @@ export function glslWaveSum() {
     return `${w.amp.toFixed(4)} * sin(${k.toFixed(6)} * (${w.dirX.toFixed(4)} * wx + ${w.dirZ.toFixed(4)} * wz) - ${(k * w.speed).toFixed(6)} * uTime)`;
   }).join('\n      + ');
 }
+
+// The analytic surface gradient (dy/dx, dy/dz) — the sum of sines has a
+// closed-form derivative, so the smooth-shaded ocean's per-pixel normals are
+// EXACT, not finite-differenced. Scaled by the same sea state as the height:
+// the normal always belongs to the surface being drawn.
+export function waveGradient(x, z, t) {
+  let gx = 0, gz = 0;
+  for (const w of WAVES) {
+    const k = TAU / w.len;
+    const c = w.amp * k * Math.cos(k * (w.dirX * x + w.dirZ * z) - k * w.speed * t);
+    gx += c * w.dirX;
+    gz += c * w.dirZ;
+  }
+  return [gx * seaState, gz * seaState];
+}
+
+// The gradient as a GLSL vec2 expression over `wx`, `wz`, `uTime` — generated
+// from the SAME table (verify-waves.mjs guards parity against waveGradient).
+// NOTE: unscaled, like glslWaveSum — the shader multiplies by uSwell itself.
+export function glslWaveGrad() {
+  return WAVES.map((w) => {
+    const k = TAU / w.len;
+    return `vec2(${(w.amp * k * w.dirX).toFixed(6)}, ${(w.amp * k * w.dirZ).toFixed(6)}) * cos(${k.toFixed(6)} * (${w.dirX.toFixed(4)} * wx + ${w.dirZ.toFixed(4)} * wz) - ${(k * w.speed).toFixed(6)} * uTime)`;
+  }).join('\n      + ');
+}

@@ -1,19 +1,14 @@
-// The visible weather — clouds and rain, the THREE half of the forecast.
-// weather.js decides WHAT the sky is doing (state + skyDressing table);
-// this layer makes it visible: a fleet of flat-shaded cumulus drifting on
-// the wind, and rain streaking past the camera when the state is wet.
-// Procedural-only, deterministic shapes (noise.js unit2), cheap enough for
-// any laptop: one shared cloud material, one rain buffer, no textures.
+// The visible weather — rain, the THREE half of the forecast. weather.js
+// decides WHAT the sky is doing (state + skyDressing table); this layer
+// makes the WET half visible: rain streaking past the camera when the state
+// calls for it. The clouds themselves live in the sky DOME now (sky.js):
+// per-pixel fbm cumulus and cirrus, never instanced blobs — the zeppelin
+// fleet of solid puffs is gone (2026-07-24, the family verdict: no blimps).
 
 import * as THREE from 'three';
 import { unit2 } from './noise.js';
 import { skyDressing } from './weather.js';
 
-const CLOUD_N = 18;          // the whole fleet; skyDressing says how many fly
-const CLOUD_ALT = 88;        // cloudbase, metres — low enough to live in the frame
-const CLOUD_R = 560;         // wrap square radius: the far rank fades into the fog,
-                             // which reads as weather coming over the horizon
-const CLOUD_DRIFT = 6;       // m/s of cloud drift downwind
 const RAIN_N = 600;          // streaks in the rain volume
 const RAIN_R = 45;           // rain volume radius around the camera
 const RAIN_H = 34;           // rain volume height
@@ -24,36 +19,6 @@ const wrap = (v, size) => ((v % size) + size) % size;
 export class SkyFx {
   constructor(scene) {
     this.scene = scene;
-
-    // ---- the clouds: puff clusters on a shared, tintable material ----
-    this.cloudMat = new THREE.MeshPhongMaterial({
-      color: 0xf2f5f7, flatShading: true, transparent: true, opacity: 0.88,
-    });
-    this.clouds = [];
-    for (let i = 0; i < CLOUD_N; i++) {
-      const c = new THREE.Group();
-      const blobs = 3 + Math.floor(unit2(i * 7.3, 11.1) * 3);
-      for (let b = 0; b < blobs; b++) {
-        const m = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 0), this.cloudMat);
-        m.position.set(
-          (unit2(i * 3.1, b * 5.7 + 1) - 0.5) * 70,
-          (unit2(i * 1.7, b * 9.1 + 2) - 0.5) * 10,
-          (unit2(i * 9.7, b * 3.3 + 3) - 0.5) * 48);
-        const s = 20 + unit2(i * 5.3, b * 7.7 + 4) * 22;
-        m.scale.set(s, s * 0.32, s * 0.75);
-        c.add(m);
-      }
-      c.userData = {
-        bx: unit2(i * 13.7, 3.1) * CLOUD_R * 2,   // berth in the wrap square
-        bz: unit2(i * 3.7, 17.9) * CLOUD_R * 2,
-        alt: CLOUD_ALT + (unit2(i * 8.9, 5.3) - 0.5) * 26,
-        rank: (i + 0.5) / CLOUD_N,                 // fair weather flies the low ranks only
-        show: 0,                                   // eased 0..1 so cover changes don't pop
-      };
-      c.visible = false;
-      scene.add(c);
-      this.clouds.push(c);
-    }
 
     // ---- the rain: line streaks in a cylinder that rides with the camera ----
     this.drops = [];
@@ -78,35 +43,12 @@ export class SkyFx {
     scene.add(this.rain);
   }
 
-  // px/pz: the ship (clouds anchor to her waters). camPos: the rain rides
-  // the lens. state: weather.js state string. gloom 0..1 darkens the fleet;
-  // dayness 0..1 keeps night clouds from glowing.
+  // camPos: the rain rides the lens. state: weather.js state string.
+  // dayness dims the streaks at night. (px/pz/gloom kept for signature
+  // stability; the dome owns the clouds they once steered.)
   update(t, dt, px, pz, camPos, windFrom, state, gloom, dayness) {
     const dress = skyDressing(state);
-
-    // clouds drift DOWNWIND (the wind blows FROM windFrom) and wrap around
-    // the ship, so the fleet is endless without ever being managed
     const toX = -Math.sin(windFrom), toZ = -Math.cos(windFrom);
-    const driftX = toX * CLOUD_DRIFT * t, driftZ = toZ * CLOUD_DRIFT * t;
-    const size = CLOUD_R * 2;
-    for (const c of this.clouds) {
-      const u = c.userData;
-      const want = u.rank <= dress.cloud ? 1 : 0;
-      u.show += (want - u.show) * Math.min(1, dt * 0.5);
-      c.visible = u.show > 0.03;
-      if (!c.visible) continue;
-      c.position.set(
-        px + wrap(u.bx + driftX - px + CLOUD_R, size) - CLOUD_R,
-        u.alt,
-        pz + wrap(u.bz + driftZ - pz + CLOUD_R, size) - CLOUD_R);
-      c.scale.setScalar(u.show);
-    }
-    // the fleet greys with the gloom and dims with the day: white cumulus at
-    // noon, slate scud in a storm, barely-there shapes at night
-    const lit = 0.25 + 0.75 * dayness;
-    const grey = 1 - 0.62 * gloom;
-    this.cloudMat.color.setRGB(0.95 * lit * grey, 0.96 * lit * grey, 0.97 * lit);
-    this.cloudMat.opacity = 0.88 * (0.35 + 0.65 * Math.max(dayness, 0.4));
 
     // rain: streaks fall through a camera-glued cylinder, slanted downwind
     if (dress.rain <= 0) { this.rain.visible = false; return; }

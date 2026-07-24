@@ -11,7 +11,11 @@ files — ever.
 
 1. **Browser-first, instant-play, procedural-only.** All geometry, textures, audio
    synthesised in code. Low-poly flat-shaded style — `BufferGeometry` built in code,
-   not voxels, but still zero binary assets.
+   not voxels, but still zero binary assets. *Amended 2026-07-24 (the Marsstead
+   port): the SEA is smooth-shaded — analytic per-pixel normals from the wave
+   table (waves.js gradient) with fbm detail tilt, because a faceted FLUID is
+   what read artificial. Land, hulls, clouds stay faceted; the flat-shaded law
+   holds everywhere a surface is solid.*
 2. **Kid-safe shared worlds.** Server-authoritative caps, no raw player text as HTML
    (`escHtml` everywhere), no unbounded griefing surface.
 3. **The verify gate is the contract.** Headless `npm run verify` must be green before
