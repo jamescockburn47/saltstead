@@ -159,6 +159,7 @@ export class ShantyBox {
       this._t0 = t + 0.25;
       this._evIx = 0;
       this._tune = tune;
+      this._doneRuns = new Set(); // slur runs already handed to the bow
     }
 
     // the two-clocks window: commit everything due inside the lookahead
@@ -187,18 +188,36 @@ export class ShantyBox {
     this._silence = 20 + Math.random() * 30; // the band takes a spell before trying again
   }
 
+  // which instrument carries a lead event: the tune crosses the deck to the
+  // response instrument on the MIDDLE passes (call-and-response), coming home
+  // to the lead for the first and last
+  _leadInstFor(e) {
+    const passes = this._plan.repeats || 1;
+    const middle = e.rep > 0 && e.rep < passes - 1;
+    return middle ? this._plan.responseLead : this._plan.lead;
+  }
+
   _playEvent(e, at, mode) {
     const durS = Math.max(0.08, e.dur * this._spb);
     if (e.voice === 'percLow') return this._drum(at, e.vel, true);
     if (e.voice === 'percHigh') return this._drum(at, e.vel, false);
     if (e.voice === 'drone') return this._drone(e.midi, at, durS, e.vel);
-    if (e.voice === 'hum') return this._hum(e.midi, at, durS, e.vel);
-    // lead may cross the deck on the second pass (call-and-response); the
-    // response voice sits a shade further off (quieter, wetter is bus-level)
-    let inst = this._plan.lead, vel = e.vel;
-    if (e.voice === 'lead' && e.rep > 0) { inst = this._plan.responseLead; vel *= 0.85; }
-    if (e.voice === 'harmony') { inst = this._plan.lead === 'fiddle' ? 'concertina' : 'fiddle'; }
-    const f = midiHz(e.midi);
+    if (e.voice === 'hum') return this._hum(e.midi, at, durS, e.vel, e.cents || 0);
+    let inst, vel = e.vel;
+    if (e.voice === 'lead') {
+      inst = this._leadInstFor(e);
+      // a slur run plays as ONE gesture — the whole run is rendered when its
+      // first note crosses the horizon; later members are already spoken for
+      const runNotes = e.run >= 0 && this._score.runMap ? this._score.runMap[e.run] : null;
+      if (runNotes && runNotes.length > 1 && (inst === 'fiddle' || inst === 'whistle' || inst === 'fife')) {
+        if (this._doneRuns.has(e.run)) return;
+        this._doneRuns.add(e.run);
+        return this._playRun(inst, runNotes);
+      }
+    } else {
+      inst = this._plan.lead === 'fiddle' ? 'concertina' : 'fiddle';
+    }
+    const f = midiHz(e.midi) * centsMul(e.cents || 0);
     if (inst === 'fiddle') this._fiddle(f, at, durS, vel);
     else if (inst === 'concertina') this._concertina(f, at, durS, vel);
     else if (inst === 'whistle') this._whistle(f, at, durS, vel, false);
@@ -206,6 +225,89 @@ export class ShantyBox {
     else if (inst === 'brass') this._brass(f, at, durS, vel);
     else if (inst === 'pluck') this._pluck(e.midi, at, vel);
     else this._fiddle(f, at, durS, vel);
+  }
+
+  // A SLUR RUN on one continuous voice: one oscillator drawn through the
+  // whole phrase, pitch gliding at each boundary (~35 ms — a finger sliding,
+  // not a key pressed), the level dipping a breath at each note-change. This
+  // is what separates a played line from a step sequencer.
+  _playRun(inst, notes) {
+    const ac = this.ctx;
+    const fife = inst === 'fife';
+    const whistleish = inst === 'whistle' || fife;
+    const t0 = this._t0 + notes[0].t * this._spb;
+    const end = this._t0 + (notes[notes.length - 1].t + notes[notes.length - 1].dur) * this._spb;
+    const o = ac.createOscillator();
+    o.type = whistleish ? 'triangle' : 'sawtooth';
+    const f0 = midiHz(notes[0].midi) * centsMul(notes[0].cents || 0) * (fife ? 2 : 1);
+    o.frequency.setValueAtTime(f0, t0);
+    // the glides: hold each pitch until 35 ms before the next note, then slide
+    for (let i = 1; i < notes.length; i++) {
+      const at = this._t0 + notes[i].t * this._spb;
+      const f = midiHz(notes[i].midi) * centsMul(notes[i].cents || 0) * (fife ? 2 : 1);
+      o.frequency.setValueAtTime(midiHz(notes[i - 1].midi) * centsMul(notes[i - 1].cents || 0) * (fife ? 2 : 1), at - 0.035);
+      o.frequency.linearRampToValueAtTime(f, at);
+    }
+    // vibrato arrives once the run has settled
+    const vib = ac.createOscillator(); vib.frequency.value = whistleish ? 4.8 : 5.4;
+    const vibG = ac.createGain();
+    vibG.gain.setValueAtTime(0, t0);
+    vibG.gain.linearRampToValueAtTime(whistleish ? 8 : 13, t0 + 0.35);
+    vib.connect(vibG).connect(o.detune);
+    // body / lid per instrument
+    const chain = [];
+    if (whistleish) {
+      const lp = ac.createBiquadFilter(); lp.type = 'lowpass';
+      lp.frequency.value = fife ? 6000 : 4200;
+      chain.push(lp);
+    } else {
+      const body = ac.createBiquadFilter(); body.type = 'peaking';
+      body.frequency.value = 1200; body.Q.value = 2.5; body.gain.value = 3.5;
+      const air = ac.createBiquadFilter(); air.type = 'peaking';
+      air.frequency.value = 300; air.Q.value = 2; air.gain.value = 2.5;
+      const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3000;
+      chain.push(body, air, lp);
+    }
+    // the envelope: one attack, a dip at each boundary, one release
+    const g = ac.createGain();
+    const base = whistleish ? (fife ? 0.13 : 0.11) : 0.16;
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(base * notes[0].vel, t0 + (whistleish ? 0.02 : 0.13));
+    for (let i = 1; i < notes.length; i++) {
+      const at = this._t0 + notes[i].t * this._spb;
+      const peak = base * notes[i].vel;
+      g.gain.setValueAtTime(base * notes[i - 1].vel, at - 0.05);
+      g.gain.linearRampToValueAtTime(peak * 0.72, at);        // the bow lightens
+      g.gain.linearRampToValueAtTime(peak, at + 0.06);        // and leans back in
+    }
+    g.gain.setValueAtTime(base * notes[notes.length - 1].vel, Math.max(t0, end - 0.06));
+    g.gain.setTargetAtTime(0, end, whistleish ? 0.05 : 0.11);
+    const pan = this._pans[inst];
+    let head = o;
+    for (const nd of chain) { head.connect(nd); head = nd; }
+    head.connect(g).connect(pan);
+    const nodes = [o, vib, vibG, ...chain, g];
+    // the instrument's breath rides the whole run: bow-hiss or blow-noise
+    const s = ac.createBufferSource(); s.buffer = this.noiseBuf; s.loop = true;
+    const bf = ac.createBiquadFilter(); bf.type = whistleish ? 'highpass' : 'bandpass';
+    bf.frequency.value = whistleish ? 2600 : 3800; bf.Q.value = 1;
+    const bg = ac.createGain(); bg.gain.value = base * notes[0].vel * (whistleish ? 0.03 : 0.045);
+    s.connect(bf).connect(bg).connect(pan);
+    nodes.push(s, bf, bg);
+    // the whistle's chiff marks only the run's first articulation
+    if (whistleish) {
+      const c = ac.createBufferSource(); c.buffer = this.noiseBuf;
+      const cf = ac.createBiquadFilter(); cf.type = 'bandpass';
+      cf.frequency.value = Math.min(9000, f0 * 2.2); cf.Q.value = 5;
+      const cg = ac.createGain();
+      cg.gain.setValueAtTime(base * notes[0].vel * 0.5, t0);
+      cg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.03);
+      c.connect(cf).connect(cg).connect(pan);
+      c.start(t0);
+      nodes.push(c, cf, cg);
+    }
+    o.start(t0); vib.start(t0); s.start(t0);
+    this._bury(nodes, end + 0.6);
   }
 
   // ---- the instruments -----------------------------------------------------
@@ -377,9 +479,9 @@ export class ShantyBox {
   // F1 ~270 Hz dominant, F2 ~1000 down 12 dB, F3 ~2200 down 18 dB, the lot
   // under a 3 kHz lid. Two detuned copies make it a watch, not a soloist;
   // slow tremolo is the breath. Kept far back — a hum you notice is too loud.
-  _hum(midi, t0, dur, vel) {
+  _hum(midi, t0, dur, vel, cents = 0) {
     const ac = this.ctx;
-    const freq = midiHz(midi);
+    const freq = midiHz(midi) * centsMul(cents);
     const mix = ac.createGain(); mix.gain.value = 1;
     // the formants, in parallel: [centre, Q, level]
     const nodes = [mix];
@@ -477,3 +579,4 @@ export class ShantyBox {
 }
 
 function midiHz(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+function centsMul(c) { return Math.pow(2, c / 1200); }

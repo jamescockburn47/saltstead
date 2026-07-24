@@ -361,16 +361,25 @@ export function planFor(seed, tune, side) {
   const lead = pool[hash32(s) % pool.length];
   const isMarch = tune.kind === 'march' || tune.kind === 'hornpipe';
   const isAir = tune.kind === 'air';
-  // call-and-response: on a second pass the tune may cross the deck to a
+  // call-and-response: on a middle pass the tune may cross the deck to a
   // different instrument (shanties ARE call-and-response — this reads true)
   const response = pool.find((i) => i !== lead) || lead;
+  // A PERFORMANCE, not a fragment: a short tune is played through several
+  // times (that is what folk performance IS — repetition with variation), a
+  // long one fewer, aiming the whole rendition at a minute or two. The
+  // arrangement arc in renderScore gives each pass its own weight.
+  const rawBeats = parseMelody(tune.m).reduce((a, n) => a + n.b, 0);
+  const passes = isAir
+    ? 1 + (hash32(s + 3) % 2)
+    : Math.max(2, Math.min(4, Math.round((80 * tune.bpm / 60) / rawBeats)));
   return {
     lead,
-    responseLead: roll(s, 9) < 0.5 ? response : lead,
+    responseLead: roll(s, 9) < 0.6 ? response : lead,
     transpose: (hash32(s + 1) % 5) - 2,            // -2..+2 semitones: a new key each night
     tempoMul: 0.92 + roll(s, 2) * 0.16,           // ±8% — a tired crew drags, a merry one drives
-    repeats: isAir ? 1 : 1 + (hash32(s + 3) % 2), // once or twice through
-    harmony: !isAir && roll(s, 4) < 0.4,          // a second voice in thirds on the repeat
+    repeats: passes,                               // passes through the whole tune
+    swing: tune.kind === 'hornpipe',               // the hornpipe's dotted lilt lives in the playing
+    harmony: !isAir && roll(s, 4) < 0.5,          // a second voice in thirds as the set fills
     drone: side === 'pirate' ? roll(s, 5) < 0.55  // the fo'c's'le loves an open fifth
       : roll(s, 5) < 0.2,
     // the watch below hums along, wordless — mostly a fo'c's'le habit; the
@@ -410,85 +419,145 @@ export function moodFor(state) {
 }
 
 // ---------------------------------------------------------------------------
-// renderScore(tune, plan) → the full rendition as flat, sorted note events:
-//   [{ t, dur, midi, voice, vel }]  (t and dur in BEATS; the box scales by bpm)
-// voices: 'lead' | 'harmony' | 'drone' | 'percLow' | 'percHigh'
+// renderScore(tune, plan) → the full PERFORMANCE as flat, sorted note events:
+//   [{ t, dur, midi, voice, vel, cents, rep, run }]  (t, dur in BEATS)
+// voices: 'lead' | 'harmony' | 'drone' | 'hum' | 'percLow' | 'percHigh'
+// plus runMap: { runId: [lead events] } — SLUR RUNS. Stepwise notes inside a
+// run are played by the box on ONE continuous oscillator with pitch glides
+// (a bow drawn through the phrase, a breath through the whistle) — the
+// single biggest "instrument, not synth" cue there is.
+//
+// The ARC: a performance is the tune played plan.repeats times through with
+// the arrangement filling as it goes — first pass the lead alone and a shade
+// soft; the drone and the hum take up on the second; a middle pass may cross
+// the deck to the response instrument; thirds join for the last, and the
+// final note holds long (the fermata every session ends on). Marches keep
+// their drum from the first beat — the King's time IS the drum.
+//
+// The HUMANITY, all deterministic: swing on the hornpipes, notes pushed and
+// dragged a few hundredths of a beat (the drummer tighter than the fiddler),
+// intonation a few cents proud or shy, dynamics shaped over the 4-bar
+// phrase, and a breath stolen from the note that closes each phrase.
 // Everything here is deterministic — same tune + plan, same score, any machine.
 export function renderScore(tune, plan) {
   const melody = parseMelody(tune.m);
   // the scale must follow the transposition — harmony and cuts live in the
   // KEY OF THE NIGHT, not the printed key
   const scale = scaleOf({ root: tune.root + plan.transpose, mode: tune.mode });
+  const rawBeats = melody.reduce((a, n) => a + n.b, 0);
+  const passes = Math.max(1, plan.repeats || 1);
+  const swingAmt = plan.swing ? 0.09 : 0;
+  const isMarch = tune.kind === 'march' || tune.kind === 'hornpipe';
+  const phrase = tune.meter * 4;
   const events = [];
+  const runMap = {};
+  let runId = 0;
   const seed = hash32(tune.root * 131 + Math.round(plan.tempoMul * 1000));
   let t = 0;
 
-  for (let rep = 0; rep < plan.repeats; rep++) {
-    let noteIx = 0;
-    for (const n of melody) {
-      if (n.p !== null) {
-        const midi = n.p + plan.transpose;
-        // the downbeat leans, the offbeat lightens — a played feel, not a grid
-        const inBar = t % tune.meter;
-        const vel = (inBar < 0.01 ? 1.0 : inBar === Math.floor(inBar) ? 0.85 : 0.72)
-          * (rep > 0 ? 0.96 : 1);
-        // a cut (grace note a scale-step up) on the longer notes, by the dice
-        const wantCut = n.b >= 1.5 && roll(seed + rep * 8191, noteIx) < plan.ornaments;
-        if (wantCut) {
-          // negative n walks UP the scale — the cut sits one step above its note
-          events.push({ t, dur: 0.12, midi: scaleStep(midi, scale, -1), voice: 'lead', vel: vel * 0.6, rep });
-        }
-        const gd = wantCut ? 0.12 : 0;
-        events.push({ t: t + gd, dur: Math.max(0.1, n.b - gd) * 0.92, midi, voice: 'lead', vel, rep });
-        // the second voice: parallel thirds below, on the repeat pass only
-        // (or throughout when the tune is played once) — quieter, a friend
-        const harmNow = plan.harmony && (plan.repeats === 1 || rep === plan.repeats - 1);
-        if (harmNow && n.b >= 0.5) {
-          events.push({ t: t + gd, dur: Math.max(0.1, n.b - gd) * 0.92,
-            midi: scaleStep(midi, scale, 2), voice: 'harmony', vel: vel * 0.45 });
-        }
-        // the watch below hums the tune an octave down — only the long notes,
-        // legato (the full length, no clipped consonants: there are none)
-        if (plan.hum && n.b >= 1) {
-          events.push({ t, dur: n.b, midi: midi - 12, voice: 'hum', vel: vel * 0.5 });
-        }
+  for (let rep = 0; rep < passes; rep++) {
+    const last = rep === passes - 1;
+    const solo = passes > 1 && rep === 0;          // the first pass belongs to the lead
+    const droneOn = plan.drone && !solo;
+    const humOn = plan.hum && !solo;
+    const harmOn = plan.harmony && (last || passes === 1);
+    const percOn = plan.perc && (isMarch || !solo);
+    const passT0 = t;
+    let run = null, prevMidi = null, noteIx = 0;
+
+    for (let mi = 0; mi < melody.length; mi++) {
+      const n = melody[mi];
+      if (n.p === null) { run = null; prevMidi = null; t += n.b; noteIx++; continue; }
+      const midi = n.p + plan.transpose;
+      const tp = t - passT0;
+      // swing: the offbeat half lands late, its downbeat partner holds longer
+      let st = t, sb = n.b;
+      if (swingAmt && Math.abs((tp % 1) - 0.5) < 0.02) { st += swingAmt; sb -= swingAmt; }
+      else if (swingAmt && (tp % 1) < 0.02 && Math.abs(n.b - 0.5) < 0.02) sb += swingAmt;
+      // the breath: the note that closes a 4-bar phrase gives back its corner
+      const endsPhrase = ((tp + n.b) % phrase) < 0.02 && mi < melody.length - 1;
+      if (endsPhrase) sb = Math.max(0.2, sb - 0.2);
+      // the fermata: the last note of the night holds long
+      if (last && mi === melody.length - 1) sb = n.b * 1.9;
+      // push and drag — the human hand; never the first beat of a pass
+      const jit = tp < 0.01 ? 0 : (roll(seed + rep * 8191, noteIx * 3 + 1) - 0.5) * 0.05;
+      st += jit;
+      // dynamics: downbeat lean × the phrase's swell × the solo pass's hush
+      const inBar = tp % tune.meter;
+      const beatVel = inBar < 0.01 ? 1.0 : inBar === Math.floor(inBar) ? 0.86 : 0.74;
+      const vel = beatVel * (0.88 + 0.12 * Math.sin(Math.PI * ((tp % phrase) / phrase)))
+        * (solo ? 0.88 : 1);
+      // intonation: a fiddler is not a tuner (a few cents proud or shy)
+      const cents = (roll(seed + rep * 131, noteIx * 7 + 3) - 0.5) * 9;
+      // a cut (grace crushed against the beat) on the longer notes, by the dice
+      const wantCut = n.b >= 1.5 && roll(seed + rep * 8191, noteIx) < plan.ornaments;
+      if (wantCut) {
+        // negative n walks UP the scale — the cut sits one step above its note
+        events.push({ t: st, dur: 0.11, midi: scaleStep(midi, scale, -1),
+          voice: 'lead', vel: vel * 0.6, rep, cents, run: -1 });
+      }
+      const gd = wantCut ? 0.1 : 0;
+      // slur bookkeeping: stepwise motion runs under one bow; leaps, repeated
+      // notes, cuts and rests re-articulate
+      const step = prevMidi === null ? 99 : Math.abs(midi - prevMidi);
+      const canSlur = run !== null && step > 0 && step <= 4 && !wantCut
+        && runMap[run].length < 6 && jit >= -0.02;
+      if (!canSlur) { run = runId++; runMap[run] = []; }
+      const ev = { t: st + gd, dur: Math.max(0.1, sb - gd) * 0.94, midi,
+        voice: 'lead', vel, rep, cents, run };
+      runMap[run].push(ev);
+      events.push(ev);
+      prevMidi = midi;
+      // the second voice: parallel thirds below, a whisker behind the lead
+      if (harmOn && n.b >= 0.5) {
+        events.push({ t: st + gd + 0.03, dur: Math.max(0.1, sb - gd) * 0.9,
+          midi: scaleStep(midi, scale, 2), voice: 'harmony', vel: vel * 0.45,
+          rep, cents: -cents * 0.7, run: -1 });
+      }
+      // the watch below hums the tune an octave down — long notes only, legato
+      if (humOn && n.b >= 1) {
+        events.push({ t: st + 0.04, dur: n.b, midi: midi - 12, voice: 'hum',
+          vel: vel * 0.5, rep, cents: cents * 0.5, run: -1 });
       }
       t += n.b;
       noteIx++;
     }
-  }
-  const total = t;
 
-  // the drone: root + fifth held under everything, re-bowed every four bars
-  if (plan.drone) {
-    const root = tune.root + plan.transpose - 12;
-    const span = tune.meter * 4;
-    for (let d = 0; d < total; d += span) {
-      const dur = Math.min(span, total - d) * 0.98;
-      events.push({ t: d, dur, midi: root, voice: 'drone', vel: 0.5 });
-      events.push({ t: d, dur, midi: root + 7, voice: 'drone', vel: 0.35 });
+    // the drone: root + fifth held under the pass, re-bowed every four bars
+    if (droneOn) {
+      const root = tune.root + plan.transpose - 12;
+      for (let d = 0; d < rawBeats; d += phrase) {
+        const dur = Math.min(phrase, rawBeats - d) * 0.98;
+        events.push({ t: passT0 + d, dur, midi: root, voice: 'drone', vel: 0.5, run: -1 });
+        events.push({ t: passT0 + d, dur, midi: root + 7, voice: 'drone', vel: 0.35, run: -1 });
+      }
     }
-  }
 
-  // the drum: a march gets the field pattern, a shanty a knuckle on the beat.
-  // 6/8 swings on 1 and 4; common time walks 1-2-3-4 with the weight on 1 and 3.
-  if (plan.perc) {
-    const six = tune.meter === 6;
-    for (let bar = 0; bar * tune.meter < total; bar++) {
-      const b0 = bar * tune.meter;
-      if (six) {
-        events.push({ t: b0, dur: 0.2, midi: 0, voice: 'percLow', vel: 0.9 });
-        if (b0 + 3 < total) events.push({ t: b0 + 3, dur: 0.2, midi: 0, voice: 'percHigh', vel: 0.55 });
-      } else {
-        for (let q = 0; q < tune.meter && b0 + q < total; q++) {
-          const low = q % 2 === 0;
-          events.push({ t: b0 + q, dur: 0.2, midi: 0,
-            voice: low ? 'percLow' : 'percHigh', vel: q === 0 ? 0.9 : low ? 0.6 : 0.4 });
+    // the drum: a march gets the field pattern, a shanty a knuckle on the
+    // beat. 6/8 swings on 1 and 4; common time walks with weight on 1 and 3.
+    // The drummer keeps far tighter time than the fiddler (±ms, not ±beats).
+    if (percOn) {
+      const six = tune.meter === 6;
+      for (let bar = 0; bar * tune.meter < rawBeats; bar++) {
+        const b0 = passT0 + bar * tune.meter;
+        const dj = (q) => (roll(seed + 977, bar * 17 + q) - 0.5) * 0.015;
+        if (six) {
+          events.push({ t: b0, dur: 0.2, midi: 0, voice: 'percLow', vel: 0.9, run: -1 });
+          if (bar * tune.meter + 3 < rawBeats) {
+            events.push({ t: b0 + 3 + dj(3), dur: 0.2, midi: 0, voice: 'percHigh', vel: 0.55, run: -1 });
+          }
+        } else {
+          for (let q = 0; q < tune.meter && bar * tune.meter + q < rawBeats; q++) {
+            const low = q % 2 === 0;
+            events.push({ t: b0 + q + (q ? dj(q) : 0), dur: 0.2, midi: 0,
+              voice: low ? 'percLow' : 'percHigh', vel: q === 0 ? 0.9 : low ? 0.6 : 0.4, run: -1 });
+          }
         }
       }
     }
   }
 
   events.sort((a, b) => a.t - b.t || (a.voice < b.voice ? -1 : 1));
-  return { events, totalBeats: total };
+  // +2 beats of air for the fermata to ring out before the box closes the book
+  return { events, totalBeats: passes * rawBeats + 2, runMap };
 }

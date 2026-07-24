@@ -120,7 +120,7 @@ for (const t of TUNES) {
     const p = planFor(s * 977, t0, 'pirate');
     ok(p.transpose >= -2 && p.transpose <= 2, `transpose within a tone (${p.transpose})`);
     ok(p.tempoMul > 0.9 && p.tempoMul < 1.1, `tempo within a stride (${p.tempoMul})`);
-    ok(p.repeats >= 1 && p.repeats <= 2, `once or twice through (${p.repeats})`);
+    ok(p.repeats >= 1 && p.repeats <= 4, `a performance, not a loop (${p.repeats} passes)`);
     ok(p.gapS >= 45 && p.gapS <= 165, `a real silence follows (${p.gapS})`);
     if (JSON.stringify(p) !== JSON.stringify(p1)) differs = true;
   }
@@ -152,6 +152,37 @@ for (const t of TUNES) {
   const silent = { ...plan, drone: false, perc: false, harmony: false, hum: false, repeats: 1 };
   const s2 = renderScore(t0, silent);
   ok(!s2.events.some((e) => e.voice !== 'lead'), 'a bare plan renders a bare tune');
+  // the performance arc: the first pass belongs to the lead alone — the
+  // drone and the hum take up on the second
+  const passLen = (totalBeats - 2) / plan.repeats;
+  const firstDrone = events.find((e) => e.voice === 'drone');
+  const firstHum = events.find((e) => e.voice === 'hum');
+  ok(firstDrone && firstDrone.t >= passLen - 0.1, 'the drone waits out the solo pass');
+  ok(firstHum && firstHum.t >= passLen - 0.1, 'so does the watch below');
+  // slur runs: well-formed, time-monotone, every tagged event accounted for
+  ok(runMapOk(renderScore(t0, plan)), 'slur runs are honest phrases');
+  // and the whole score is deterministic — same plan, same performance
+  ok(JSON.stringify(renderScore(t0, plan)) === JSON.stringify(renderScore(t0, plan)),
+    'the same night plays the same set');
+  // humanity stays within bounds: pushes of hundredths, cents in single figures
+  ok(events.every((e) => e.cents === undefined || Math.abs(e.cents) <= 5),
+    'intonation proud or shy, never sour');
+}
+
+function runMapOk({ events, runMap }) {
+  if (!runMap) return false;
+  for (const [id, run] of Object.entries(runMap)) {
+    if (!run.length) return false;
+    for (let i = 0; i < run.length; i++) {
+      if (run[i].voice !== 'lead' || run[i].run !== Number(id)) return false;
+      if (i > 0 && run[i].t <= run[i - 1].t) return false;
+      if (i > 0 && run[i].midi === run[i - 1].midi) return false; // repeats re-articulate
+    }
+    if (run.length > 6) return false; // a bow only holds so long
+  }
+  // every run-tagged lead event sits in its run
+  return events.filter((e) => e.voice === 'lead' && e.run >= 0)
+    .every((e) => (runMap[e.run] || []).includes(e));
 }
 
 // the mood policy: guns, gales and groundings silence the band
