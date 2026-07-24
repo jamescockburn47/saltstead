@@ -13,6 +13,7 @@
 
 import * as THREE from 'three';
 import { signedCoastGame, worldToLatLon } from './earth.js';
+import { fbm2 } from './noise.js';
 
 export const COASTMAP_METRES = 2560; // world metres the map covers
 const N = 128;                       // texels per side (20 m/texel)
@@ -61,7 +62,16 @@ export class CoastMapLayer {
       for (let i = 0; i < N; i++) {
         const w = this.texelWorld(p.cx, p.cz, i, p.row);
         const ll = worldToLatLon(w.x, w.z);
-        const d = signedCoastGame(ll.lat, ll.lon);
+        let d = signedCoastGame(ll.lat, ll.lon);
+        // ORGANIC JITTER (the de-striping): the shore set's crests are the
+        // field's level sets, and a mathematically exact distance field
+        // gives ruler-straight stripes. A slow noise bend — fading to
+        // nothing at the waterline so the breaker line stays snug on the
+        // real beach — turns them into wavefronts. Baked INTO the field, so
+        // CPU buoyancy and the shader read the same bent sea for free.
+        const j = Math.max(-30, Math.min(30,
+          (fbm2(w.x * 0.013 + 7, w.z * 0.013 - 4) - 0.235) * 180));
+        d += j * Math.min(1, Math.abs(d) / 70);
         p.field[p.row * N + i] = Math.max(-CLAMP, Math.min(CLAMP, d));
       }
     }

@@ -107,7 +107,9 @@ vec2 oCoastUv(vec2 p) { return (p - uCoastC) / ${COASTMAP_METRES.toFixed(1)} + 0
 float oCoastSd(vec2 p) {
   vec2 uv = oCoastUv(p);
   vec2 e = abs(uv - 0.5);
-  float inM = step(max(e.x, e.y), 0.5);
+  // fade the shore's influence out over the map's last tenth — a hard step
+  // at the rim popped the sea from calmed to full in a visible line
+  float inM = 1.0 - smoothstep(0.4, 0.5, max(e.x, e.y));
   return mix(-10000.0, texture2D(uCoastMap, uv).r, inM);
 }` + glslShore();
       sh.vertexShader = 'uniform float uTime;\nuniform vec2 uOrigin;\nuniform float uSwell;\n'
@@ -188,13 +190,16 @@ float oCoastSd(vec2 p) {
       oRag = 0.40 + 0.60 * oFbm(vWPos.xz * 1.9 + uTime * vec2(0.11, 0.07));
     }
     // breakers: the shore set's own crests whiten as they close the beach —
-    // foam lines that lie parallel to the shore because the crests do
+    // foam lines that lie parallel to the shore because the crests do.
+    // Confined to the SURF ZONE (the last ~140 m): the crest measure is
+    // normalized, and unconfined it painted faint stripes 400 m out.
     float oBrk = 0.0;
     if (oSEnv > 0.02) {
       float oSC = clamp(0.5 + 0.5 * oShoreSum(oSd) / max(0.05, oSEnv * O_MAXSH), 0.0, 1.0);
-      oBrk = smoothstep(0.62, 0.92, oSC) * smoothstep(0.06, 0.5, oSEnv);
+      float oSurf = 1.0 - smoothstep(90.0, 200.0, -oSd);
+      oBrk = smoothstep(0.66, 0.94, oSC) * smoothstep(0.06, 0.5, oSEnv) * oSurf;
     }
-    oFoam = clamp((oWkHF.y * 0.85 + oWc + oBrk * 0.8) * oRag, 0.0, 1.0);
+    oFoam = clamp((oWkHF.y * 0.85 + oWc + oBrk * 0.7) * oRag, 0.0, 1.0);
   }
   // crests pass light: looking through high water toward the sun finds
   // green glass (cheap subsurface scatter — reads huge, costs nothing)
