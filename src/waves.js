@@ -46,9 +46,11 @@ export function getSeaState() { return seaState; }
 
 export const SHORE_RANGE = 700;  // m offshore where the land starts to tell
 export const SHORE_CALM = 0.25;  // open-wave amplitude left at the waterline
+// small on purpose: the shore set rides INSIDE the calming — the coast must
+// stay quieter than blue water even in the surf band (the design's first law)
 export const SHORE_WAVES = [
-  { len: 30, amp: 0.34, speed: 4.6 },
-  { len: 14, amp: 0.14, speed: 3.2 },
+  { len: 30, amp: 0.15, speed: 4.6 },
+  { len: 14, amp: 0.06, speed: 3.2 },
 ];
 export const MAX_SHORE_HEIGHT = SHORE_WAVES.reduce((s, w) => s + w.amp, 0);
 
@@ -66,10 +68,26 @@ export function shoreOpenAtten(d) {
 }
 
 // the shore set's envelope: silent in blue water, swelling through the
-// approach, breaking hardest over the last ~80 m, spent at the sand
+// approach, breaking hardest over the last ~80 m, spent at the sand.
+// Deliberately NARROW — a wide envelope striped every strait and sound
+// on earth with full-channel surf (the Solent corduroy, 2026-07-24)
 export function shoreEnv(d) {
-  return (1 - sstep(80, 480, -d)) * sstep(4, 34, -d);
+  return (1 - sstep(40, 240, -d)) * sstep(4, 34, -d);
 }
+
+// the STRAIT gate: shore waves march up a real approach, where the coast
+// distance field's gradient is clean (|∇d| ≈ 1). In a channel between two
+// facing shores the medial line collapses the gradient — and that is
+// exactly where breakers must NOT be: sheltered water lies calm. Both the
+// CPU evaluator and the shader compute this from the same sampled field.
+export function shoreGate(gLen) {
+  return sstep(0.35, 0.75, gLen);
+}
+
+// how much of the shore set's slope reaches the NORMALS: full-strength
+// shading painted the surf band as broad bright sheets; the height (and the
+// hull that rides it) keeps the full set, the shading takes it gently
+export const SHORE_SHADE = 0.6;
 
 // shore-parallel surface height at signed coast distance d, time t. UNscaled
 // by sea state — waveHeight applies it to the whole shore-aware sum.
@@ -108,7 +126,8 @@ export function waveHeight(x, z, t) {
   }
   const s = shoreSampler && shoreSampler(x, z);
   if (!s) return y * seaState;
-  return (y * shoreOpenAtten(s.d) + shoreHeight(s.d, t)) * seaState;
+  const g = s.gLen === undefined ? 1 : shoreGate(s.gLen);
+  return (y * shoreOpenAtten(s.d) + shoreHeight(s.d, t) * g) * seaState;
 }
 
 // The same sum as a GLSL expression over `wx`, `wz` (world xz) and `uTime`.
@@ -135,7 +154,9 @@ export function waveGradient(x, z, t) {
   const s = shoreSampler && shoreSampler(x, z);
   if (!s) return [gx * seaState, gz * seaState];
   const a = shoreOpenAtten(s.d);
-  const gm = shoreGradMag(s.d, t); // rides the landward unit gradient of d
+  const g = s.gLen === undefined ? 1 : shoreGate(s.gLen);
+  // rides the landward unit gradient of d, softened for the normals
+  const gm = shoreGradMag(s.d, t) * g * SHORE_SHADE;
   return [(gx * a + gm * s.gx) * seaState, (gz * a + gm * s.gz) * seaState];
 }
 
@@ -157,7 +178,7 @@ export function glslShoreAttenExpr() {
   return `${SHORE_CALM.toFixed(4)} + ${(1 - SHORE_CALM).toFixed(4)} * smoothstep(40.0, ${SHORE_RANGE.toFixed(1)}, -sd)`;
 }
 export function glslShoreEnvExpr() {
-  return '(1.0 - smoothstep(80.0, 480.0, -sd)) * smoothstep(4.0, 34.0, -sd)';
+  return '(1.0 - smoothstep(40.0, 240.0, -sd)) * smoothstep(4.0, 34.0, -sd)';
 }
 export function glslShoreSumExpr() {
   return SHORE_WAVES.map((w) => {
@@ -171,6 +192,9 @@ export function glslShoreGradExpr() {
     return `${(w.amp * k).toFixed(6)} * cos(${k.toFixed(6)} * sd - ${(k * w.speed).toFixed(6)} * uTime)`;
   }).join(' + ');
 }
+export function glslShoreGateExpr() {
+  return 'smoothstep(0.35, 0.75, gl)';
+}
 
 // the function block the ocean shader inlines (vertex AND fragment)
 export function glslShore() {
@@ -179,5 +203,6 @@ float oShoreAtten(float sd) { return ${glslShoreAttenExpr()}; }
 float oShoreEnv(float sd) { return ${glslShoreEnvExpr()}; }
 float oShoreSum(float sd) { return oShoreEnv(sd) * (${glslShoreSumExpr()}); }
 float oShoreGradMag(float sd) { return oShoreEnv(sd) * (${glslShoreGradExpr()}); }
+float oShoreGate(float gl) { return ${glslShoreGateExpr()}; }
 `;
 }

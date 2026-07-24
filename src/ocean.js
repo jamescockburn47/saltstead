@@ -33,6 +33,7 @@
 import * as THREE from 'three';
 import {
   glslWaveSum, glslWaveGrad, glslShore, MAX_WAVE_HEIGHT, MAX_SHORE_HEIGHT,
+  SHORE_SHADE,
 } from './waves.js';
 import { WAKEMAP_METRES } from './wakemaplayer.js';
 import { COASTMAP_METRES } from './coastmaplayer.js';
@@ -111,6 +112,23 @@ float oCoastSd(vec2 p) {
   // at the rim popped the sea from calmed to full in a visible line
   float inM = 1.0 - smoothstep(0.4, 0.5, max(e.x, e.y));
   return mix(-10000.0, texture2D(uCoastMap, uv).r, inM);
+}
+// the field's gradient, per world metre (texel 20 m, central diff over 2)
+vec2 oCoastGrad(vec2 p) {
+  vec2 uv = oCoastUv(p);
+  float t = 1.0 / 128.0;
+  return vec2(
+    texture2D(uCoastMap, uv + vec2(t, 0.0)).r - texture2D(uCoastMap, uv - vec2(t, 0.0)).r,
+    texture2D(uCoastMap, uv + vec2(0.0, t)).r - texture2D(uCoastMap, uv - vec2(0.0, t)).r) / 40.0;
+}
+// the SHELTER gradient: a ±100 m baseline. Facing shores cancel across a
+// strait's middle, so |∇d| sags over a broad band there — the surf's gate.
+vec2 oCoastGradW(vec2 p) {
+  vec2 uv = oCoastUv(p);
+  float t = 5.0 / 128.0;
+  return vec2(
+    texture2D(uCoastMap, uv + vec2(t, 0.0)).r - texture2D(uCoastMap, uv - vec2(t, 0.0)).r,
+    texture2D(uCoastMap, uv + vec2(0.0, t)).r - texture2D(uCoastMap, uv - vec2(0.0, t)).r) / 200.0;
 }` + glslShore();
       sh.vertexShader = 'uniform float uTime;\nuniform vec2 uOrigin;\nuniform float uSwell;\n'
         + 'uniform sampler2D uWakeMap;\nuniform vec2 uWakeC;\n'
@@ -125,7 +143,8 @@ float oCoastSd(vec2 p) {
             + '  vec2 wWUv = oWakeUv(vec2(wx, wz));\n'
             + '  float wWakeH = texture2D(uWakeMap, wWUv).r * oWakeIn(wWUv);\n'
             + '  float wSd = oCoastSd(vec2(wx, wz));\n'
-            + `  transformed.y += uSwell * (oShoreAtten(wSd) * (${glslWaveSum()}) + oShoreSum(wSd)) + wWakeH;\n`
+            + '  float wGate = oShoreGate(length(oCoastGradW(vec2(wx, wz))));\n'
+            + `  transformed.y += uSwell * (oShoreAtten(wSd) * (${glslWaveSum()}) + oShoreSum(wSd) * wGate) + wWakeH;\n`
             + '  vWPos = vec3(wx, transformed.y, wz);')
           .replace('#include <project_vertex>',
             '#include <project_vertex>\n'
@@ -158,18 +177,15 @@ float oCoastSd(vec2 p) {
   float oSd = oCoastSd(vWPos.xz);
   float oSAtt = oShoreAtten(oSd);
   float oSEnv = oShoreEnv(oSd);
-  vec2 oCDir = vec2(0.0);
-  {
-    float oCTexUv = 1.0 / 128.0;
-    vec2 oCUv = oCoastUv(vWPos.xz);
-    vec2 oCG = vec2(
-      texture2D(uCoastMap, oCUv + vec2(oCTexUv, 0.0)).r - texture2D(uCoastMap, oCUv - vec2(oCTexUv, 0.0)).r,
-      texture2D(uCoastMap, oCUv + vec2(0.0, oCTexUv)).r - texture2D(uCoastMap, oCUv - vec2(0.0, oCTexUv)).r);
-    float oCLen = length(oCG);
-    if (oCLen > 1e-4) oCDir = oCG / oCLen;
-  }
-  float oH = uSwell * (oSAtt * (${glslWaveSum()}) + oShoreSum(oSd));
-  vec2 oWG = uSwell * (oSAtt * (${glslWaveGrad()}) + oShoreGradMag(oSd) * oCDir) + oWkG;
+  vec2 oCG = oCoastGrad(vWPos.xz);
+  float oCLen = length(oCG);
+  // the strait gate: no shore set where the wide-baseline gradient sags —
+  // the middle of a channel is SHELTERED water, not a surf zone
+  float oCGate = oShoreGate(length(oCoastGradW(vWPos.xz)));
+  vec2 oCDir = oCLen > 1e-4 ? oCG / oCLen : vec2(0.0);
+  float oH = uSwell * (oSAtt * (${glslWaveSum()}) + oShoreSum(oSd) * oCGate);
+  vec2 oWG = uSwell * (oSAtt * (${glslWaveGrad()})
+    + oShoreGradMag(oSd) * ${SHORE_SHADE.toFixed(2)} * oCGate * oCDir) + oWkG;
   // crest measure: -1 trough -> +1 highest possible crest at this sea state
   float oCrest = clamp(0.5 + 0.5 * oH / max(0.2, uSwell * O_MAXH), 0.0, 1.0);
   // froth. Whitecaps only when the wind has the sea up (weather.js drives
@@ -193,13 +209,15 @@ float oCoastSd(vec2 p) {
     // foam lines that lie parallel to the shore because the crests do.
     // Confined to the SURF ZONE (the last ~140 m): the crest measure is
     // normalized, and unconfined it painted faint stripes 400 m out.
+    // thin LINES on the highest crests only — sheets of white read as
+    // artifact, a line of white reads as surf
     float oBrk = 0.0;
     if (oSEnv > 0.02) {
       float oSC = clamp(0.5 + 0.5 * oShoreSum(oSd) / max(0.05, oSEnv * O_MAXSH), 0.0, 1.0);
       float oSurf = 1.0 - smoothstep(90.0, 200.0, -oSd);
-      oBrk = smoothstep(0.66, 0.94, oSC) * smoothstep(0.06, 0.5, oSEnv) * oSurf;
+      oBrk = smoothstep(0.84, 0.97, oSC) * smoothstep(0.06, 0.5, oSEnv) * oSurf * oCGate;
     }
-    oFoam = clamp((oWkHF.y * 0.85 + oWc + oBrk * 0.7) * oRag, 0.0, 1.0);
+    oFoam = clamp((oWkHF.y * 0.85 + oWc + oBrk * 0.5) * oRag, 0.0, 1.0);
   }
   // crests pass light: looking through high water toward the sun finds
   // green glass (cheap subsurface scatter — reads huge, costs nothing)

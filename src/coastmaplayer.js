@@ -69,8 +69,10 @@ export class CoastMapLayer {
         // nothing at the waterline so the breaker line stays snug on the
         // real beach — turns them into wavefronts. Baked INTO the field, so
         // CPU buoyancy and the shader read the same bent sea for free.
-        const j = Math.max(-30, Math.min(30,
-          (fbm2(w.x * 0.013 + 7, w.z * 0.013 - 4) - 0.235) * 180));
+        // Nyquist-clean: features ~180 m against the 20 m texel (the first
+        // cut's 77 m features aliased into pockmarks — the Solent dimples).
+        const j = Math.max(-14, Math.min(14,
+          (fbm2(w.x * 0.0055 + 7, w.z * 0.0055 - 4) - 0.235) * 120));
         d += j * Math.min(1, Math.abs(d) / 70);
         p.field[p.row * N + i] = Math.max(-CLAMP, Math.min(CLAMP, d));
       }
@@ -103,7 +105,7 @@ export class CoastMapLayer {
     if (!this.field) return null;
     const d = this.bilinear(x, z);
     if (d === null) return null;
-    // landward unit gradient by central difference of the bilinear field
+    // direction: landward unit gradient by tight central difference
     const h = this.texel / 2;
     const dxp = this.bilinear(x + h, z), dxm = this.bilinear(x - h, z);
     const dzp = this.bilinear(x, z + h), dzm = this.bilinear(x, z - h);
@@ -111,6 +113,16 @@ export class CoastMapLayer {
     let gx = dxp - dxm, gz = dzp - dzm;
     const len = Math.hypot(gx, gz);
     if (len > 1e-6) { gx /= len; gz /= len; } else { gx = 0; gz = 0; }
-    return { d, gx, gz };
+    // shelter: the gradient over a WIDE baseline (±100 m). On a strait or
+    // sound the two shores' slopes cancel across the middle — |∇d| sags
+    // over a broad band, and waves.js shoreGate stands the surf down there.
+    // A tight baseline only sagged on the exact medial line (one texel).
+    const H = this.texel * 5;
+    const wxp = this.bilinear(x + H, z), wxm = this.bilinear(x - H, z);
+    const wzp = this.bilinear(x, z + H), wzm = this.bilinear(x, z - H);
+    const gLen = (wxp === null || wxm === null || wzp === null || wzm === null)
+      ? 1
+      : Math.hypot(wxp - wxm, wzp - wzm) / (2 * H);
+    return { d, gx, gz, gLen };
   }
 }

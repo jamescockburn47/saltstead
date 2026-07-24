@@ -78,6 +78,7 @@ try {
         }
       }
       if (!spot) throw new Error('no inshore water found near coast');
+      window.__spot = spot; // the measured point stays put; the ship may sail
       g.ship.x = spot.x; g.ship.z = spot.z;
       g.ship.speed = 0;
       g.geoClock = 0;
@@ -96,24 +97,24 @@ try {
   // ---- 1. the Caribbean coast: palms, calm inshore water, breakers ----
   await goCoast(17.94, -76.88); // the Palisadoes, off Port Royal
   const carib = await page.evaluate(async () => {
-    const { waveHeight, getSeaState } = await import('/src/waves.js');
     const g = window.saltstead;
-    // mean |height| here (inshore) vs 3 km out to sea, CPU side
+    // mean |height| at the teleport spot (inshore, FIXED — the ship may
+    // have sailed off it) vs 3 km out to sea, through the GAME's own
+    // waveHeight (g.waveAt — a dynamic import can land on a second,
+    // sampler-less module instance under dev-server HMR)
     const mean = (x, z) => {
       let s = 0;
-      for (let i = 0; i < 120; i++) s += Math.abs(waveHeight(x, z, g.t + i * 0.41));
+      for (let i = 0; i < 120; i++) s += Math.abs(g.waveAt(x, z, g.t + i * 0.41));
       return s / 120;
     };
-    const kinds = new Set();
-    for (const c of g.shoreDecor.cells.values()) if (c.mesh) kinds.add('mesh');
+    const p = window.__spot;
     return {
       field: !!g.coastMap.field,
       centerSet: g.coastMap.uvCenter.x < 1e8,
-      inshore: mean(g.ship.x, g.ship.z),
-      offshore: mean(g.ship.x, g.ship.z - 3000) || mean(g.ship.x - 3000, g.ship.z),
+      inshore: mean(p.x, p.z),
+      offshore: mean(p.x, p.z - 3000) || mean(p.x - 3000, p.z),
       decorMeshes: [...g.shoreDecor.cells.values()].filter((c) => c.mesh).length,
       terrainChunks: g.terrain.chunks.size,
-      seaState: getSeaState(),
       mode: g.mode,
     };
   });
@@ -213,6 +214,24 @@ try {
   ok(england.farWritRefused, 'the far writ refuses a guest');
   await page.screenshot({ path: join(OUT, 'shore-england.png') });
   console.log('  shot - media/shore-england.png');
+
+  // ---- 6. the Solent: a strait must lie CALM, not striped with surf ----
+  await goCoast(50.51, -1.11); // between the Island and the mainland
+  await sleep(3000);
+  const solent = await page.evaluate(async () => {
+    const g = window.saltstead;
+    const p = window.__spot;
+    const mean = (x, z) => {
+      let s = 0;
+      for (let i = 0; i < 120; i++) s += Math.abs(g.waveAt(x, z, g.t + i * 0.41));
+      return s / 120;
+    };
+    return { inshore: mean(p.x, p.z), offshore: mean(p.x, p.z + 3000) || mean(p.x + 3000, p.z) };
+  });
+  ok(solent.inshore < solent.offshore * 0.75,
+    `the Wight inshore water lies sheltered (${solent.inshore.toFixed(3)} vs ${solent.offshore.toFixed(3)} out to sea)`);
+  await page.screenshot({ path: join(OUT, 'shore-solent.png') });
+  console.log('  shot - media/shore-solent.png');
 
   ok(pageErrors.length === 0,
     `no page errors (${pageErrors.length ? pageErrors.slice(0, 3).join(' | ') : 'clean'})`);

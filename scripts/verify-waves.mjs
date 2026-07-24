@@ -4,7 +4,7 @@
 // agree everywhere — the sea the eye sees is the sea the hull feels.
 import {
   WAVES, waveHeight, waveGradient, glslWaveSum, glslWaveGrad, MAX_WAVE_HEIGHT,
-  SHORE_WAVES, SHORE_RANGE, SHORE_CALM, MAX_SHORE_HEIGHT,
+  SHORE_WAVES, SHORE_RANGE, SHORE_CALM, MAX_SHORE_HEIGHT, SHORE_SHADE,
   shoreOpenAtten, shoreEnv, shoreHeight, shoreGradMag, setShoreSampler,
   glslShoreAttenExpr, glslShoreEnvExpr, glslShoreSumExpr, glslShoreGradExpr, glslShore,
 } from '../src/waves.js';
@@ -112,7 +112,7 @@ const plainBefore = waveHeight(100, 200, 33);
 setShoreSampler((x, z) => {
   const r = Math.hypot(x, z) || 1e-9;
   if (r > 3500) return null;
-  return { d: 500 - r, gx: -x / r, gz: -z / r };
+  return { d: 500 - r, gx: -x / r, gz: -z / r, gLen: 1 };
 });
 const meanAmp = (r) => {
   let s = 0;
@@ -126,8 +126,19 @@ ok(meanAmp(560) < meanAmp(3000), 'the sea calms as it closes the beach');
   const want = openBefore * shoreOpenAtten(-200) + shoreHeight(-200, t);
   ok(Math.abs(waveHeight(x, z, t) - want) < 1e-9, 'shore-aware height composes exactly');
   const [gx2] = waveGradient(x, z, t);
-  const wantG = openGradBefore[0] * shoreOpenAtten(-200) + shoreGradMag(-200, t) * -1;
-  ok(Math.abs(gx2 - wantG) < 1e-9, 'shore-aware gradient composes exactly');
+  const wantG = openGradBefore[0] * shoreOpenAtten(-200)
+    + shoreGradMag(-200, t) * SHORE_SHADE * -1;
+  ok(Math.abs(gx2 - wantG) < 1e-9, 'shore-aware gradient composes exactly (shading softened)');
+}
+// THE STRAIT GATE: where the field's gradient collapses (a channel's
+// medial line — two shores fighting over one distance field) the shore set
+// stands down entirely; the calming stays. No more full-channel corduroy.
+setShoreSampler((x, z) => ({ d: -30, gx: 1, gz: 0, gLen: 0.2 }));
+{
+  const x = 700, z = 0, t = 123.4;
+  const want = openBefore * shoreOpenAtten(-30); // calm, but NO shore set
+  ok(Math.abs(waveHeight(x, z, t) - want) < 1e-9,
+    'a strait\'s sheltered water calms without breaking');
 }
 setShoreSampler(null);
 ok(Math.abs(waveHeight(100, 200, 33) - plainBefore) < 1e-12,

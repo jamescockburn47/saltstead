@@ -1417,6 +1417,11 @@ class Game {
     this.persist();
   }
 
+  // the live harness's window on the sea: the GAME's own waveHeight (the
+  // module instance holding the shore sampler \u2014 a dynamic import in dev can
+  // land on a second, sampler-less instance under HMR timestamps)
+  waveAt(x, z, tt) { return waveHeight(x, z, tt); }
+
   // The far writ: saltstead.goTo(lat, lon) \u2014 or goTo('port royal'),
   // goTo('kraken') \u2014 drops the warden's ship in the nearest safe water to
   // ANY place on earth. The inspection tool for any coast on the planet;
