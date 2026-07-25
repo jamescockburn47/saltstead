@@ -17,7 +17,23 @@ assets, browser-first, deterministic, verify-gated**. Public client:
  have **no THREE/DOM imports** and each is guarded by a `scripts/verify-*.mjs`
  check (flora is guarded inside verify-shoredecor).
 - `src/earthdata.js` is **generated** by `scripts/build-earthdata.mjs` from Natural
-  Earth (coastlines, rivers, mountain ranges) — never edit by hand.
+  Earth (coastlines, rivers, mountain ranges) — never edit by hand. Enforced: a
+  PreToolUse hook (`.claude/settings.json` → `scripts/hook-guard-earthdata.mjs`)
+  denies Edit/Write to it and shell writes at it (redirects, `sed -i`, `tee`,
+  `cp`/`mv` onto it, `rm`, `Set-Content`…); reads and regeneration pass.
+
+## Working discipline
+
+- **Guarantees are instruments, not prose.** A rule that must never fail belongs in a
+  verify script, a hook, or a deploy gate — a CLAUDE.md sentence has a nonzero failure
+  rate. Before adding a "never/always" rule here, ask whether it should be a check.
+- **Big sweeps get delegated.** Multi-module audits/reviews: per-file subagent passes,
+  then one cross-file integration pass — one context over dozens of files dilutes
+  attention. Trivial single-file changes: just do them, no ceremony.
+- **Review is a fresh pair of eyes.** The session that wrote a change is a poor
+  reviewer of it; use an independent subagent or /code-review before deploy-worthy work.
+- **Long explorations persist findings as they go** — write phase summaries to a
+  scratchpad/doc before moving on, not after context is already thin.
 
 ## Build & verify
 
