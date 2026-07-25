@@ -32,8 +32,8 @@
 
 import * as THREE from 'three';
 import {
-  glslWaveSum, glslWaveGrad, glslShore, MAX_WAVE_HEIGHT, MAX_SHORE_HEIGHT,
-  SHORE_SHADE, SEA_STATE_MAX,
+  glslWaveSum, glslWaveGrad, glslWaveGradBand, GRAD_BANDS, glslShore,
+  MAX_WAVE_HEIGHT, MAX_SHORE_HEIGHT, SHORE_SHADE, SEA_STATE_MAX,
 } from './waves.js';
 import { WAKEMAP_METRES } from './wakemaplayer.js';
 import { COASTMAP_METRES } from './coastmaplayer.js';
@@ -184,7 +184,22 @@ vec2 oCoastGradW(vec2 p) {
   float oCGate = oShoreGate(length(oCoastGradW(vWPos.xz)));
   vec2 oCDir = oCLen > 1e-4 ? oCG / oCLen : vec2(0.0);
   float oH = uSwell * (oSAtt * (${glslWaveSum()}) + oShoreSum(oSd) * oCGate);
-  vec2 oWG = uSwell * (oSAtt * (${glslWaveGrad()})
+  // the gradient by WAVELENGTH BAND (waves.js GRAD_BANDS): long swell shades
+  // to the horizon; mid sea fades out where its wavelength is pixels; short
+  // chop fades sooner AND comes in cat's-paw patches — a 5 m ripple drawn as
+  // a global sinusoid was a stripe field to the horizon (the title scene
+  // only ever looked right because its fog hid everything past 120 m).
+  // HEIGHT above stays the exact felt surface; this is lighting resolution.
+  vec2 oWGl = ${glslWaveGradBand(GRAD_BANDS.long, 1e9)};
+  vec2 oWGm = ${glslWaveGradBand(GRAD_BANDS.mid, GRAD_BANDS.long)};
+  vec2 oWGs = ${glslWaveGradBand(0, GRAD_BANDS.mid)};
+  float oChop = uDetailAmp > 0.001
+    ? 0.35 + 0.65 * oFbm(vWPos.xz * 0.021 + uTime * vec2(0.013, 0.009))
+    : 0.7;
+  float oFadeS = 1.0 - smoothstep(60.0, 240.0, vVDist);
+  float oFadeM = 1.0 - smoothstep(240.0, 700.0, vVDist);
+  vec2 oWGopen = oWGl + oWGm * mix(0.55, 1.0, oChop) * oFadeM + oWGs * oChop * oFadeS;
+  vec2 oWG = uSwell * (oSAtt * oWGopen
     + oShoreGradMag(oSd) * ${SHORE_SHADE.toFixed(2)} * oCGate * oCDir) + oWkG;
   // crest measure: -1 trough -> +1 highest possible crest at this sea state
   float oCrest = clamp(0.5 + 0.5 * oH / max(0.2, uSwell * O_MAXH), 0.0, 1.0);
@@ -265,7 +280,7 @@ vec2 oCoastGradW(vec2 p) {
       float oB0 = oFbm(oQ1) * 0.5 + oFbm(oQ2) * 0.5;
       float oBx = oFbm(oQ1 + vec2(oDe2 * 0.045, 0.0)) * 0.5 + oFbm(oQ2 + vec2(oDe2 * 0.012, 0.0)) * 0.5;
       float oBz = oFbm(oQ1 + vec2(0.0, oDe2 * 0.045)) * 0.5 + oFbm(oQ2 + vec2(0.0, oDe2 * 0.012)) * 0.5;
-      float oBAmp = 0.10 * uDetailAmp * (0.6 + 0.4 * uSwell);
+      float oBAmp = 0.065 * uDetailAmp * (0.6 + 0.4 * uSwell);
       oWG += vec2(oBx - oB0, oBz - oB0) / oDe2 * oBAmp;
     }
   }
@@ -286,7 +301,7 @@ vec2 oCoastGradW(vec2 p) {
   outgoingLight += uSparkle * oGl * oTw * vec3(1.0, 0.95, 0.85) * (1.0 - oFoam);
 #include <opaque_fragment>`);
     };
-    mat.customProgramCacheKey = () => 'saltstead-ocean-farfield';
+    mat.customProgramCacheKey = () => 'saltstead-ocean-gradlod';
     this.step = SIZE / SEG;
     this.glitterScale = 1; // the tier lever: parked at 0 under Plain (invariant 5)
     this.mesh = new THREE.Mesh(geo, mat);

@@ -181,6 +181,24 @@ export function glslWaveGrad() {
   }).join('\n      + ');
 }
 
+// ---- SHADING LOD BANDS (2026-07-24, the stripes-to-the-horizon fix) ----
+// The same gradient split by wavelength band, so the FRAGMENT shader can
+// treat each honestly: long swell shades everywhere; mid sea fades its
+// normals out where a wavelength is pixels; short chop both fades AND comes
+// in wind-patched cat's-paws (a global sinusoid of 5 m ripple is a stripe
+// field — real chop is patchy and local). HEIGHT is untouched: the drawn
+// surface is still exactly the felt one; only the LIGHTING resolves what a
+// camera at that distance could resolve. verify-waves asserts the three
+// bands partition the full gradient exactly.
+export const GRAD_BANDS = { long: 45, mid: 20 }; // len >= long | >= mid | rest
+export function glslWaveGradBand(minLen, maxLen) {
+  const terms = WAVES.filter((w) => w.len >= minLen && w.len < maxLen).map((w) => {
+    const k = TAU / w.len;
+    return `vec2(${(w.amp * k * w.dirX).toFixed(6)}, ${(w.amp * k * w.dirZ).toFixed(6)}) * cos(${k.toFixed(6)} * (${w.dirX.toFixed(4)} * wx + ${w.dirZ.toFixed(4)} * wz) - ${(k * w.speed).toFixed(6)} * uTime)`;
+  });
+  return terms.length ? terms.join('\n      + ') : 'vec2(0.0)';
+}
+
 // ---- the shore field's GLSL, generated from the SAME tables ----
 // Raw expression emitters (over `sd` = signed coast distance and `uTime`) are
 // exported separately so verify-waves can compile each one as JS and hold it

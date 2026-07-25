@@ -4,6 +4,7 @@
 // agree everywhere — the sea the eye sees is the sea the hull feels.
 import {
   WAVES, waveHeight, waveGradient, glslWaveSum, glslWaveGrad, MAX_WAVE_HEIGHT,
+  glslWaveGradBand, GRAD_BANDS,
   SHORE_WAVES, SHORE_RANGE, SHORE_CALM, MAX_SHORE_HEIGHT, SHORE_SHADE,
   shoreOpenAtten, shoreEnv, shoreHeight, shoreGradMag, setShoreSampler,
   glslShoreAttenExpr, glslShoreEnvExpr, glslShoreSumExpr, glslShoreGradExpr, glslShore,
@@ -57,6 +58,20 @@ for (let i = 0; i < 500; i++) {
 }
 ok(worstG < 2e-3, `gradient CPU/GPU parity (worst ${worstG.toExponential(2)})`);
 ok(worstFD < 2e-3, `gradient matches finite-differenced height (worst ${worstFD.toExponential(2)})`);
+
+// the shading LOD bands: three per-band gradient emissions must PARTITION
+// the full gradient — nothing lost, nothing double-lit (structural check on
+// the emitted terms; the fragment shader recombines them with its fades)
+{
+  const parse = (expr) => expr === 'vec2(0.0)' ? [] : expr.split('\n      + ');
+  const l = parse(glslWaveGradBand(GRAD_BANDS.long, 1e9));
+  const m = parse(glslWaveGradBand(GRAD_BANDS.mid, GRAD_BANDS.long));
+  const s = parse(glslWaveGradBand(0, GRAD_BANDS.mid));
+  const all = parse(glslWaveGrad());
+  ok(l.length + m.length + s.length === all.length, 'the LOD bands partition the components');
+  ok([...l, ...m, ...s].every((t) => all.includes(t)), 'each band term is the full emission\'s own');
+  ok(l.length >= 1 && m.length >= 1 && s.length >= 1, 'every band carries real sea');
+}
 
 ok(WAVES.length >= 3, 'at least 3 wave components (a real sea, not a sine)');
 for (let i = 1; i < WAVES.length; i++) {
