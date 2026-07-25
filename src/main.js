@@ -71,8 +71,8 @@ import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
   encounterGait, ENCOUNTER_FAR, isLand, wrapX, dxWrap,
 } from './earth.js';
-import { windProfile, seaStateFor, skyDressing } from './weather.js';
-import { setSeaState, RIVER_STATE, setShoreSampler } from './waves.js';
+import { windProfile, seaBandsFor, skyDressing } from './weather.js';
+import { setSeaBands, RIVER_STATE, setShoreSampler } from './waves.js';
 import { CoastMapLayer } from './coastmaplayer.js';
 import { WAKE_MAX } from './wake.js';
 import { WakeMapLayer } from './wakemaplayer.js';
@@ -324,7 +324,8 @@ class Game {
     this.weatherState = 'clear';
     this.stormField = { weatherState: 'clear', gloom: 0, seaScale: 1, danger: 0 };
     this.gloom = 0;
-    this.swell = 1;
+    this.swell = 1;                          // legacy scalar: max of the two bands
+    this.seaBands = { swell: 0.6, chop: 1 }; // the two-population sea (waves.js)
     this.cam = { yaw: Math.PI * 0.85, pitch: 0.32, dist: 8, targetDist: 8 };
 
     // the marketing lens (showreel.js): photoCam pins the camera, weatherLock
@@ -2163,14 +2164,27 @@ class Game {
       this.wind.speed *= STORM_WIND_MULT;
     }
 
-    // the sea takes the wind's shape, eased so the swell never pops. Over
-    // land the water is a RIVER: sheltered to near-flat whatever the wind,
-    // and it settles quickly — a mouth crossed at gait should calm in a few
-    // boat-lengths, not half the estuary
-    const swellWant = this.overLand ? RIVER_STATE
-      : seaStateFor(this.wind.speed) * (this.stormField ? this.stormField.seaScale : 1);
-    this.swell += (swellWant - this.swell) * Math.min(1, dt * (this.overLand ? 0.35 : 0.05));
-    setSeaState(this.swell);
+    // the sea takes the wind's shape — TWO populations now (waves.js): the
+    // local wind-sea (chop) answers the breeze in minutes; the long rollers
+    // (swell) need a hard wind and open water, and they are the ocean's
+    // MEMORY — slow to build, slow to die, so a dropped gale leaves the deep
+    // sea rolling under a quiet wind while sheltered water lies genuinely
+    // calm. Storms drive the rollers hardest. Over land the water is a
+    // RIVER: near-flat whatever the wind, and it settles quickly.
+    let bandsWant;
+    if (this.overLand) {
+      bandsWant = { swell: RIVER_STATE, chop: RIVER_STATE };
+    } else {
+      const b = seaBandsFor(this.wind.speed, this.coastDist);
+      const sc = this.stormField ? this.stormField.seaScale : 1;
+      bandsWant = { swell: b.swell * sc, chop: b.chop * (1 + (sc - 1) * 0.5) };
+    }
+    this.seaBands.swell += (bandsWant.swell - this.seaBands.swell)
+      * Math.min(1, dt * (this.overLand ? 0.35 : 0.015)); // rollers: a minute either way
+    this.seaBands.chop += (bandsWant.chop - this.seaBands.chop)
+      * Math.min(1, dt * (this.overLand ? 0.35 : 0.08));   // wind-sea: seconds
+    setSeaBands(this.seaBands.swell, this.seaBands.chop);
+    this.swell = Math.max(this.seaBands.swell, this.seaBands.chop);
 
     if (this.mode === 'helm') {
       const rt = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
@@ -3147,7 +3161,7 @@ class Game {
       this.wind.from, this.weatherState, gloomEff, sol.dayness);
     this.coastMap.update(this.ship.x, this.ship.z); // amortized shore-field bake
     this.ocean.update(t, this.ship.x, this.ship.z, this.camera.position, glit,
-      this.sky.domeUniforms.uHor.value, this.swell,
+      this.sky.domeUniforms.uHor.value, this.seaBands,
       this.sky.domeUniforms.uZen.value, this.wakeC);
     // bioluminescence: on a dark warm-water night the wake burns green
     this.foam.setGlow(bioGlow(sol.nightness, Math.abs(skyLL.lat),

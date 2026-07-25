@@ -32,8 +32,9 @@
 
 import * as THREE from 'three';
 import {
-  glslWaveSum, glslWaveGrad, glslWaveGradBand, GRAD_BANDS, glslShore,
-  MAX_WAVE_HEIGHT, MAX_SHORE_HEIGHT, SHORE_SHADE, SEA_STATE_MAX,
+  glslWaveSumBand, glslWaveGradBand, GRAD_BANDS, glslShore,
+  MAX_SWELL_HEIGHT, MAX_CHOP_HEIGHT, MAX_SHORE_HEIGHT, SHORE_SHADE,
+  SEA_STATE_MAX, SEA_SWELL_MAX, SWELL_LEN,
 } from './waves.js';
 import { WAKEMAP_METRES } from './wakemaplayer.js';
 import { COASTMAP_METRES } from './coastmaplayer.js';
@@ -67,7 +68,10 @@ export class Ocean {
     this.uniforms = {
       uTime: { value: 0 },
       uOrigin: { value: new THREE.Vector2(0, 0) },
-      uSwell: { value: 1 }, // sea state — MUST track waves.js getSeaState()
+      // the two-band sea state — MUST track waves.js getSeaBands(): the long
+      // rollers and the local wind-sea are scaled apart, on GPU as on CPU
+      uSwellL: { value: 1 },
+      uSwellS: { value: 1 },
       uSunDirW: { value: new THREE.Vector3(0, 1, 0) }, // world, sun or moon
       uSparkle: { value: 0 },   // glitterSource amp × the quality lever
       uScatter: { value: 0 },   // crest translucency strength
@@ -130,7 +134,8 @@ vec2 oCoastGradW(vec2 p) {
     texture2D(uCoastMap, uv + vec2(t, 0.0)).r - texture2D(uCoastMap, uv - vec2(t, 0.0)).r,
     texture2D(uCoastMap, uv + vec2(0.0, t)).r - texture2D(uCoastMap, uv - vec2(0.0, t)).r) / 200.0;
 }` + glslShore();
-      sh.vertexShader = 'uniform float uTime;\nuniform vec2 uOrigin;\nuniform float uSwell;\n'
+      sh.vertexShader = 'uniform float uTime;\nuniform vec2 uOrigin;\n'
+        + 'uniform float uSwellL;\nuniform float uSwellS;\n'
         + 'uniform sampler2D uWakeMap;\nuniform vec2 uWakeC;\n'
         + 'uniform sampler2D uCoastMap;\nuniform vec2 uCoastC;\n'
         + 'varying vec3 vWPos;\nvarying float vVDist;\n'
@@ -144,18 +149,23 @@ vec2 oCoastGradW(vec2 p) {
             + '  float wWakeH = texture2D(uWakeMap, wWUv).r * oWakeIn(wWUv);\n'
             + '  float wSd = oCoastSd(vec2(wx, wz));\n'
             + '  float wGate = oShoreGate(length(oCoastGradW(vec2(wx, wz))));\n'
-            + `  transformed.y += uSwell * (oShoreAtten(wSd) * (${glslWaveSum()}) + oShoreSum(wSd) * wGate) + wWakeH;\n`
+            // the two populations scaled apart, exactly as waves.js scales
+            // them (the shore set is chop's kin — it rides uSwellS)
+            + `  transformed.y += oShoreAtten(wSd) * (uSwellL * (${glslWaveSumBand(SWELL_LEN, 1e9)}) + uSwellS * (${glslWaveSumBand(0, SWELL_LEN)}))\n`
+            + '    + uSwellS * oShoreSum(wSd) * wGate + wWakeH;\n'
             + '  vWPos = vec3(wx, transformed.y, wz);')
           .replace('#include <project_vertex>',
             '#include <project_vertex>\n'
             + '  vVDist = -mvPosition.z;');
-      sh.fragmentShader = 'uniform float uTime;\nuniform float uSwell;\n'
+      sh.fragmentShader = 'uniform float uTime;\n'
+        + 'uniform float uSwellL;\nuniform float uSwellS;\n'
         + 'uniform vec3 uSunDirW;\nuniform float uSparkle;\nuniform float uScatter;\n'
         + 'uniform float uFresnel;\nuniform vec3 uHor;\nuniform vec3 uZen;\nuniform float uDetailAmp;\n'
         + 'uniform sampler2D uWakeMap;\nuniform vec2 uWakeC;\n'
         + 'uniform sampler2D uCoastMap;\nuniform vec2 uCoastC;\n'
         + 'varying vec3 vWPos;\nvarying float vVDist;\n'
-        + `const float O_MAXH = ${MAX_WAVE_HEIGHT.toFixed(4)};\n`
+        + `const float O_MAXHL = ${MAX_SWELL_HEIGHT.toFixed(4)};\n`
+        + `const float O_MAXHS = ${MAX_CHOP_HEIGHT.toFixed(4)};\n`
         + `const float O_MAXSH = ${MAX_SHORE_HEIGHT.toFixed(4)};\n`
         + O_FBM + wakeSample + '\n' + coastSample + '\n'
         + sh.fragmentShader
@@ -183,13 +193,18 @@ vec2 oCoastGradW(vec2 p) {
   // the middle of a channel is SHELTERED water, not a surf zone
   float oCGate = oShoreGate(length(oCoastGradW(vWPos.xz)));
   vec2 oCDir = oCLen > 1e-4 ? oCG / oCLen : vec2(0.0);
-  float oH = uSwell * (oSAtt * (${glslWaveSum()}) + oShoreSum(oSd) * oCGate);
+  float oH = oSAtt * (uSwellL * (${glslWaveSumBand(SWELL_LEN, 1e9)})
+    + uSwellS * (${glslWaveSumBand(0, SWELL_LEN)}))
+    + uSwellS * oShoreSum(oSd) * oCGate;
   // the gradient by WAVELENGTH BAND (waves.js GRAD_BANDS): long swell shades
   // to the horizon; mid sea fades out where its wavelength is pixels; short
   // chop fades sooner AND comes in cat's-paw patches — a 5 m ripple drawn as
   // a global sinusoid was a stripe field to the horizon (the title scene
   // only ever looked right because its fog hid everything past 120 m).
   // HEIGHT above stays the exact felt surface; this is lighting resolution.
+  // Each band also carries its OWN sea state: the swell rollers ride uSwellL,
+  // the wind-sea rides uSwellS (GRAD_BANDS.long === SWELL_LEN, so the LOD
+  // long band IS the swell population).
   vec2 oWGl = ${glslWaveGradBand(GRAD_BANDS.long, 1e9)};
   vec2 oWGm = ${glslWaveGradBand(GRAD_BANDS.mid, GRAD_BANDS.long)};
   vec2 oWGs = ${glslWaveGradBand(0, GRAD_BANDS.mid)};
@@ -198,13 +213,14 @@ vec2 oCoastGradW(vec2 p) {
     : 0.7;
   float oFadeS = 1.0 - smoothstep(60.0, 240.0, vVDist);
   float oFadeM = 1.0 - smoothstep(240.0, 700.0, vVDist);
-  vec2 oWGopen = oWGl + oWGm * mix(0.55, 1.0, oChop) * oFadeM + oWGs * oChop * oFadeS;
-  vec2 oWG = uSwell * (oSAtt * oWGopen
-    + oShoreGradMag(oSd) * ${SHORE_SHADE.toFixed(2)} * oCGate * oCDir) + oWkG;
+  vec2 oWGopen = uSwellL * oWGl
+    + uSwellS * (oWGm * mix(0.55, 1.0, oChop) * oFadeM + oWGs * oChop * oFadeS);
+  vec2 oWG = oSAtt * oWGopen
+    + uSwellS * oShoreGradMag(oSd) * ${SHORE_SHADE.toFixed(2)} * oCGate * oCDir + oWkG;
   // crest measure: -1 trough -> +1 highest possible crest at this sea state
-  float oCrest = clamp(0.5 + 0.5 * oH / max(0.2, uSwell * O_MAXH), 0.0, 1.0);
+  float oCrest = clamp(0.5 + 0.5 * oH / max(0.2, uSwellL * O_MAXHL + uSwellS * O_MAXHS), 0.0, 1.0);
   // froth. Whitecaps only when the wind has the sea up (weather.js drives
-  // uSwell): fbm patches pick WHICH crests break — never a uniform dusting.
+  // uSwellS): fbm patches pick WHICH crests break — never a uniform dusting.
   // froth on EVERY tier: the wake's churn is a texture read, so even Plain
   // keeps her white road (flat-toned there). Fine adds the whitecaps and
   // the streaky fbm lace.
@@ -213,7 +229,9 @@ vec2 oCoastGradW(vec2 p) {
     float oWc = 0.0;
     float oRag = 0.72;
     if (uDetailAmp > 0.001) {
-      float wcGate = smoothstep(1.05, 1.75, uSwell);
+      // whitecaps are the WIND-SEA breaking — the chop state is the wind
+      // proxy, and far-travelled swell under light air must not foam
+      float wcGate = smoothstep(1.05, 1.75, uSwellS);
       // WHICH crests break: two independent fbm masks at well-separated
       // scales. One mask at one scale still let every crest of a wave row
       // break inside a patch — rows of identical blobs marching in step
@@ -264,7 +282,7 @@ vec2 oCoastGradW(vec2 p) {
       float oD0 = oFbm(oP1) * 0.55 + oFbm(oP2) * 0.45;
       float oDx = oFbm(oP1 + vec2(oDe * 1.35, 0.0)) * 0.55 + oFbm(oP2 + vec2(oDe * 0.42, 0.0)) * 0.45;
       float oDz = oFbm(oP1 + vec2(0.0, oDe * 1.35)) * 0.55 + oFbm(oP2 + vec2(0.0, oDe * 0.42)) * 0.45;
-      float oDAmp = 0.16 * uDetailAmp * oDF * (0.55 + 0.45 * uSwell) * (1.0 + 1.5 * oWkHF.y);
+      float oDAmp = 0.16 * uDetailAmp * oDF * (0.55 + 0.45 * uSwellS) * (1.0 + 1.5 * oWkHF.y);
       oWG += vec2(oDx - oD0, oDz - oD0) / oDe * oDAmp;
     }
     // THE FAR FIELD (2026-07-24): past the fine band's 120 m the normals were
@@ -280,7 +298,7 @@ vec2 oCoastGradW(vec2 p) {
       float oB0 = oFbm(oQ1) * 0.5 + oFbm(oQ2) * 0.5;
       float oBx = oFbm(oQ1 + vec2(oDe2 * 0.045, 0.0)) * 0.5 + oFbm(oQ2 + vec2(oDe2 * 0.012, 0.0)) * 0.5;
       float oBz = oFbm(oQ1 + vec2(0.0, oDe2 * 0.045)) * 0.5 + oFbm(oQ2 + vec2(0.0, oDe2 * 0.012)) * 0.5;
-      float oBAmp = 0.065 * uDetailAmp * (0.6 + 0.4 * uSwell);
+      float oBAmp = 0.065 * uDetailAmp * (0.6 + 0.4 * uSwellS);
       oWG += vec2(oBx - oB0, oBz - oB0) / oDe2 * oBAmp;
     }
   }
@@ -301,7 +319,7 @@ vec2 oCoastGradW(vec2 p) {
   outgoingLight += uSparkle * oGl * oTw * vec3(1.0, 0.95, 0.85) * (1.0 - oFoam);
 #include <opaque_fragment>`);
     };
-    mat.customProgramCacheKey = () => 'saltstead-ocean-gradlod';
+    mat.customProgramCacheKey = () => 'saltstead-ocean-twoband';
     this.step = SIZE / SEG;
     this.glitterScale = 1; // the tier lever: parked at 0 under Plain (invariant 5)
     this.mesh = new THREE.Mesh(geo, mat);
@@ -324,11 +342,13 @@ vec2 oCoastGradW(vec2 p) {
   // wakeC: the wake map's snapped centre (wakemaplayer.update's return)
   update(t, cx, cz, camPos, glit, horizon, swell = 1, zen = null, wakeC = null) {
     this.uniforms.uTime.value = t;
-    // clamped to the SAME cap the CPU applies (waves.js setSeaState): a storm's
-    // seaScale can push main's raw swell far past it, and an unclamped uniform
-    // drew a sea the hull wasn't feeling — overdriven crests, whitecap gate
-    // slammed wide open (the 2026-07-24 storm stripes had this in them)
-    this.uniforms.uSwell.value = Math.min(swell, SEA_STATE_MAX);
+    // swell may be the two-band object ({ swell, chop }) or the one-scalar
+    // legacy number (the title scene) — either way, clamped to the SAME caps
+    // the CPU applies (waves.js setSeaBands): an unclamped uniform once drew
+    // a sea the hull wasn't feeling (the 2026-07-24 storm stripes)
+    const bands = typeof swell === 'number' ? { swell, chop: swell } : swell;
+    this.uniforms.uSwellL.value = Math.min(bands.swell, SEA_SWELL_MAX);
+    this.uniforms.uSwellS.value = Math.min(bands.chop, SEA_STATE_MAX);
     const sx = Math.round(cx / this.step) * this.step;
     const sz = Math.round(cz / this.step) * this.step;
     this.mesh.position.set(sx, 0, sz);

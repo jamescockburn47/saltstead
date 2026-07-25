@@ -37,7 +37,24 @@ export function skyDressing(state) {
 
 // Wind makes the sea: a linear multiplier on the whole wave table
 // (waves.js setSeaState). 7 m/s reads as today's sea; a gale doubles it.
+// Kept for the one-scalar callers (the title's staged battle); the live
+// game drives the two bands below.
 export function seaStateFor(windMs) {
   return clamp(0.55 + 0.062 * windMs, 0.6, 2);
+}
+
+// ---- the two-band sea (waves.js setSeaBands, 2026-07-25) ----
+// CHOP is the local wind-sea: it answers the breeze almost linearly and
+// lives everywhere there is wind. SWELL is deep-water rollers: it takes a
+// HARD wind to raise and OPEN WATER to carry — coastDist is the game's
+// honest depth-and-shelter proxy (no bathymetry in the build): under the
+// land's lee the long sea never arrives, in blue water it rolls. main.js
+// eases the two at different rates — chop in minutes, swell as the ocean's
+// memory — so a died gale leaves rollers under a quiet wind.
+export function seaBandsFor(windMs, coastDist) {
+  const chop = clamp(0.5 + 0.055 * windMs, 0.55, 1.9);
+  const fetch = smooth01((coastDist - 400) / 3600); // shelter -> blue water
+  const swell = clamp(0.18 * (windMs - 5), 0, 2.4) * (0.2 + 0.8 * fetch);
+  return { swell, chop };
 }
 

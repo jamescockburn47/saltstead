@@ -1,7 +1,9 @@
 // verify-weather: the wind builds offshore, WMO codes map to sane marine
 // states, and the sea state tracks the wind inside its clamps. Pure half
 // only — the live fetch is a layer, never a dependency (the Moorstead rule).
-import { windProfile, seaStateFor, skyDressing, WIND_FLOOR } from '../src/weather.js';
+import {
+  windProfile, seaStateFor, seaBandsFor, skyDressing, WIND_FLOOR,
+} from '../src/weather.js';
 import {
   SEA_STATE_MIN, SEA_STATE_MAX, RIVER_STATE, MAX_WAVE_HEIGHT,
   setSeaState, getSeaState, waveHeight,
@@ -40,6 +42,26 @@ ok(mono, 'monotonic build all the way out');
 ok(seaStateFor(7) > 0.9 && seaStateFor(7) < 1.05, `7 m/s is today's sea (${seaStateFor(7).toFixed(2)})`);
 ok(seaStateFor(24) === SEA_STATE_MAX, 'gale pins the ceiling');
 ok(seaStateFor(0) === SEA_STATE_MIN, 'calm pins the floor');
+
+// the two-band sea: chop is the LOCAL wind-sea, swell needs wind AND water
+{
+  const calmIn = seaBandsFor(10, 100);    // light air in the land's lee
+  const calmOut = seaBandsFor(10, 5000);  // light air, blue water
+  const galeIn = seaBandsFor(22, 100);    // hard wind, sheltered
+  const galeOut = seaBandsFor(22, 5000);  // hard wind, blue water — the rollers
+  ok(calmIn.swell < 0.25, `the lee shore carries no rollers in light air (${calmIn.swell.toFixed(2)})`);
+  ok(galeOut.swell > 2, `a gale over blue water rolls DEEP (${galeOut.swell.toFixed(2)})`);
+  ok(galeIn.swell < galeOut.swell * 0.35, 'the land\'s lee kills the long sea even in wind');
+  ok(calmOut.swell < galeOut.swell * 0.45, 'and light air raises only a modest heave offshore');
+  ok(galeOut.chop > calmOut.chop, 'chop follows the wind');
+  ok(Math.abs(seaBandsFor(15, 100).chop - seaBandsFor(15, 9000).chop) < 1e-9,
+    'chop is local — it does not care about fetch');
+  ok(seaBandsFor(99, 99999).swell <= 2.4 && seaBandsFor(99, 99999).chop <= 1.9,
+    'both bands respect their ceilings');
+  // the contrast the deck feels: gale/blue-water total vs light-air/lee total
+  const heavy = galeOut.swell + galeOut.chop, quiet = calmIn.swell + calmIn.chop;
+  ok(heavy > quiet * 2.5, `the sea VARIES: ${heavy.toFixed(2)} rolling vs ${quiet.toFixed(2)} quiet`);
+}
 {
   const y0 = waveHeight(123.4, -56.7, 42);
   setSeaState(2);

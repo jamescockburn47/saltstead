@@ -4,7 +4,9 @@
 // agree everywhere — the sea the eye sees is the sea the hull feels.
 import {
   WAVES, waveHeight, waveGradient, glslWaveSum, glslWaveGrad, MAX_WAVE_HEIGHT,
-  glslWaveGradBand, GRAD_BANDS,
+  glslWaveGradBand, GRAD_BANDS, glslWaveSumBand, SWELL_LEN,
+  setSeaBands, getSeaBands, SEA_SWELL_MAX, SEA_STATE_MAX,
+  MAX_SWELL_HEIGHT, MAX_CHOP_HEIGHT,
   SHORE_WAVES, SHORE_RANGE, SHORE_CALM, MAX_SHORE_HEIGHT, SHORE_SHADE,
   shoreOpenAtten, shoreEnv, shoreHeight, shoreGradMag, setShoreSampler,
   glslShoreAttenExpr, glslShoreEnvExpr, glslShoreSumExpr, glslShoreGradExpr, glslShore,
@@ -158,6 +160,33 @@ setShoreSampler((x, z) => ({ d: -30, gx: 1, gz: 0, gLen: 0.2 }));
 setShoreSampler(null);
 ok(Math.abs(waveHeight(100, 200, 33) - plainBefore) < 1e-12,
   'sampler removed: the open sea is back untouched');
+
+// ---- the TWO-BAND sea (swell rollers vs local wind-sea, 2026-07-25) ----
+// CPU waveHeight under split band states must equal the per-band emitted
+// sums scaled the same way — which is exactly what the shader computes.
+{
+  ok(GRAD_BANDS.long === SWELL_LEN, 'the LOD long band IS the swell population');
+  ok(Math.abs(MAX_SWELL_HEIGHT + MAX_CHOP_HEIGHT - MAX_WAVE_HEIGHT) < 1e-12,
+    'the two populations partition the sea\'s height');
+  const sumL = new Function('wx', 'wz', 'uTime',
+    `const sin = Math.sin; return ${glslWaveSumBand(SWELL_LEN, 1e9)};`);
+  const sumS = new Function('wx', 'wz', 'uTime',
+    `const sin = Math.sin; return ${glslWaveSumBand(0, SWELL_LEN)};`);
+  setSeaBands(1.7, 0.6);
+  let worstB = 0;
+  for (let i = 0; i < 200; i++) {
+    const x = (rnd() - 0.5) * 4000, z = (rnd() - 0.5) * 4000, t = rnd() * 3600;
+    worstB = Math.max(worstB,
+      Math.abs(1.7 * sumL(x, z, t) + 0.6 * sumS(x, z, t) - waveHeight(x, z, t)));
+  }
+  ok(worstB < 2e-3, `two-band CPU/GPU parity (worst ${worstB.toExponential(2)})`);
+  const b = getSeaBands();
+  ok(b.swell === 1.7 && b.chop === 0.6, 'the bands read back');
+  setSeaBands(99, 99);
+  ok(getSeaBands().swell === SEA_SWELL_MAX && getSeaBands().chop === SEA_STATE_MAX,
+    'both band caps hold');
+  setSeaBands(1, 1); // leave the world as we found it
+}
 
 for (let i = 1; i < SHORE_WAVES.length; i++) {
   ok(SHORE_WAVES[i].amp <= SHORE_WAVES[i - 1].amp, `shore amps descend (${i})`);

@@ -28,20 +28,35 @@ const TAU = Math.PI * 2;
 
 export const MAX_WAVE_HEIGHT = WAVES.reduce((s, w) => s + w.amp, 0);
 
-// Sea state: ONE linear multiplier on the whole sum, mirrored to the GPU as
-// the uSwell uniform (ocean.js) — inshore chop is gentle, blue water heaves,
-// a storm heaves harder, and CPU/GPU parity survives because both sides
-// scale the SAME sum by the same factor.
-// SEA_STATE_MIN is the WIND's floor (weather.js seaStateFor) — the open sea
-// never reads glassy. RIVER_STATE sits below it: inland water is sheltered
-// by the land itself, so a river runs near-flat whatever the wind does.
+// ---- TWO SEAS IN ONE WATER (2026-07-25) ----
+// A real sea is two populations: SWELL — the long rollers (len >= SWELL_LEN),
+// born of strong wind over open water, slow to build and slow to die — and
+// CHOP, the local wind-sea that answers the breeze in minutes and lives
+// everywhere. One scalar on the whole sum made a gale just a magnified calm;
+// two band multipliers give blue water its rolling heave under a hard wind
+// and leave sheltered light-air water genuinely quiet. CPU and GPU scale the
+// SAME per-band sums by the same two factors (verify-waves holds the parity).
+// SEA_STATE_MIN is the WIND's floor (weather.js) — the open sea never reads
+// glassy. RIVER_STATE sits below it: inland water is sheltered by the land
+// itself, so a river runs near-flat whatever the wind does.
 export const SEA_STATE_MIN = 0.6, SEA_STATE_MAX = 2.0;
+export const SEA_SWELL_MAX = 2.4;  // storm rollers may top the chop ceiling
 export const RIVER_STATE = 0.05;
-let seaState = 1;
-export function setSeaState(k) {
-  seaState = Math.max(0, Math.min(SEA_STATE_MAX, k));
+export const SWELL_LEN = 45;       // the band boundary (aligned with GRAD_BANDS.long)
+export const MAX_SWELL_HEIGHT = WAVES.filter((w) => w.len >= SWELL_LEN)
+  .reduce((s, w) => s + w.amp, 0);
+export const MAX_CHOP_HEIGHT = MAX_WAVE_HEIGHT - MAX_SWELL_HEIGHT;
+let seaSwell = 1, seaChop = 1;
+export function setSeaBands(swell, chop) {
+  seaSwell = Math.max(0, Math.min(SEA_SWELL_MAX, swell));
+  seaChop = Math.max(0, Math.min(SEA_STATE_MAX, chop));
 }
-export function getSeaState() { return seaState; }
+// legacy door: one number drives both bands (the title scene's heavy sea,
+// and every caller from the one-scalar era)
+export function setSeaState(k) { setSeaBands(Math.min(k, SEA_STATE_MAX), k); }
+export function getSeaState() { return seaChop; }
+export function getSeaBands() { return { swell: seaSwell, chop: seaChop }; }
+const bandOf = (w) => (w.len >= SWELL_LEN ? 0 : 1); // 0 swell, 1 chop
 
 // ---- THE SHORE FIELD (2026-07-24) ----
 // Near land the sea grows shore-aware: the open-water set calms as the coast
@@ -133,12 +148,15 @@ export function waveHeight(x, z, t) {
   let y = 0;
   for (const w of WAVES) {
     const k = TAU / w.len;
-    y += w.amp * Math.sin(k * (w.dirX * x + w.dirZ * z) - k * w.speed * t);
+    const m = bandOf(w) === 0 ? seaSwell : seaChop;
+    y += m * w.amp * Math.sin(k * (w.dirX * x + w.dirZ * z) - k * w.speed * t);
   }
   const s = shoreSampler && shoreSampler(x, z);
-  if (!s) return y * seaState;
+  // the shore set is local wind-sea breaking on a beach — it rides the CHOP
+  // band's state, never the far-travelled swell's
+  if (!s) return y;
   const g = s.gLen === undefined ? 1 : shoreGate(s.gLen);
-  return (y * shoreOpenAtten(s.d) + shoreHeight(s.d, t) * g) * seaState;
+  return y * shoreOpenAtten(s.d) + shoreHeight(s.d, t) * g * seaChop;
 }
 
 // The same sum as a GLSL expression over `wx`, `wz` (world xz) and `uTime`.
@@ -150,6 +168,17 @@ export function glslWaveSum() {
   }).join('\n      + ');
 }
 
+// the sum split at the SWELL_LEN boundary, so the shader can scale each
+// population by its own state uniform (uSwellL / uSwellS) exactly as the
+// CPU evaluator above scales its bands
+export function glslWaveSumBand(minLen, maxLen) {
+  const terms = WAVES.filter((w) => w.len >= minLen && w.len < maxLen).map((w) => {
+    const k = TAU / w.len;
+    return `${w.amp.toFixed(4)} * sin(${k.toFixed(6)} * (${w.dirX.toFixed(4)} * wx + ${w.dirZ.toFixed(4)} * wz) - ${(k * w.speed).toFixed(6)} * uTime)`;
+  });
+  return terms.length ? terms.join('\n      + ') : '0.0';
+}
+
 // The analytic surface gradient (dy/dx, dy/dz) — the sum of sines has a
 // closed-form derivative, so the smooth-shaded ocean's per-pixel normals are
 // EXACT, not finite-differenced. Scaled by the same sea state as the height:
@@ -158,17 +187,19 @@ export function waveGradient(x, z, t) {
   let gx = 0, gz = 0;
   for (const w of WAVES) {
     const k = TAU / w.len;
-    const c = w.amp * k * Math.cos(k * (w.dirX * x + w.dirZ * z) - k * w.speed * t);
+    const m = bandOf(w) === 0 ? seaSwell : seaChop;
+    const c = m * w.amp * k * Math.cos(k * (w.dirX * x + w.dirZ * z) - k * w.speed * t);
     gx += c * w.dirX;
     gz += c * w.dirZ;
   }
   const s = shoreSampler && shoreSampler(x, z);
-  if (!s) return [gx * seaState, gz * seaState];
+  if (!s) return [gx, gz];
   const a = shoreOpenAtten(s.d);
   const g = s.gLen === undefined ? 1 : shoreGate(s.gLen);
-  // rides the landward unit gradient of d, softened for the normals
-  const gm = shoreGradMag(s.d, t) * g * SHORE_SHADE;
-  return [(gx * a + gm * s.gx) * seaState, (gz * a + gm * s.gz) * seaState];
+  // rides the landward unit gradient of d, softened for the normals; the
+  // shore set follows the chop band, like the height it belongs to
+  const gm = shoreGradMag(s.d, t) * g * SHORE_SHADE * seaChop;
+  return [gx * a + gm * s.gx, gz * a + gm * s.gz];
 }
 
 // The gradient as a GLSL vec2 expression over `wx`, `wz`, `uTime` — generated
