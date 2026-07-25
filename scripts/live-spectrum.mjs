@@ -17,8 +17,9 @@ const OUT = resolve('media');
 mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// James's live repro: open Channel water south of the Wight, 10 m/s, clear.
-const SPOT = { lat: 50.5, lon: -1.05 };
+// Mid-Atlantic: no coast, no shore set — the bands are reported "everywhere
+// on the globe, including mid oceans" (2026-07-25), so hunt them clean.
+const SPOT = { lat: 44, lon: -35 };
 const CAM_H = 150;     // nadir camera height (m)
 const FRAMES = 5;      // power spectra averaged per config
 const NLAM = 36, NANG = 36; // histogram bins: log-λ 1.2–80 m × band-angle 5°
@@ -78,6 +79,21 @@ try {
       const c = window.__cfg;
       if (c.chop != null) g.seaBands.chop = c.chop;
       if (c.swell != null) g.seaBands.swell = c.swell;
+      // detail-stack ablation: glitterScale drives uDetailAmp -> ALL fbm
+      // (detail normals, far-field band, whitecaps, churn texture) off
+      g.ocean.glitterScale = c.detailOff ? 0 : 1;
+      // shadow ablation: the ocean receives the 2048² shadow map on fine —
+      // acne bands would run east-west under a southern sun
+      if (!!c.shadowOff === g.ocean.mesh.receiveShadow) {
+        g.ocean.mesh.receiveShadow = !c.shadowOff;
+        g.ocean.mesh.material.needsUpdate = true;
+      }
+      // shadow-bias probe: hunt the banding's kill-threshold with the
+      // ship's shadow-on-sea feature kept alive
+      g.sky.sun.shadow.normalBias = c.nBias != null ? c.nBias : 0.5;
+      // sprite ablation: the foam layer's wake quads + flecks
+      if (g.foam) for (const kk of ['wakeMesh', 'fleckMesh'])
+        if (g.foam[kk]) g.foam[kk].visible = !c.spritesOff;
       // specular-path ablation: Phong glint + sparkle + crest scatter off
       const m = g.ocean.mesh.material;
       if (c.specOff) {
@@ -131,6 +147,10 @@ try {
       const N = 512;
       const hist = new Float64Array(NLAM * NANG);
       let meanLum = 0;
+      // the EW-stripe channel: collapse x, FFT the north-south profile —
+      // east-west bands land ENTIRELY in this 1D spectrum, whatever else
+      // is in frame
+      const ewSpec = new Float64Array(N / 2);
       const fft1d = (re, im) => {
         const n = re.length;
         for (let i = 1, j = 0; i < n; i++) {
@@ -169,6 +189,18 @@ try {
           lum[y * N + x] = v; mean += v;
         }
         mean /= N * N; meanLum += mean / FRAMES;
+        {
+          const prof = new Float64Array(N), pim = new Float64Array(N);
+          for (let y = 0; y < N; y++) {
+            let s = 0;
+            for (let x = 0; x < N; x++) s += lum[y * N + x];
+            prof[y] = s / N;
+          }
+          const pm = prof.reduce((a, b) => a + b, 0) / N;
+          for (let y = 0; y < N; y++) prof[y] = (prof[y] - pm) * hann[y];
+          fft1d(prof, pim);
+          for (let k = 1; k < N / 2; k++) ewSpec[k] += (prof[k] ** 2 + pim[k] ** 2) / FRAMES;
+        }
         for (let y = 0; y < N; y++) for (let x = 0; x < N; x++)
           lum[y * N + x] = (lum[y * N + x] - mean) * hann[y] * hann[x];
         const re = Float64Array.from(lum), im = new Float64Array(N * N);
@@ -204,10 +236,23 @@ try {
           }
         }
       }
+      // EW verdict: strongest north-south frequency, λ 0.5–10 m
+      const dpr2 = (window.saltstead.renderer.getContext().drawingBufferHeight) / 900;
+      const mpp2 = (2 * camH * Math.tan((62 / 2) * Math.PI / 180)) / (900 * dpr2);
+      let ewPeak = { lam: 0, p: 0 }, ewTotal = 0;
+      for (let k = 1; k < N / 2; k++) {
+        const lam = (N * mpp2) / k;
+        if (lam < 0.5 || lam > 10) continue;
+        ewTotal += ewSpec[k];
+        if (ewSpec[k] > ewPeak.p) ewPeak = { lam, p: ewSpec[k] };
+      }
       done({ hist: Array.from(hist), meanLum: +meanLum.toFixed(1),
+        ew: { lambda: +ewPeak.lam.toFixed(2), power: +ewPeak.p.toExponential(2),
+          share: +(ewTotal ? ewPeak.p / ewTotal : 0).toFixed(3) },
         tier: window.saltstead.gfxQuality, bands: { ...window.saltstead.seaBands } });
     }), [CAM_H, FRAMES, NLAM, NANG]);
     console.log(`measured ${label} (tier ${res.tier}, swell ${res.bands.swell.toFixed(2)}, chop ${res.bands.chop.toFixed(2)}, meanLum ${res.meanLum})`);
+    console.log(`    EW-stripe: λ ${res.ew.lambda} m  power ${res.ew.power}  share-of-EW-band ${res.ew.share}`);
     await page.screenshot({ path: `${OUT}/spectrum-${label.replace(/\W+/g, '-')}.png` });
     return res;
   };
@@ -220,12 +265,15 @@ try {
   // Values are FORCED per config — releasing to the easing loop leaves the
   // sea flat for tens of seconds and measures nothing (the first run's bug).
   const CHOP = 1.05, SWELL = 0.55;
-  const ref = await measure('flat-reference', { wakeOff: true, chop: 0, swell: 0 });
+  const ref = await measure('flat-reference', { wakeOff: true, detailOff: true, chop: 0, swell: 0 });
   const configs = [
-    ['baseline', { wakeOff: false, chop: CHOP, swell: SWELL }],
+    ['baseline', { chop: CHOP, swell: SWELL }],
+    ['shadow-off', { shadowOff: true, chop: CHOP, swell: SWELL }],
     ['wake-off', { wakeOff: true, chop: CHOP, swell: SWELL }],
-    ['chop-zero', { wakeOff: false, chop: 0, swell: SWELL }],
-    ['swell-zero', { wakeOff: false, chop: CHOP, swell: 0 }],
+    ['sprites-off', { spritesOff: true, chop: CHOP, swell: SWELL }],
+    ['detail-off', { detailOff: true, chop: CHOP, swell: SWELL }],
+    ['waves-off', { chop: 0, swell: 0 }],
+    ['all-off', { shadowOff: true, wakeOff: true, spritesOff: true, detailOff: true, chop: 0, swell: 0 }],
   ];
   for (const [label, cfg] of configs) {
     const res = await measure(label, cfg);
@@ -233,7 +281,7 @@ try {
     const cells = excess.map((p, i) => ({ p, li: Math.floor(i / NANG), ai: i % NANG }))
       .filter((c) => c.p > 0).sort((a, b) => b.p - a.p);
     const total = cells.reduce((s, c) => s + c.p, 0) || 1;
-    console.log(`  top excess cells over flat sea:`);
+    console.log(`  total excess power ${total.toExponential(2)}; top cells:`);
     for (const c of cells.slice(0, 8))
       console.log(`    λ ~${lamOf(c.li).toFixed(1).padStart(5)} m   band-line ${angOf(c.ai).toFixed(0).padStart(3)}°E   share ${(c.p / total).toFixed(3)}`);
     // James's metric: narrow (λ < 12 m) energy within ±20° of east-west
