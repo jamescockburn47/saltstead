@@ -34,7 +34,7 @@ import * as THREE from 'three';
 import {
   glslWaveSumBand, glslWaveGradBand, GRAD_BANDS, glslShore,
   MAX_SWELL_HEIGHT, MAX_CHOP_HEIGHT, MAX_SHORE_HEIGHT, SHORE_SHADE,
-  SEA_STATE_MAX, SEA_SWELL_MAX, SWELL_LEN,
+  SEA_STATE_MAX, SEA_SWELL_MAX, SWELL_LEN, getChopRot,
 } from './waves.js';
 import { WAKEMAP_METRES } from './wakemaplayer.js';
 import { COASTMAP_METRES } from './coastmaplayer.js';
@@ -72,6 +72,10 @@ export class Ocean {
       // rollers and the local wind-sea are scaled apart, on GPU as on CPU
       uSwellL: { value: 1 },
       uSwellS: { value: 1 },
+      // the wind's turn on the chop fan (cos, sin) — MUST track waves.js
+      // getChopRot(), or the drawn wind-sea runs a different way from the
+      // felt one. update() reads it from the module every frame.
+      uChopCS: { value: new THREE.Vector2(1, 0) },
       uSunDirW: { value: new THREE.Vector3(0, 1, 0) }, // world, sun or moon
       uSparkle: { value: 0 },   // glitterSource amp × the quality lever
       uScatter: { value: 0 },   // crest translucency strength
@@ -135,7 +139,7 @@ vec2 oCoastGradW(vec2 p) {
     texture2D(uCoastMap, uv + vec2(0.0, t)).r - texture2D(uCoastMap, uv - vec2(0.0, t)).r) / 200.0;
 }` + glslShore();
       sh.vertexShader = 'uniform float uTime;\nuniform vec2 uOrigin;\n'
-        + 'uniform float uSwellL;\nuniform float uSwellS;\n'
+        + 'uniform float uSwellL;\nuniform float uSwellS;\nuniform vec2 uChopCS;\n'
         + 'uniform sampler2D uWakeMap;\nuniform vec2 uWakeC;\n'
         + 'uniform sampler2D uCoastMap;\nuniform vec2 uCoastC;\n'
         + 'varying vec3 vWPos;\nvarying float vVDist;\n'
@@ -158,7 +162,7 @@ vec2 oCoastGradW(vec2 p) {
             '#include <project_vertex>\n'
             + '  vVDist = -mvPosition.z;');
       sh.fragmentShader = 'uniform float uTime;\n'
-        + 'uniform float uSwellL;\nuniform float uSwellS;\n'
+        + 'uniform float uSwellL;\nuniform float uSwellS;\nuniform vec2 uChopCS;\n'
         + 'uniform vec3 uSunDirW;\nuniform float uSparkle;\nuniform float uScatter;\n'
         + 'uniform float uFresnel;\nuniform vec3 uHor;\nuniform vec3 uZen;\nuniform float uDetailAmp;\n'
         + 'uniform sampler2D uWakeMap;\nuniform vec2 uWakeC;\n'
@@ -349,6 +353,9 @@ vec2 oCoastGradW(vec2 p) {
     const bands = typeof swell === 'number' ? { swell, chop: swell } : swell;
     this.uniforms.uSwellL.value = Math.min(bands.swell, SEA_SWELL_MAX);
     this.uniforms.uSwellS.value = Math.min(bands.chop, SEA_STATE_MAX);
+    // the wind's turn, read from the same module the hull reads
+    const rot = getChopRot();
+    this.uniforms.uChopCS.value.set(Math.cos(rot), Math.sin(rot));
     const sx = Math.round(cx / this.step) * this.step;
     const sz = Math.round(cz / this.step) * this.step;
     this.mesh.position.set(sx, 0, sz);

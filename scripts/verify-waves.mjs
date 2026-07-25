@@ -10,6 +10,7 @@ import {
   SHORE_WAVES, SHORE_RANGE, SHORE_CALM, MAX_SHORE_HEIGHT, SHORE_SHADE,
   shoreOpenAtten, shoreEnv, shoreHeight, shoreGradMag, setShoreSampler,
   glslShoreAttenExpr, glslShoreEnvExpr, glslShoreSumExpr, glslShoreGradExpr, glslShore,
+  chopCS, setChopRot, getChopRot, chopRotFor, CHOP_WARP,
 } from '../src/waves.js';
 
 let failed = 0;
@@ -19,14 +20,24 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
 let seed = 12345;
 const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
 
+// the wind's turn on the chop fan is a UNIFORM now (uChopCS): the emitted
+// GLSL reads it exactly as the shader does, so the parity check must supply
+// it — and must hold at a NON-ZERO rotation, or it only ever proves the
+// windless case (2026-07-25)
+setChopRot(chopRotFor(2.1));
+const CS = chopCS();
+ok(Math.abs(getChopRot() - chopRotFor(2.1)) < 1e-12, 'chop rotation reads back');
+
 const expr = glslWaveSum();
 ok(!expr.includes('NaN') && expr.includes('uTime'), 'GLSL expression well-formed');
-const gpu = new Function('wx', 'wz', 'uTime', `const sin = Math.sin; return ${expr};`);
+ok(expr.includes('uChopCS'), 'chop terms ride the wind uniform');
+const gpu = new Function('wx', 'wz', 'uTime', 'uChopCS',
+  `const sin = Math.sin; return ${expr};`);
 
 let worst = 0;
 for (let i = 0; i < 500; i++) {
   const x = (rnd() - 0.5) * 4000, z = (rnd() - 0.5) * 4000, t = rnd() * 3600;
-  const d = Math.abs(gpu(x, z, t) - waveHeight(x, z, t));
+  const d = Math.abs(gpu(x, z, t, CS) - waveHeight(x, z, t));
   if (d > worst) worst = d;
   ok(Math.abs(waveHeight(x, z, t)) <= MAX_WAVE_HEIGHT + 1e-9, `height within MAX at sample ${i}`);
 }
@@ -37,21 +48,22 @@ ok(worst < 2e-3, `CPU/GPU parity (worst drift ${worst.toExponential(2)})`);
 // the normal always belongs to the surface being drawn.
 const gexpr = glslWaveGrad();
 ok(gexpr.includes('uTime') && gexpr.includes('vec2'), 'GLSL gradient well-formed');
-// vec2 * cos(scalar) isn't plain JS — evaluate the emitted terms structurally
-const gradTerms = gexpr.split('\n      + ').map((s) => {
-  const m = s.match(/^vec2\((-?[\d.]+), (-?[\d.]+)\) \* cos\(([\d.]+) \* \((-?[\d.]+) \* wx \+ (-?[\d.]+) \* wz\) - ([\d.]+) \* uTime\)$/);
-  return m && m.slice(1).map(Number);
-});
-ok(gradTerms.every(Boolean), 'GLSL gradient terms parse');
-const gpuGradEval = (wx, wz, t) => gradTerms.reduce(([gx, gz], [ax, az, k, dx, dz, w]) => {
-  const c = Math.cos(k * (dx * wx + dz * wz) - w * t);
-  return [gx + ax * c, gz + az * c];
-}, [0, 0]);
+// The emitted gradient is now ONE vec2 constructor per term with scalar
+// components (the warp's chain rule lives inside them), so a vec2 shim that
+// sums componentwise compiles the whole emission as JS — no regex on the
+// maths, which is the honest check: the shader gets this exact string.
+ok(gexpr.includes('uChopCS') && gexpr.includes('sin('),
+  'gradient carries the wind turn and the phase warp');
+const gpuGradEval = new Function('wx', 'wz', 'uTime', 'uChopCS', `
+  const sin = Math.sin, cos = Math.cos;
+  const vec2 = (a, b) => [a, b];
+  const terms = [${gexpr.split('\n      + ').join(',\n')}];
+  return terms.reduce((s, v) => [s[0] + v[0], s[1] + v[1]], [0, 0]);`);
 let worstG = 0, worstFD = 0;
 for (let i = 0; i < 500; i++) {
   const x = (rnd() - 0.5) * 4000, z = (rnd() - 0.5) * 4000, t = rnd() * 3600;
   const [gx, gz] = waveGradient(x, z, t);
-  const [ex, ez] = gpuGradEval(x, z, t);
+  const [ex, ez] = gpuGradEval(x, z, t, CS);
   worstG = Math.max(worstG, Math.abs(gx - ex), Math.abs(gz - ez));
   const e = 0.01;
   const fx = (waveHeight(x + e, z, t) - waveHeight(x - e, z, t)) / (2 * e);
@@ -168,16 +180,16 @@ ok(Math.abs(waveHeight(100, 200, 33) - plainBefore) < 1e-12,
   ok(GRAD_BANDS.long === SWELL_LEN, 'the LOD long band IS the swell population');
   ok(Math.abs(MAX_SWELL_HEIGHT + MAX_CHOP_HEIGHT - MAX_WAVE_HEIGHT) < 1e-12,
     'the two populations partition the sea\'s height');
-  const sumL = new Function('wx', 'wz', 'uTime',
+  const sumL = new Function('wx', 'wz', 'uTime', 'uChopCS',
     `const sin = Math.sin; return ${glslWaveSumBand(SWELL_LEN, 1e9)};`);
-  const sumS = new Function('wx', 'wz', 'uTime',
+  const sumS = new Function('wx', 'wz', 'uTime', 'uChopCS',
     `const sin = Math.sin; return ${glslWaveSumBand(0, SWELL_LEN)};`);
   setSeaBands(1.7, 0.6);
   let worstB = 0;
   for (let i = 0; i < 200; i++) {
     const x = (rnd() - 0.5) * 4000, z = (rnd() - 0.5) * 4000, t = rnd() * 3600;
     worstB = Math.max(worstB,
-      Math.abs(1.7 * sumL(x, z, t) + 0.6 * sumS(x, z, t) - waveHeight(x, z, t)));
+      Math.abs(1.7 * sumL(x, z, t, CS) + 0.6 * sumS(x, z, t, CS) - waveHeight(x, z, t)));
   }
   ok(worstB < 2e-3, `two-band CPU/GPU parity (worst ${worstB.toExponential(2)})`);
   const b = getSeaBands();
@@ -195,6 +207,78 @@ for (let i = 1; i < SHORE_WAVES.length; i++) {
 ok(Math.abs(MAX_SHORE_HEIGHT - SHORE_WAVES.reduce((s, w) => s + w.amp, 0)) < 1e-12,
   'MAX_SHORE is the shore amp sum');
 ok(SHORE_RANGE > 100 && SHORE_CALM > 0 && SHORE_CALM < 1, 'shore constants sane');
+
+// ---- THE ANTI-GRATING CONTRACT (2026-07-25) ----
+// The narrow east-west stripes that stood in every ocean were a beat between
+// two chop trains, world-locked because the table's headings were constants.
+// Three assertions keep that door shut. They test the MODEL headlessly; the
+// pixels are gated separately by live-spectrum.mjs's EW-stripe metric.
+{
+  // 1. the wind-sea actually turns, and turns the right way: the chop's own
+  //    crest lines must lie across the wind (a downwind-running sea)
+  const windFrom = 0.8;                      // wind blows FROM this yaw
+  setChopRot(chopRotFor(windFrom));
+  const cs = chopCS();
+  const toward = { x: -Math.sin(windFrom), z: -Math.cos(windFrom) };
+  let dot = 0, n = 0;
+  for (const w of WAVES) {
+    if (w.len >= SWELL_LEN) continue;
+    const dx = w.dirX * cs.x - w.dirZ * cs.y, dz = w.dirX * cs.y + w.dirZ * cs.x;
+    dot += dx * toward.x + dz * toward.z; n++;
+  }
+  ok(dot / n > 0.55, `the chop fan runs downwind (mean alignment ${(dot / n).toFixed(2)})`);
+  // and the swell does NOT turn — after a shift the sea lies crossed
+  const sw = WAVES.find((w) => w.len >= SWELL_LEN);
+  const sumSw = glslWaveSumBand(SWELL_LEN, 1e9);
+  ok(!sumSw.includes('uChopCS') && sw, 'the swell keeps its own heading (a crossed sea)');
+
+  // 2. no two trains beat into a fixed narrow stripe family. The old defect:
+  //    the 11 m and 17 m trains' difference wave-vector had period ~7.4 m and
+  //    pointed near-north — a permanent grid. Any pair whose difference falls
+  //    in the eye's danger band (2-12 m) must now be BROKEN by the warp: the
+  //    warp shifts each train's phase independently, so the beat's own phase
+  //    wanders by at least a radian across a stripe's own wavelength.
+  const TAU2 = Math.PI * 2;
+  const warpOfI = (i) => ({ a: i * 2.39996, k: TAU2 / (96 + 23 * i) });
+  let checked = 0;
+  for (let i = 0; i < WAVES.length; i++) {
+    for (let j = i + 1; j < WAVES.length; j++) {
+      const a = WAVES[i], b = WAVES[j];
+      const ka = TAU2 / a.len, kb = TAU2 / b.len;
+      const dx = ka * a.dirX - kb * b.dirX, dz = ka * a.dirZ - kb * b.dirZ;
+      const beatLen = TAU2 / Math.hypot(dx, dz);
+      if (beatLen < 2 || beatLen > 12) continue;   // outside the danger band
+      checked++;
+      // the beat's phase = φi - φj carries BOTH warps; over one beat
+      // wavelength their difference must swing at least ~1 rad, or the
+      // stripes would still stack coherently
+      // each train's warp is CHOP_WARP × its own wavenumber in phase-gradient
+      // terms, so the beat's phase swings by CHOP_WARP(ka + kb) per metre
+      const swing = CHOP_WARP * (ka + kb) * beatLen;
+      ok(swing > 1, `beat pair ${i}/${j} (λ ${beatLen.toFixed(1)} m) is decohered `
+        + `(phase swing ${swing.toFixed(2)} rad)`);
+    }
+  }
+  ok(checked > 0, 'the beat check actually found pairs to check (it is not vacuous)');
+
+  // 3. the warp is real and bends crest lines: along a train's own crest the
+  //    height must NOT stay constant (a straight infinite crest line is the
+  //    grating). Walk the 11 m train's crest and demand it wander.
+  setSeaBands(1, 1);
+  const w11 = WAVES.find((w) => Math.abs(w.len - 11) < 0.01);
+  let vary = 0;
+  if (w11) {
+    const cx = -w11.dirZ, cz = w11.dirX;      // along-crest unit vector
+    let lo = Infinity, hi = -Infinity;
+    for (let s = 0; s < 400; s += 4) {
+      const h = waveHeight(cx * s, cz * s, 0);
+      lo = Math.min(lo, h); hi = Math.max(hi, h);
+    }
+    vary = hi - lo;
+  }
+  ok(vary > 0.2, `crest lines wander along their own heading (spread ${vary.toFixed(2)} m)`);
+  setChopRot(0); // leave the world as we found it
+}
 
 if (failed) { console.error(`verify-waves: ${failed} FAILED`); process.exit(1); }
 console.log('verify-waves: OK — CPU/GPU wave parity holds (open + shore field),',
