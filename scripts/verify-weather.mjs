@@ -52,7 +52,8 @@ ok(seaStateFor(0) === SEA_STATE_MIN, 'calm pins the floor');
   ok(calmIn.swell < 0.25, `the lee shore carries no rollers in light air (${calmIn.swell.toFixed(2)})`);
   ok(galeOut.swell > 2, `a gale over blue water rolls DEEP (${galeOut.swell.toFixed(2)})`);
   ok(galeIn.swell < galeOut.swell * 0.35, 'the land\'s lee kills the long sea even in wind');
-  ok(calmOut.swell < galeOut.swell * 0.45, 'and light air raises only a modest heave offshore');
+  ok(calmOut.swell > 1 && calmOut.swell < galeOut.swell,
+    `the deep sea always rolls; the gale rolls deeper (${calmOut.swell.toFixed(2)})`);
   ok(galeOut.chop > calmOut.chop, 'chop follows the wind');
   ok(Math.abs(seaBandsFor(15, 100).chop - seaBandsFor(15, 9000).chop) < 1e-9,
     'chop is local — it does not care about fetch');

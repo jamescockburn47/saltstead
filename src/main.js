@@ -327,6 +327,7 @@ class Game {
     this.swell = 1;                          // legacy scalar: max of the two bands
     this.seaBands = { swell: 0.6, chop: 1 }; // the two-population sea (waves.js)
     this.cam = { yaw: Math.PI * 0.85, pitch: 0.32, dist: 8, targetDist: 8 };
+    this.fpv = false; // Z — the captain's eye (Marsstead's rover view, afloat)
 
     // the marketing lens (showreel.js): photoCam pins the camera, weatherLock
     // stops live weather overwriting a beat's forced sky
@@ -366,6 +367,7 @@ class Game {
       if (e.code === 'KeyP' && !e.repeat) this.toggleLines();
       if (e.code === 'KeyU' && !e.repeat) this.heaveChipLog();
       if (e.code === 'KeyI' && !e.repeat) this.toggleMusic();
+      if (e.code === 'KeyZ' && !e.repeat) this.toggleEye();
       if (e.code === 'Digit1' && !e.repeat) this.callDispute(1);
       if (e.code === 'Digit2' && !e.repeat) this.callDispute(2);
     });
@@ -1280,6 +1282,16 @@ class Game {
     this.gfxWatch.frames.length = 0; this.gfxWatch.span = 0;
     try { localStorage['saltstead-gfx2'] = next; } catch { /* private mode */ }
     this.say(`Graphics: ${next.toUpperCase()} — your choice, remembered (V to change back)`, 5);
+  }
+
+  // Z — the captain's eye: first person from the deck, back again on Z.
+  // Below decks the hold camera already owns the frame; Z waits on deck.
+  toggleEye() {
+    if (this.mode === 'below') { this.say('Come up on deck first — the eye is for the horizon', 4); return; }
+    this.fpv = !this.fpv;
+    this.say(this.fpv
+      ? 'THE CAPTAIN’S EYE — drag to look; Z steps back to the quarterdeck'
+      : 'The quarterdeck view again', 4);
   }
 
   // I — the ship's band, struck up or stood down; the choice is remembered
@@ -3084,7 +3096,10 @@ class Game {
     }
     this.captain.animate(dt, this.cap.moving);
 
-    // third-person orbit camera, on-foot close / captain's view at the helm
+    // third-person orbit camera, on-foot close / captain's view at the helm —
+    // or, on Z, THE CAPTAIN'S EYE (first person). The captain's body shows
+    // only in third person: in first person YOU are the captain.
+    this.captain.group.visible = !(this.fpv && this.mode !== 'below');
     this.cam.dist += (this.cam.targetDist - this.cam.dist) * Math.min(1, dt * 4);
     const target = new THREE.Vector3();
     if (this.mode === 'helm') {
@@ -3093,10 +3108,25 @@ class Game {
       this.captain.group.getWorldPosition(target); target.y += 1.0;
     }
     const cp = this.cam.pitch, cd = this.cam.dist;
+    if (this.fpv && this.mode !== 'below') {
+      // rigid to the deck — no lerp, no swell clamp: the horizon moves
+      // because the SHIP moves (the Marsstead rover law: a laggy first-
+      // person camera is a seasick one). The eye rides the captain's head
+      // through the hull's live pitch and roll; drag still looks around.
+      this.shipGroup.updateMatrixWorld();
+      const eye = this.captain.group.localToWorld(new THREE.Vector3(0, 1.52, 0));
+      this.camera.position.copy(eye);
+      this.camera.lookAt(
+        eye.x - Math.sin(this.cam.yaw) * Math.cos(cp),
+        eye.y - Math.sin(cp),
+        eye.z - Math.cos(this.cam.yaw) * Math.cos(cp));
+      this.camera.up.set(0, 1, 0);
+    } else {
     this.camera.position.set(
       target.x + Math.sin(this.cam.yaw) * Math.cos(cp) * cd,
       target.y + Math.sin(cp) * cd,
       target.z + Math.cos(this.cam.yaw) * Math.cos(cp) * cd);
+    }
     // never let the lens dip under the swell — unless we're BELOW DECKS,
     // where the lens instead stays inside the hold's walls (ship-local
     // clamp through the live hull transform, so pitch and roll carry it)
@@ -3109,10 +3139,10 @@ class Game {
       lp.z = Math.max(H.minZ + 0.3, Math.min(H.maxZ - 0.3, lp.z));
       lp.y = Math.max(H.y + 0.5, Math.min(this.shipFrame.deck.y - 0.35, lp.y));
       this.camera.position.copy(this.shipGroup.localToWorld(lp));
-    } else if (this.camera.position.y < wy + 0.6) {
+    } else if (!(this.fpv && this.mode !== 'below') && this.camera.position.y < wy + 0.6) {
       this.camera.position.y = wy + 0.6;
     }
-    this.camera.lookAt(target);
+    if (!(this.fpv && this.mode !== 'below')) this.camera.lookAt(target);
 
     // the meeting lens (cinecam.js): when another sail closes on open water
     // the camera steps back for the wide establishing shot — both hulls,
@@ -3230,8 +3260,11 @@ class Game {
     this.hud.pos.textContent = (this.oars && !this.anchorDown)
       ? 'Under sweeps' : POS_NAMES.find(([a]) => Math.abs(rel) <= a)[1];
     this.hud.trim.style.width = (this.ship.trim * 100).toFixed(0) + '%';
-    const camYaw = Math.atan2(
-      this.camera.position.x - target.x, this.camera.position.z - target.z);
+    // in first person the camera IS the target — the compass reads the
+    // orbit yaw directly (same value the orbit derives geometrically)
+    const camYaw = this.fpv && this.mode !== 'below' ? this.cam.yaw
+      : Math.atan2(
+        this.camera.position.x - target.x, this.camera.position.z - target.z);
     const windTo = this.wind.from + Math.PI;
     this.hud.windArrow.style.transform =
       `rotate(${(-(windTo - camYaw) * 180 / Math.PI).toFixed(1)}deg)`;

@@ -25,6 +25,32 @@ const DT = 1 / 30;
   ok(Math.hypot(s.x, s.z) > 100, 'the ship actually went somewhere');
 }
 
+// SET AND DRIFT: the along-track current passes whole (the passage plan's
+// fair current), but the beam set is capped as LEEWAY — a keel crabs a few
+// degrees, it never surfs broadside (the sideways Gulf-Stream sloop, 2026-07-25)
+{
+  const mk = () => { const s = newShipState(0, 0); s.speed = 1; s.trim = 0; return s; };
+  const noWind = { from: Math.PI, speed: 0 }; // yaw 0 = due north, wind astern-less
+  // beam set: a hard easterly stream against a slow northbound hull
+  const beam = mk();
+  stepShip(beam, noWind, DT, SLOOP, 1, true, 0, { vx: 2.2, vz: 0 });
+  const latPerS = beam.x / DT;
+  ok(latPerS <= 0.35 * (beam.speed + 0.4) + 1e-6,
+    `beam set is bounded leeway (${latPerS.toFixed(2)} m/s sideways)`);
+  ok(latPerS > 0.1, 'but the stream still tells — leeway is real');
+  // the same stream dead ahead-and-astern passes WHOLE
+  const fair = mk();
+  stepShip(fair, noWind, DT, SLOOP, 1, true, 0, { vx: 0, vz: 2.2 });
+  const foul = mk();
+  stepShip(foul, noWind, DT, SLOOP, 1, true, 0, { vx: 0, vz: -2.2 });
+  ok(Math.abs(fair.z / DT - (fair.speed + 2.2)) < 0.05, 'a fair current carries her whole');
+  ok(foul.z / DT < fair.z / DT - 4, 'a foul one sets her back as hard');
+  // and a dead-slow hull barely crabs at all
+  const slow = newShipState(0, 0); slow.speed = 0.1; slow.trim = 0;
+  stepShip(slow, noWind, DT, SLOOP, 1, true, 0, { vx: 2.2, vz: 0 });
+  ok(slow.x / DT < 0.35 * 0.6, `near-stopped, she holds her water (${(slow.x / DT).toFixed(2)} m/s)`);
+}
+
 // sails furled (anchorage): drive dies whatever the trim, she glides to rest
 {
   const s = newShipState(0, 0);

@@ -130,11 +130,20 @@ export function stepShip(s, wind, dt, spec = SLOOP, gait = 1, furl = false, oarD
   if (oarDrive > 0) bite = Math.max(bite, 0.5);
   s.yaw += s.rudder * spec.turnRate * bite * dt;
 
-  // the fair current carries the water she floats in, so it advances with the
-  // gait exactly as her own way does (currents.js; default zero for every hull
-  // that doesn't sample it — verify-ship stays unchanged)
-  s.x += (Math.sin(s.yaw) * s.speed + current.vx) * gait * dt;
-  s.z += (Math.cos(s.yaw) * s.speed + current.vz) * gait * dt;
+  // SET AND DRIFT, honestly split (2026-07-25): the ALONG-TRACK set passes
+  // whole — the fair (or foul) current every passage plan banks on, gait-
+  // scaled like her own way — but the BEAM set is bounded by her way: a keel
+  // makes LEEWAY, a few degrees of crab, never broadside surfing. Unbounded,
+  // a 2-knot sloop in the Gulf Stream's 2.2 m/s travelled SIDEWAYS — the
+  // report that named this rule.
+  const fx = Math.sin(s.yaw), fz = Math.cos(s.yaw);
+  const along = current.vx * fx + current.vz * fz;
+  let lx = current.vx - along * fx, lz = current.vz - along * fz;
+  const lm = Math.hypot(lx, lz);
+  const cap = 0.35 * (s.speed + 0.4);
+  if (lm > cap) { lx *= cap / lm; lz *= cap / lm; }
+  s.x += (fx * (s.speed + along) + lx) * gait * dt;
+  s.z += (fz * (s.speed + along) + lz) * gait * dt;
   return s;
 }
 

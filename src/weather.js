@@ -54,7 +54,10 @@ export function seaStateFor(windMs) {
 export function seaBandsFor(windMs, coastDist) {
   const chop = clamp(0.5 + 0.055 * windMs, 0.55, 1.9);
   const fetch = smooth01((coastDist - 400) / 3600); // shelter -> blue water
-  const swell = clamp(0.18 * (windMs - 5), 0, 2.4) * (0.2 + 0.8 * fetch);
+  // the deep sea ALWAYS rolls (playtest 2026-07-25: the floor wind's heave
+  // read flat) — at the 10 m/s floor blue water carries a real swell, and a
+  // gale drives it to the cap; the land's lee still kills nearly all of it
+  const swell = clamp(0.24 * (windMs - 4), 0, 2.4) * (0.15 + 0.85 * fetch);
   return { swell, chop };
 }
 
