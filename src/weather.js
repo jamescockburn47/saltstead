@@ -53,11 +53,30 @@ export function seaStateFor(windMs) {
 // memory — so a died gale leaves rollers under a quiet wind.
 export function seaBandsFor(windMs, coastDist) {
   const chop = clamp(0.5 + 0.055 * windMs, 0.55, 1.9);
-  const fetch = smooth01((coastDist - 400) / 3600); // shelter -> blue water
-  // the deep sea ALWAYS rolls (playtest 2026-07-25: the floor wind's heave
-  // read flat) — at the 10 m/s floor blue water carries a real swell, and a
-  // gale drives it to the cap; the land's lee still kills nearly all of it
-  const swell = clamp(0.24 * (windMs - 4), 0, 2.4) * (0.15 + 0.85 * fetch);
+  // THE SWELL-LESS SEA (measured 2026-07-25). The old fetch curve only came
+  // good ~4 km offshore, and players sail COASTS — ports, islands, the
+  // Caribbean, the Channel. Measured in the live game off the Wight at 10
+  // m/s: swell band 0.11. The title scene, whose water is the benchmark
+  // ("the landing page video looks amazing"), sails at 1.9 — the SAME
+  // renderer, the same shader, ten to twenty times the roll. The game was
+  // showing nearly every player a sea with no rollers in it at all: only
+  // chop, which is short and low and reads as flat water.
+  //
+  // Three corrections, one idea — let the swell BE a swell, and let the
+  // shore field do the sheltering it was built to do:
+  //  1. fetch comes good over 200 -> 1800 m instead of 400 -> 4000. A ship a
+  //     mile offshore is in open water and should feel it.
+  //  2. the lee floor rises 0.15 -> 0.45: swell is far-travelled, so even
+  //     under the land it arrives, diminished — that is what a lee IS.
+  //  3. the wind curve starts at a lighter breeze and climbs harder, so the
+  //     ordinary 10 m/s day carries a real heave rather than a ripple.
+  // The inshore calm the design's first law demands is NOT lost: waves.js
+  // shoreOpenAtten still crushes the open set to SHORE_CALM at the waterline
+  // and the strait gate still stands surf down in sheltered channels. That
+  // sheltering was being applied TWICE, and the second helping killed the
+  // sea. verify-weather holds the shape; live-spectrum holds the pixels.
+  const fetch = smooth01((coastDist - 200) / 1600); // shelter -> blue water
+  const swell = clamp(0.22 * (windMs - 3), 0, 2.4) * (0.45 + 0.55 * fetch);
   return { swell, chop };
 }
 

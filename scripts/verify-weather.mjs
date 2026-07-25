@@ -49,9 +49,24 @@ ok(seaStateFor(0) === SEA_STATE_MIN, 'calm pins the floor');
   const calmOut = seaBandsFor(10, 5000);  // light air, blue water
   const galeIn = seaBandsFor(22, 100);    // hard wind, sheltered
   const galeOut = seaBandsFor(22, 5000);  // hard wind, blue water — the rollers
-  ok(calmIn.swell < 0.25, `the lee shore carries no rollers in light air (${calmIn.swell.toFixed(2)})`);
+  // THE LEE NO LONGER KILLS THE SEA (2026-07-25). These three assertions used
+  // to demand the lee carry NO rollers — and that intent, honestly encoded,
+  // is what left the game swell-less wherever players actually sail. A lee is
+  // a DIMINISHING, not a wall: swell is far-travelled water, so it arrives
+  // under the land reduced, and the inshore calm belongs to waves.js's shore
+  // field (shoreOpenAtten, the strait gate), which applies it once and
+  // properly. What must still hold is the ORDERING and the contrast.
+  ok(calmIn.swell > 0.35 && calmIn.swell < calmOut.swell * 0.7,
+    `the lee diminishes the rollers without killing them (${calmIn.swell.toFixed(2)} `
+    + `vs ${calmOut.swell.toFixed(2)} in blue water)`);
   ok(galeOut.swell > 2, `a gale over blue water rolls DEEP (${galeOut.swell.toFixed(2)})`);
-  ok(galeIn.swell < galeOut.swell * 0.35, 'the land\'s lee kills the long sea even in wind');
+  ok(galeIn.swell < galeOut.swell * 0.6, 'the land\'s lee still tells, even in wind');
+  // the benchmark: the title scene's water (the landing-page video, sea state
+  // 1.9) is what the game must be able to reach. An ordinary working breeze
+  // over open water has to put a real heave under her.
+  ok(seaBandsFor(12, 5000).swell > 1.1,
+    `an ordinary breeze offshore carries the landing page's heave `
+    + `(${seaBandsFor(12, 5000).swell.toFixed(2)})`);
   ok(calmOut.swell > 1 && calmOut.swell < galeOut.swell,
     `the deep sea always rolls; the gale rolls deeper (${calmOut.swell.toFixed(2)})`);
   ok(galeOut.chop > calmOut.chop, 'chop follows the wind');
@@ -61,7 +76,7 @@ ok(seaStateFor(0) === SEA_STATE_MIN, 'calm pins the floor');
     'both bands respect their ceilings');
   // the contrast the deck feels: gale/blue-water total vs light-air/lee total
   const heavy = galeOut.swell + galeOut.chop, quiet = calmIn.swell + calmIn.chop;
-  ok(heavy > quiet * 2.5, `the sea VARIES: ${heavy.toFixed(2)} rolling vs ${quiet.toFixed(2)} quiet`);
+  ok(heavy > quiet * 2, `the sea VARIES: ${heavy.toFixed(2)} rolling vs ${quiet.toFixed(2)} quiet`);
 }
 {
   const y0 = waveHeight(123.4, -56.7, 42);
