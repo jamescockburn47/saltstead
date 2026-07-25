@@ -58,74 +58,6 @@ export function getSeaState() { return seaChop; }
 export function getSeaBands() { return { swell: seaSwell, chop: seaChop }; }
 const bandOf = (w) => (w.len >= SWELL_LEN ? 0 : 1); // 0 swell, 1 chop
 
-// ---- THE WIND'S OWN SEA, AND THE END OF THE GRATING (2026-07-25) ----
-// Measured, not guessed: live-spectrum.mjs ablated every effect layer over
-// mid-Atlantic water and the narrow east-west stripes died ONLY when the
-// wave table itself was zeroed (stripe power 17100 -> 65). They were never
-// foam, shadows, wake or noise: two chop trains whose wave-vectors differ
-// by a near-north vector of period ~7.4 m beat against each other, and the
-// sea's nonlinear shading (foam thresholds, fresnel) draws that second-order
-// beat as a THIRD wave train. World-locked, because the table's headings
-// were constants — which is why it stood in every ocean, every weather, and
-// survived every amplitude retune ever tried.
-//
-// Two cures, both here, both closed-form (the parity doctrine holds):
-//  1. THE CHOP TURNS WITH THE WIND. The wind-sea's fan rotates as a body to
-//     run downwind (main.js eases it; the swell keeps its own heading, so a
-//     wind shift leaves a crossed sea — the ocean's memory). A beat that
-//     rotates with the weather cannot etch a permanent grid on the world.
-//  2. EVERY TRAIN'S PHASE WANDERS. Each train carries a slow phase warp on
-//     its own heading and wavelength (golden-angle fan, ~96-230 m features),
-//     so crest lines bend and knot instead of ruling straight to the horizon
-//     — and the difference-phase that makes the beat wanders with them, so
-//     the beat smears instead of stacking. The warp is a pure function of
-//     (x, z, t): the gradient keeps its closed form by the chain rule, and
-//     verify-waves holds the CPU/GPU twins together as ever.
-// The warp's strength as a FRACTION of each train's own wavenumber — so the
-// crest-line wander is a bounded ANGLE (atan 0.35 ≈ 19°) for every train
-// alike, not a fixed phase. A flat phase amplitude was the first cut, and
-// verify-waves rejected it: the swing it bought the SHORT beats (0.2-0.9 rad
-// against the 1 rad the stripes need to smear) was far too small, while the
-// same amplitude would have swung the 63 m swell through ±55° of heading.
-export const CHOP_WARP = 0.35;
-// the table's own mean chop heading — the angle setChopRot() turns FROM
-const CHOP_BASE = (() => {
-  let dx = 0, dz = 0;
-  for (const w of WAVES) if (bandOf(w) === 1) { dx += w.dirX; dz += w.dirZ; }
-  return Math.atan2(dz, dx);
-})();
-export function chopRotFor(windFrom) {
-  // wind blows FROM yaw `windFrom` (wind.js), so it drives the sea TOWARD
-  // -(sin, cos); in the table's atan2(dirZ, dirX) frame that is:
-  return Math.atan2(-Math.cos(windFrom), -Math.sin(windFrom)) - CHOP_BASE;
-}
-let chopRot = 0;
-export function setChopRot(a) { chopRot = a; }
-export function getChopRot() { return chopRot; }
-export function chopCS() { return { x: Math.cos(chopRot), y: Math.sin(chopRot) }; }
-
-// each train's warp: a golden-angle fan of headings on wavelengths far
-// longer than any train's own, so no two trains wander together
-// Each train wanders on a warp FOUR TIMES its own wavelength — so a 5.5 m
-// ripple bends over ~22 m and a 63 m roller over ~250 m, each on its own
-// scale, and the phase excursion is the same modest 1.4 rad for all of them
-// (CHOP_WARP × WARP_SCALE). A single long warp wavelength for every train
-// was the second cut: it drove the short trains' phase amplitude to ~15 rad,
-// where the emitted constants' own rounding broke CPU/GPU parity (3.4e-3
-// against a 2e-3 contract) — the gate caught it, 2026-07-25.
-const WARP_SCALE = 4;
-const warpOf = (i, kTrain) => {
-  const a = i * 2.39996;                 // golden angle: never repeats
-  const k = kTrain / WARP_SCALE;
-  return { dx: Math.cos(a), dz: Math.sin(a), k, w: k * 0.55,
-    amp: CHOP_WARP * WARP_SCALE };
-};
-const kOf = (w) => TAU / w.len;
-// a chop train's heading after the wind's turn (swell keeps the table's)
-const dirOf = (w, cs) => (bandOf(w) === 0
-  ? { x: w.dirX, z: w.dirZ }
-  : { x: w.dirX * cs.x - w.dirZ * cs.y, z: w.dirX * cs.y + w.dirZ * cs.x });
-
 // ---- THE SHORE FIELD (2026-07-24) ----
 // Near land the sea grows shore-aware: the open-water set calms as the coast
 // closes (shoreOpenAtten) and a second, SHORE-PARALLEL set rises in its place
@@ -214,14 +146,10 @@ export function shoreGradMag(d, t) {
 // performs from the coast map texture.
 export function waveHeight(x, z, t) {
   let y = 0;
-  const cs = chopCS();
-  for (let i = 0; i < WAVES.length; i++) {
-    const w = WAVES[i];
+  for (const w of WAVES) {
     const k = TAU / w.len;
     const m = bandOf(w) === 0 ? seaSwell : seaChop;
-    const d = dirOf(w, cs), p = warpOf(i, k);
-    const warp = p.amp * Math.sin(p.k * (p.dx * x + p.dz * z) - p.w * t);
-    y += m * w.amp * Math.sin(k * (d.x * x + d.z * z) - k * w.speed * t + warp);
+    y += m * w.amp * Math.sin(k * (w.dirX * x + w.dirZ * z) - k * w.speed * t);
   }
   const s = shoreSampler && shoreSampler(x, z);
   // the shore set is local wind-sea breaking on a beach — it rides the CHOP
@@ -233,51 +161,21 @@ export function waveHeight(x, z, t) {
 
 // The same sum as a GLSL expression over `wx`, `wz` (world xz) and `uTime`.
 // Generated from the table so CPU and GPU can never drift apart.
-// ---- the emitted term, ONE generator for every emitter below ----
-// `uChopCS` is the wind's turn (cos, sin) — a uniform on the GPU, a plain
-// {x, y} in the JS the verify script compiles. Swell terms ignore it.
-const gDir = (w) => (bandOf(w) === 0
-  ? { x: `${w.dirX.toFixed(4)}`, z: `${w.dirZ.toFixed(4)}` }
-  : {
-      x: `(${w.dirX.toFixed(4)} * uChopCS.x - ${w.dirZ.toFixed(4)} * uChopCS.y)`,
-      z: `(${w.dirX.toFixed(4)} * uChopCS.y + ${w.dirZ.toFixed(4)} * uChopCS.x)`,
-    });
-// the warp argument, and the phase that carries it
-// NOTE the 9-decimal warp constants. A direction rounded to 4 places is a
-// 5e-5 error on a unit vector, and at 2 km of world coordinate that is 0.03
-// of a radian of phase — enough to break the 2e-3 parity contract on its own
-// (the gate caught this too). The wave table's own headings are exact at 4
-// places, so they stay short; the warp's cosines are not.
-const gWarpArg = (i, k) => {
-  const p = warpOf(i, k);
-  return `(${p.k.toFixed(9)} * (${p.dx.toFixed(9)} * wx + ${p.dz.toFixed(9)} * wz) - ${p.w.toFixed(9)} * uTime)`;
-};
-const gPhase = (w, i) => {
-  const k = kOf(w), d = gDir(w), p = warpOf(i, k);
-  return `${k.toFixed(6)} * (${d.x} * wx + ${d.z} * wz) - ${(k * w.speed).toFixed(6)} * uTime`
-    + ` + ${p.amp.toFixed(9)} * sin(${gWarpArg(i, k)})`;
-};
-const gHeightTerm = (w, i) => `${w.amp.toFixed(4)} * sin(${gPhase(w, i)})`;
-// the gradient term: ONE vec2 constructor with scalar components (no vec2
-// algebra), so the verify shim needs nothing but a vec2 constructor
-const gGradTerm = (w, i) => {
-  const k = kOf(w), d = gDir(w), p = warpOf(i, k);
-  const c = `${w.amp.toFixed(4)} * cos(${gPhase(w, i)})`;
-  const dw = `${(p.amp * p.k).toFixed(9)} * cos(${gWarpArg(i, k)})`;
-  return `vec2((${c}) * (${k.toFixed(6)} * ${d.x} + (${dw}) * ${p.dx.toFixed(9)}),`
-    + `\n        (${c}) * (${k.toFixed(6)} * ${d.z} + (${dw}) * ${p.dz.toFixed(9)}))`;
-};
-
 export function glslWaveSum() {
-  return WAVES.map(gHeightTerm).join('\n      + ');
+  return WAVES.map((w) => {
+    const k = TAU / w.len;
+    return `${w.amp.toFixed(4)} * sin(${k.toFixed(6)} * (${w.dirX.toFixed(4)} * wx + ${w.dirZ.toFixed(4)} * wz) - ${(k * w.speed).toFixed(6)} * uTime)`;
+  }).join('\n      + ');
 }
 
 // the sum split at the SWELL_LEN boundary, so the shader can scale each
 // population by its own state uniform (uSwellL / uSwellS) exactly as the
 // CPU evaluator above scales its bands
 export function glslWaveSumBand(minLen, maxLen) {
-  const terms = WAVES.map((w, i) => (w.len >= minLen && w.len < maxLen ? gHeightTerm(w, i) : null))
-    .filter(Boolean);
+  const terms = WAVES.filter((w) => w.len >= minLen && w.len < maxLen).map((w) => {
+    const k = TAU / w.len;
+    return `${w.amp.toFixed(4)} * sin(${k.toFixed(6)} * (${w.dirX.toFixed(4)} * wx + ${w.dirZ.toFixed(4)} * wz) - ${(k * w.speed).toFixed(6)} * uTime)`;
+  });
   return terms.length ? terms.join('\n      + ') : '0.0';
 }
 
@@ -287,20 +185,12 @@ export function glslWaveSumBand(minLen, maxLen) {
 // the normal always belongs to the surface being drawn.
 export function waveGradient(x, z, t) {
   let gx = 0, gz = 0;
-  const cs = chopCS();
-  for (let i = 0; i < WAVES.length; i++) {
-    const w = WAVES[i];
+  for (const w of WAVES) {
     const k = TAU / w.len;
     const m = bandOf(w) === 0 ? seaSwell : seaChop;
-    const d = dirOf(w, cs), p = warpOf(i, k);
-    const wArg = p.k * (p.dx * x + p.dz * z) - p.w * t;
-    // the chain rule through the warp — the phase is no longer linear in
-    // position, so the gradient carries the warp's own slope
-    const dw = p.amp * p.k * Math.cos(wArg);
-    const c = m * w.amp * Math.cos(k * (d.x * x + d.z * z) - k * w.speed * t
-      + p.amp * Math.sin(wArg));
-    gx += c * (k * d.x + dw * p.dx);
-    gz += c * (k * d.z + dw * p.dz);
+    const c = m * w.amp * k * Math.cos(k * (w.dirX * x + w.dirZ * z) - k * w.speed * t);
+    gx += c * w.dirX;
+    gz += c * w.dirZ;
   }
   const s = shoreSampler && shoreSampler(x, z);
   if (!s) return [gx, gz];
@@ -316,7 +206,10 @@ export function waveGradient(x, z, t) {
 // from the SAME table (verify-waves.mjs guards parity against waveGradient).
 // NOTE: unscaled, like glslWaveSum — the shader multiplies by uSwell itself.
 export function glslWaveGrad() {
-  return WAVES.map(gGradTerm).join('\n      + ');
+  return WAVES.map((w) => {
+    const k = TAU / w.len;
+    return `vec2(${(w.amp * k * w.dirX).toFixed(6)}, ${(w.amp * k * w.dirZ).toFixed(6)}) * cos(${k.toFixed(6)} * (${w.dirX.toFixed(4)} * wx + ${w.dirZ.toFixed(4)} * wz) - ${(k * w.speed).toFixed(6)} * uTime)`;
+  }).join('\n      + ');
 }
 
 // ---- SHADING LOD BANDS (2026-07-24, the stripes-to-the-horizon fix) ----
@@ -330,8 +223,10 @@ export function glslWaveGrad() {
 // bands partition the full gradient exactly.
 export const GRAD_BANDS = { long: 45, mid: 20 }; // len >= long | >= mid | rest
 export function glslWaveGradBand(minLen, maxLen) {
-  const terms = WAVES.map((w, i) => (w.len >= minLen && w.len < maxLen ? gGradTerm(w, i) : null))
-    .filter(Boolean);
+  const terms = WAVES.filter((w) => w.len >= minLen && w.len < maxLen).map((w) => {
+    const k = TAU / w.len;
+    return `vec2(${(w.amp * k * w.dirX).toFixed(6)}, ${(w.amp * k * w.dirZ).toFixed(6)}) * cos(${k.toFixed(6)} * (${w.dirX.toFixed(4)} * wx + ${w.dirZ.toFixed(4)} * wz) - ${(k * w.speed).toFixed(6)} * uTime)`;
+  });
   return terms.length ? terms.join('\n      + ') : 'vec2(0.0)';
 }
 

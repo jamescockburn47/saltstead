@@ -72,7 +72,7 @@ import {
   encounterGait, ENCOUNTER_FAR, isLand, wrapX, dxWrap,
 } from './earth.js';
 import { windProfile, seaBandsFor, skyDressing } from './weather.js';
-import { setSeaBands, RIVER_STATE, setShoreSampler, setChopRot, chopRotFor } from './waves.js';
+import { setSeaBands, RIVER_STATE, setShoreSampler } from './waves.js';
 import { CoastMapLayer } from './coastmaplayer.js';
 import { WAKE_MAX } from './wake.js';
 import { WakeMapLayer } from './wakemaplayer.js';
@@ -326,7 +326,6 @@ class Game {
     this.gloom = 0;
     this.swell = 1;                          // legacy scalar: max of the two bands
     this.seaBands = { swell: 0.6, chop: 1 }; // the two-population sea (waves.js)
-    this.chopRot = chopRotFor(this.wind.from); // the wind-sea's heading, eased
     this.cam = { yaw: Math.PI * 0.85, pitch: 0.32, dist: 8, targetDist: 8 };
     this.fpv = false; // Z — the captain's eye (Marsstead's rover view, afloat)
 
@@ -2198,19 +2197,6 @@ class Game {
       * Math.min(1, dt * (this.overLand ? 0.35 : 0.08));   // wind-sea: seconds
     setSeaBands(this.seaBands.swell, this.seaBands.chop);
     this.swell = Math.max(this.seaBands.swell, this.seaBands.chop);
-    // THE CHOP RUNS DOWNWIND (2026-07-25). The wind-sea's whole fan turns to
-    // the wind — the player reads direction off the water itself — and the
-    // swell keeps the table's heading, so a shift leaves a crossed sea. It
-    // also un-sticks the beat that ruled the old east-west grating: a beat
-    // that turns with the weather can never etch the world. Eased the SHORT
-    // way round the circle, at the chop band's own pace (a minute or two).
-    {
-      const want = chopRotFor(this.wind.from);
-      let d = want - this.chopRot;
-      d = Math.atan2(Math.sin(d), Math.cos(d)); // shortest arc, no unwinding
-      this.chopRot += d * Math.min(1, dt * 0.05);
-      setChopRot(this.chopRot);
-    }
 
     if (this.mode === 'helm') {
       const rt = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
