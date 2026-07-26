@@ -38,23 +38,20 @@ import {
 } from './waves.js';
 import { WAKEMAP_METRES } from './wakemaplayer.js';
 import { COASTMAP_METRES } from './coastmaplayer.js';
+import { glslOceanNoise } from './oceannoise.js';
 
 const SIZE = 720, SEG = 180;
 
-// the family fbm (Marsstead glsl.js), o-prefixed against chunk collisions.
-// Decorative GPU noise: deliberately NOT noise.js — only geometry heights
-// carry the determinism contract.
-const O_FBM = /* glsl */`
-  float oH21(vec2 p){ p = fract(p * vec2(234.34, 435.345));
-    p += dot(p, p + 34.23); return fract(p.x * p.y); }
-  float oVnoise(vec2 p){ vec2 i = floor(p), f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(oH21(i), oH21(i + vec2(1,0)), f.x),
-               mix(oH21(i + vec2(0,1)), oH21(i + vec2(1,1)), f.x), f.y); }
-  float oFbm(vec2 p){ float a = .5, s = 0.;
-    for (int i = 0; i < 4; i++){ s += a * oVnoise(p); p *= 2.03; a *= .5; }
-    return s; }
-`;
+// The decorative fbm. It USED to be the family one-liner inlined here, reading
+// the raw world lattice index through a fract-hash with 234/435 multipliers —
+// which at real play coordinates (15-80 km from the world origin) overruns a
+// float32 mantissa and collapses the noise into a one-dimensional staircase
+// locked to a world axis. That was the east-west grating. It now lives in
+// src/oceannoise.js: wrapped lattice index, small-multiplier hash, per-octave
+// rotation, and a headless gate (verify-oceannoise.mjs) that will not let the
+// field lose a dimension again. Still decorative — only geometry heights carry
+// the determinism contract — but decorative is not the same as unguarded.
+const O_FBM = glslOceanNoise();
 
 export class Ocean {
   constructor(scene) {

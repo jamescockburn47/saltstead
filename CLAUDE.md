@@ -9,7 +9,8 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 
 - **[docs/DESIGN.md](docs/DESIGN.md)** — game identity, era-ladder progression, world
   model (1:250 land / gait-compressed ocean), phase plan, named risks.
-- `src/` modules are small and single-purpose; pure logic modules (waves, sailing,
+- `src/` modules are small and single-purpose; pure logic modules (waves, oceannoise,
+ sailing,
  shipphysics, shipframe, foam, earth, terraingen, shoredecor, flora, skymath,
  lightrig, woodgrain, legends, legendfx, combat, monsters, merchants, plunder,
  treasure, fleet, port, ports, shipyard, noise, searoute, shanties; showreel's
@@ -37,9 +38,18 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 
 ## Build & verify
 
-- `npm run verify` — the headless gate (60 checks). **Must be green before deploy.**
+- `npm run verify` — the headless gate (62 checks). **Must be green before deploy.**
  Add a verify script with every feature; prefer testing pure modules headlessly over
- eyeballing. `scripts/live-classes.mjs` (puppeteer, needs the dev server) smoke-tests
+ eyeballing.
+- **Shader arithmetic gets a gate too.** GPU floats are 32-bit and play happens
+ 15–80 km from the world origin, so anything that feeds a raw world coordinate into
+ a `fract` hash loses its mantissa and the "noise" degenerates into world-axis
+ stripes. That was the east-west grating (2026-07-26): `verify-oceannoise.mjs`
+ now proves the water's fbm keeps both dimensions across the globe, and
+ `scripts/live-grating.mjs` measures it in pixels from a grazing player view
+ (sub-metre band, pixel diffs per layer, isotropy not amplitude). Any new shader
+ noise wants the same two checks.
+- `scripts/live-classes.mjs` (puppeteer, needs the dev server) smoke-tests
  the seven ship classes, a long-range battle and a ramming in a real browser;
  `scripts/live-hold.mjs` does the same for below-decks and the warden's writ;
  `scripts/live-searoute.mjs` sails a course laid around Florida, the breakers-ahead

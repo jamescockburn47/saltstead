@@ -1,6 +1,41 @@
 # Sea v2 — the rebuild
 
 Status: **Phases A and B BUILT, 2026-07-26.** C, D and E remain spec.
+
+> **CORRECTION, 2026-07-26 — the grating was never in the waves.** Fault 2 below
+> blames the east-west banding on the wave table's pairwise beats, on the strength
+> of an ablation: "the stripes died ONLY when the wave table was zeroed". That
+> ablation conflated cause with modulation. Zeroing the table also flattens the
+> surface, removes the grazing geometry and silences every layer gated by wave
+> state — including the one that actually owned the artifact. Sea v2 duly rebuilt
+> the whole wave model, the measured beat energy fell 50-fold, **and James
+> reported "exactly the same grating as before"**, which is the tell.
+>
+> The grating was `ocean.js`'s own decorative fbm running out of float32
+> mantissa. Its hash multiplied the raw world lattice index by 234 and 435; at
+> the noise scales the water uses (2.3, 1.9, 1.35 per metre) and the coordinates
+> the earth hands it (`M_PER_DEG` is 444, so play sits 15–80 km out), the product
+> lands past 2^24 and `fract` returns a handful of levels or exactly zero. The
+> hash then collapses to a function of ONE coordinate and the noise loses a
+> dimension: a 0.4–0.7 m staircase locked to a world axis. Which axis depends on
+> where you are — north-south in the Channel, east-west in the tropics — and
+> where both channels die the sea has no detail and no whitecaps at all.
+>
+> Measured in the owner's own grazing view (`scripts/live-grating.mjs`), sub-metre
+> structure along a world axis versus along a diagonal: **26.3x in the Channel,
+> 6.0x in the Indian Ocean, 1.3x at 0N 0E** — the control being the one place on
+> earth where the hash still had its bits. After the fix (`src/oceannoise.js`:
+> wrapped lattice index, small-multiplier hash, per-octave rotation): 0.70x,
+> 0.91x, 1.11x. The wake map — the leading hypothesis, and a good one — was
+> cleared by its own pixel difference at 1.01x and 1.10x.
+>
+> Two lessons, both now instruments rather than prose. **The spatial probe was
+> blind by construction**: `live-spectrum.mjs` searched 1.2–80 m and the artifact
+> lives at 0.4–1.8 m, from a nadir camera where the fresnel term that amplifies it
+> is ~0. **And the sea v2 local-frame lesson stopped at the water's edge** — the
+> waves were moved to a local frame precisely because "a GPU float carries ~7
+> digits", and nobody carried that across to the shader sitting next to them.
+> `verify-oceannoise.mjs` now fails a build that lets any of it back in.
 Supersedes the wave model in `src/waves.js`, keeps its architecture. Written
 2026-07-25 after the east-west grating investigation and the reverted wind-turn
 attempt (`48b05ae` reverts `1d38aca`).
