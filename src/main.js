@@ -72,7 +72,10 @@ import {
   encounterGait, ENCOUNTER_FAR, isLand, wrapX, dxWrap,
 } from './earth.js';
 import { windProfile, seaBandsFor, skyDressing } from './weather.js';
-import { setSeaBands, RIVER_STATE, setShoreSampler } from './waves.js';
+import {
+  setSeaBands, RIVER_STATE, setShoreSampler, easeWaveAxes, setWaveAxes,
+  waveAxisFor,
+} from './waves.js';
 import { CoastMapLayer } from './coastmaplayer.js';
 import { WAKE_MAX } from './wake.js';
 import { WakeMapLayer } from './wakemaplayer.js';
@@ -326,6 +329,11 @@ class Game {
     this.gloom = 0;
     this.swell = 1;                          // legacy scalar: max of the two bands
     this.seaBands = { swell: 0.6, chop: 1 }; // the two-population sea (waves.js)
+    // the sea's own headings (waves.js): SNAPPED to the wind on the first
+    // weather tick, then eased. Without the snap a new sailor would sail into
+    // a sea running at whatever bearing the module was left on, and wait a
+    // quarter of an hour for the rollers to come round.
+    this.seaAxisSet = false;
     this.cam = { yaw: Math.PI * 0.85, pitch: 0.32, dist: 8, targetDist: 8 };
     this.fpv = false; // Z — the captain's eye (Marsstead's rover view, afloat)
 
@@ -2197,6 +2205,19 @@ class Game {
       * Math.min(1, dt * (this.overLand ? 0.35 : 0.08));   // wind-sea: seconds
     setSeaBands(this.seaBands.swell, this.seaBands.chop);
     this.swell = Math.max(this.seaBands.swell, this.seaBands.chop);
+    // THE SEA ANSWERS THE WIND (sea v2 Phase B). The wind-sea's whole fan eases
+    // downwind over about a minute; the swell's over a quarter of an hour, so a
+    // shift leaves a genuine CROSSED sea and the player can read direction and
+    // strength straight off the water. This is only safe because the phase is
+    // local now: v1's world-absolute phase pivoted the field about a point
+    // twenty kilometres away and the ship bucked (48b05ae). Called BEFORE
+    // anything samples the sea this frame, so hull and shader share the axes.
+    if (!this.seaAxisSet) {
+      const a = waveAxisFor(this.wind.from);
+      setWaveAxes(a, a);
+      this.seaAxisSet = true;
+    }
+    easeWaveAxes(this.wind.from, dt);
 
     if (this.mode === 'helm') {
       const rt = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);

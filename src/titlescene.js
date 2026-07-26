@@ -25,7 +25,7 @@ import { CombatLayer } from './combatlayer.js';
 import { buildShip, buildHand } from './ship.js';
 import { newShipState, shipAttitude, SPECS } from './shipphysics.js';
 import { frameFor, gunPosts, crewPosts } from './shipframe.js';
-import { setSeaState } from './waves.js';
+import { setSeaState, setWaveAxes, waveAxisFor, setWaveOrigin } from './waves.js';
 import { DAY_LENGTH, solarState, lunarState, moonPhase } from './skymath.js';
 import { glitterSource, moonBrightness, EXPOSURE_BASE } from './lightrig.js';
 import { LIVERIES } from './livery.js';
@@ -73,6 +73,12 @@ export class TitleScene {
     this.foam = new FoamLayer(this.scene);
     this.combat = new CombatLayer(this.scene);
     setSeaState(SEA_STATE);
+    // the diorama's sea runs downwind of the diorama's wind (sea v2: the
+    // bands carry axes now), and its origin sits at the world origin — the
+    // fleet sails within a few hundred metres of it, so the local frame is
+    // already small and no snap is needed on this screen.
+    setWaveOrigin(0, 0);
+    setWaveAxes(waveAxisFor(WIND_FROM), waveAxisFor(WIND_FROM));
 
     // the lightning: a cold stroke that lives two frames
     this.bolt = new THREE.DirectionalLight(0xcfe0ff, 0);

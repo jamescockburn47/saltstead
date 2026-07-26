@@ -32,9 +32,9 @@
 
 import * as THREE from 'three';
 import {
-  glslWaveSumBand, glslWaveGradBand, GRAD_BANDS, glslShore,
+  glslWaves, glslShore, NWAVE, packWaveUniforms, setWaveOrigin,
   MAX_SWELL_HEIGHT, MAX_CHOP_HEIGHT, MAX_SHORE_HEIGHT, SHORE_SHADE,
-  SEA_STATE_MAX, SEA_SWELL_MAX, SWELL_LEN,
+  SEA_STATE_MAX, SEA_SWELL_MAX,
 } from './waves.js';
 import { WAKEMAP_METRES } from './wakemaplayer.js';
 import { COASTMAP_METRES } from './coastmaplayer.js';
@@ -72,6 +72,18 @@ export class Ocean {
       // rollers and the local wind-sea are scaled apart, on GPU as on CPU
       uSwellL: { value: 1 },
       uSwellS: { value: 1 },
+      // THE SPECTRUM, as data (sea v2). vec4(kx, kz, amp, phase) per component
+      // — the very Float32Array waves.js packWaveUniforms() writes, so the
+      // drawn sea cannot be a different sea from the felt one. The phase folds
+      // the local-frame accumulator AND the clock, wrapped to [0, 2π), which
+      // is what keeps a float32 exact where v1's world-absolute k·p reached
+      // 1e5 radians. Repacked every frame in update().
+      uWave: { value: packWaveUniforms(0) },
+      // the per-tier component lever: 1 keeps the whole spectrum in the
+      // FRAGMENT (shading), 0 drops the sub-20 m components there. The vertex
+      // displacement — the surface the hull is promised — always runs the full
+      // set, so parity is never the thing being traded.
+      uWaveLOD: { value: 1 },
       uSunDirW: { value: new THREE.Vector3(0, 1, 0) }, // world, sun or moon
       uSparkle: { value: 0 },   // glitterSource amp × the quality lever
       uScatter: { value: 0 },   // crest translucency strength
@@ -133,7 +145,7 @@ vec2 oCoastGradW(vec2 p) {
   return vec2(
     texture2D(uCoastMap, uv + vec2(t, 0.0)).r - texture2D(uCoastMap, uv - vec2(t, 0.0)).r,
     texture2D(uCoastMap, uv + vec2(0.0, t)).r - texture2D(uCoastMap, uv - vec2(0.0, t)).r) / 200.0;
-}` + glslShore();
+}` + glslShore() + glslWaves();
       sh.vertexShader = 'uniform float uTime;\nuniform vec2 uOrigin;\n'
         + 'uniform float uSwellL;\nuniform float uSwellS;\n'
         + 'uniform sampler2D uWakeMap;\nuniform vec2 uWakeC;\n'
@@ -145,19 +157,25 @@ vec2 oCoastGradW(vec2 p) {
             '#include <begin_vertex>\n'
             + '  float wx = position.x + uOrigin.x;\n'
             + '  float wz = position.z + uOrigin.y;\n'
+            // THE LOCAL FRAME (sea v2): the mesh is drawn at uOrigin, so the
+            // vertex's own position IS p - origin — the coordinate waves.js
+            // evaluates its phases in. The coast and wake maps stay in world
+            // metres; only the wave field goes local, which is what lets a
+            // direction turn pivot under the hull instead of over the horizon.
+            + '  vec2 wLP = vec2(position.x, position.z);\n'
             + '  vec2 wWUv = oWakeUv(vec2(wx, wz));\n'
             + '  float wWakeH = texture2D(uWakeMap, wWUv).r * oWakeIn(wWUv);\n'
             + '  float wSd = oCoastSd(vec2(wx, wz));\n'
             + '  float wGate = oShoreGate(length(oCoastGradW(vec2(wx, wz))));\n'
             // the two populations scaled apart, exactly as waves.js scales
             // them (the shore set is chop's kin — it rides uSwellS)
-            + `  transformed.y += oShoreAtten(wSd) * (uSwellL * (${glslWaveSumBand(SWELL_LEN, 1e9)}) + uSwellS * (${glslWaveSumBand(0, SWELL_LEN)}))\n`
+            + '  transformed.y += oShoreAtten(wSd) * (uSwellL * oWaveSwell(wLP) + uSwellS * oWaveWind(wLP))\n'
             + '    + uSwellS * oShoreSum(wSd) * wGate + wWakeH;\n'
             + '  vWPos = vec3(wx, transformed.y, wz);')
           .replace('#include <project_vertex>',
             '#include <project_vertex>\n'
             + '  vVDist = -mvPosition.z;');
-      sh.fragmentShader = 'uniform float uTime;\n'
+      sh.fragmentShader = 'uniform float uTime;\nuniform vec2 uOrigin;\n'
         + 'uniform float uSwellL;\nuniform float uSwellS;\n'
         + 'uniform vec3 uSunDirW;\nuniform float uSparkle;\nuniform float uScatter;\n'
         + 'uniform float uFresnel;\nuniform vec3 uHor;\nuniform vec3 uZen;\nuniform float uDetailAmp;\n'
@@ -172,6 +190,7 @@ vec2 oCoastGradW(vec2 p) {
           .replace('#include <color_fragment>', `#include <color_fragment>
   // ---- the water's own colour work (main-scope: later passes read these)
   float wx = vWPos.x; float wz = vWPos.z;
+  vec2 oLP = vWPos.xz - uOrigin;   // the wave field's LOCAL frame (sea v2)
   vec3 oV = normalize(cameraPosition - vWPos);
   // per-pixel wake: height + churn from the map, gradient from neighbours
   vec2 oWUv = oWakeUv(vWPos.xz);
@@ -193,8 +212,7 @@ vec2 oCoastGradW(vec2 p) {
   // the middle of a channel is SHELTERED water, not a surf zone
   float oCGate = oShoreGate(length(oCoastGradW(vWPos.xz)));
   vec2 oCDir = oCLen > 1e-4 ? oCG / oCLen : vec2(0.0);
-  float oH = oSAtt * (uSwellL * (${glslWaveSumBand(SWELL_LEN, 1e9)})
-    + uSwellS * (${glslWaveSumBand(0, SWELL_LEN)}))
+  float oH = oSAtt * (uSwellL * oWaveSwell(oLP) + uSwellS * oWaveWindLod(oLP))
     + uSwellS * oShoreSum(oSd) * oCGate;
   // the gradient by WAVELENGTH BAND (waves.js GRAD_BANDS): long swell shades
   // to the horizon; mid sea fades out where its wavelength is pixels; short
@@ -205,9 +223,9 @@ vec2 oCoastGradW(vec2 p) {
   // Each band also carries its OWN sea state: the swell rollers ride uSwellL,
   // the wind-sea rides uSwellS (GRAD_BANDS.long === SWELL_LEN, so the LOD
   // long band IS the swell population).
-  vec2 oWGl = ${glslWaveGradBand(GRAD_BANDS.long, 1e9)};
-  vec2 oWGm = ${glslWaveGradBand(GRAD_BANDS.mid, GRAD_BANDS.long)};
-  vec2 oWGs = ${glslWaveGradBand(0, GRAD_BANDS.mid)};
+  vec2 oWGl = oWaveGradLong(oLP);
+  vec2 oWGm = oWaveGradMid(oLP);
+  vec2 oWGs = oWaveGradShort(oLP);
   float oChop = uDetailAmp > 0.001
     ? 0.35 + 0.65 * oFbm(vWPos.xz * 0.021 + uTime * vec2(0.013, 0.009))
     : 0.7;
@@ -319,7 +337,7 @@ vec2 oCoastGradW(vec2 p) {
   outgoingLight += uSparkle * oGl * oTw * vec3(1.0, 0.95, 0.85) * (1.0 - oFoam);
 #include <opaque_fragment>`);
     };
-    mat.customProgramCacheKey = () => 'saltstead-ocean-twoband';
+    mat.customProgramCacheKey = () => `saltstead-ocean-spectrum-${NWAVE}`;
     this.step = SIZE / SEG;
     this.glitterScale = 1; // the tier lever: parked at 0 under Plain (invariant 5)
     this.mesh = new THREE.Mesh(geo, mat);
@@ -353,6 +371,18 @@ vec2 oCoastGradW(vec2 p) {
     const sz = Math.round(cz / this.step) * this.step;
     this.mesh.position.set(sx, 0, sz);
     this.uniforms.uOrigin.value.set(sx, sz);
+    // THE FOLLOWING ORIGIN IS THE WAVE FIELD'S FRAME (sea v2). Handing it to
+    // waves.js keeps the shader's local coordinates small AND — because the
+    // phase accumulators absorb the move exactly — changes nothing whatever
+    // about the surface, so the snap is a non-event for the hull. The pack
+    // must come AFTER the origin, or the GPU would draw last frame's phases
+    // against this frame's frame.
+    setWaveOrigin(sx, sz);
+    packWaveUniforms(t, this.uniforms.uWave.value);
+    // the tier lever: Plain drops the sub-20 m components from the FRAGMENT's
+    // shading loops (they are sub-pixel past 60 m and already fbm-patched and
+    // distance-faded there). The vertex displacement keeps the full spectrum.
+    this.uniforms.uWaveLOD.value = this.glitterScale >= 0.5 ? 1 : 0;
     if (glit) {
       // rebuild the light's world direction from the corridor drive: low is
       // 1 - alt * 1.15 (lightrig), so invert; grazing light stays a whisker up
