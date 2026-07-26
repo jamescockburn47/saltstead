@@ -166,14 +166,24 @@ const SHOTS = [
   // ---- THE GLITTER ROADS (a LOW-SUN phenomenon — never shot at noon) -------
   {
     key: '08-glitter-sun-road-low-sun',
-    title: "The sun's glitter road — a five-degree sun down the water",
-    where: 'the trades, mid-Atlantic 16N 40W', lat: 16, lon: -40,
-    demo: "Cox & Munk roughness: the sun's corridor from a low lens, the case the "
-      + 'gate measures at 1.54x the off-source sea.',
+    title: "The sun's glitter road — a five-degree sun down a running sea",
+    // MOVED OFF THE TRADES, 2026-07-26. This shot was staged for LIGHT and not
+    // for SEA, and the two cannot be staged apart: the lobe's width IS the sea
+    // surface's slope spread (Cox & Munk), so a 5 degree sun over the trades'
+    // 1.37/0.99 water drew a narrow corridor and the owner's verdict was that the
+    // azimuth was worse than the landing page's. The landing page runs SEA_STATE
+    // 1.9 on BOTH bands. Forcing that here would break this script's own rule
+    // that the sea is pre-loaded and never invented — so the shot goes to water
+    // that HAS it instead, and the fifties' own steady state (2.17/1.32) is
+    // wider than the title scene's while still being whatever wind.js gives 54S.
+    where: 'the Southern Ocean, 54S 90E', lat: -54, lon: 90,
+    demo: "Cox & Munk roughness: the sun's corridor from a low lens over a gale "
+      + "sea — the roughness IS the corridor's width, so the light and the water "
+      + 'are staged together. The road is a field of separate glints, not a streak.',
     sky: { sunAlt: 0.10 }, weather: { state: 'clear', gloom: 0 }, sea: 'place',
     ship: { speed: 6, trim: 0.7, reach: 2.6 },
     cam: { aim: 'sun', dist: 26, height: 2.8, side: 9, lookAhead: 40, lookY: 3 },
-    settle: 7,
+    settle: 8,
   },
   {
     key: '09-glitter-golden-hour-crest-in-the-road',
@@ -364,47 +374,127 @@ const FINDINGS = [
     'The diagnostic frame (`12-clean-water-no-grating.png`) is a grazing lens 1.6 m '
     + 'above the water 33 km from the world origin under a 67 degree sun — the exact '
     + 'geometry the artifact lived in. Upscaled 2x, the 30-300 m band is isotropic: '
-    + 'no parallel filaments anywhere in the set.'],
-  ['DEFECT — the near-field whitecap foam grows a repeating chain of dark elliptical '
-    + 'holes within about ten metres of the lens.',
-    'Visible in every low-camera gale frame (02, 04, 09, 12) as a soft white mass with '
-    + 'a regularly spaced line of dark ellipses through it. ATTRIBUTED: forcing '
-    + '`uDetailAmp = 0` on the identical frame removes the holes and leaves smooth '
-    + 'white streaks, so it is the detail block\'s churn-rag term magnifying past its '
-    + 'useful scale. It is worst exactly where the player\'s own eye-level camera sits '
-    + 'in a big sea, which makes it the most publicity-relevant blemish in the set.'],
-  ['DEFECT (cosmetic) — a submerged whale is drawn as a flat slab lying ON the water '
-    + 'rather than under it.',
-    'Seen in 14 and in the sounding clip: an animal a metre or two down reads as a '
-    + 'hard-edged grey shape on the surface with no refraction or depth fade. It sells '
-    + 'the scale (which is why 14 works) but it does not read as an animal underwater.'],
-  ['HAZARD — the gulls and the albatross are stationed on the SHIP, so they cross a '
-    + 'low lens.',
-    'wildlifelayer.js circles the gulls 7-19 m off the masthead and the albatross at a '
-    + '42 m radius, 9 m up. A three-metre bird duly landed across the bottom corners '
-    + 'of the first pure-seascape frame. This script detaches them for the bare shots; '
-    + 'a player with the camera low and the wheel scrolled in gets them anyway.'],
-  ['LIMIT — above about 45 m of eye height the ocean mesh\'s own edge comes into '
-    + 'frame.',
-    'The mesh is 720 m across and the fog closes at 620. A 75 m plan view (tried for '
-    + 'the wind-veer clip) put a hard polygonal boundary of bare sky across the top of '
-    + 'every frame. In ordinary play the camera cannot get there; a warden\'s photo '
-    + 'camera can, and so can a showreel beat.'],
+    + 'no parallel filaments anywhere in the set. Re-measured after the appearance '
+    + 'pass: world-axis anisotropy 1.13 / 0.76 / 0.64 against a 2.2 ceiling.'
+  ],
+  ['FIXED — the sun and moon roads SHATTER instead of being smooth streaks.',
+    'The owner judged the first cut of this set: the glitter was "crap and basic". '
+    + 'It was. The twinkle sampled a world-locked 0.435 m lattice at a fixed '
+    + 'contrast, and that lattice is BELOW A PIXEL past about forty metres — so the '
+    + 'corridor averaged to its own mean exactly where the road is and painted a '
+    + 'searchlight beam. A glint cell is now measured in PIXELS (glitter.js sparkPx) '
+    + 'and the field is a thresholded sum of two lattices, so it fires on about a '
+    + 'fifth of the water and leaves the rest dark. Measured in pixels down the road '
+    + 'from a 2.8 m lens under a 6 degree sun: 2.3 -> 47.1 separated maxima per 1000 '
+    + 'px, local contrast 0.054 -> 0.080, with water well off the road unchanged. '
+    + 'The shatter rides in on the lobe\u2019s own strength and stands down over foam, '
+    + 'because a first cut that applied it everywhere turned a gale into television '
+    + 'static — measured on the identical frame, and the reason those two constants '
+    + 'exist.'
+  ],
+  ['FIXED — whitecaps have a shape, and the hardest-breaking water is the whitest.',
+    'They read as torn-paper decals: no relief, no bright tumbling head, no '
+    + 'dissipating tail. The break field always knew which end of a whitecap a pixel '
+    + 'was on — its window is asymmetric about the crest, which is the whole '
+    + 'persistence mechanism — and the shader was throwing that coordinate away. '
+    + 'waves.js now exposes it (breakAge), the spent tail shreds while the head '
+    + 'stays dense, the raft carries its own relief, and its MACRO normal levels '
+    + 'toward vertical because foam is a diffuse scatterer and not a mirror. That '
+    + 'last one is the fix for the defect the sea v2 spec reported and could not '
+    + 'gate: the steepest forward face is the facet tilted furthest from the sky, so '
+    + 'the hardest-breaking water rendered DARKER than unbroken water. verify-glitter '
+    + 'now sweeps the foam path\u2019s own radiance over 9 source elevations x 13 facet '
+    + 'tilts x 7 rungs of the break ladder and holds every step positive (worst '
+    + '+0.0157); the same model un-levelled goes to -0.0223, which is the defect '
+    + 'reproduced in arithmetic.'
+  ],
+  ['FIXED — the near-field chain of dark elliptical holes.',
+    'A RESOLUTION fault, not a noise fault. The churn rag runs at 1.9 per metre, so '
+    + 'one of its cells is 0.526 m: lace at thirty metres and, at three, a 210 px '
+    + 'blob whose fbm minima sit at 0.40 of its peak. The lace now cross-fades onto '
+    + 'a finer lattice and tapers its contrast, both driven by the pixel\u2019s own '
+    + 'footprint through the same oGlFoot the glitter lobe is sized by. Measured '
+    + '(verify-glitter): at three metres one cell falls 210 -> 100 px and its '
+    + 'contrast 83% -> 35%, so the drawn hole\u2019s area x depth falls 10.5x — while at '
+    + 'thirty metres and beyond the lace is bit-for-bit what it was, because the rag '
+    + 'is what stops foam reading as a flat sheet at ordinary range.'
+  ],
+  ['FIXED — the gulls and the albatross have world positions.',
+    'They were stationed on the hull (7-19 m off the masthead, and a 42 m radius at '
+    + '9 m up), so they translated with her and could never be left behind — a lens '
+    + 'two metres over the water got a three-metre bird across it, and this script '
+    + 'had to DETACH the bodies to shoot bare water. Each flock now chases a WORLD '
+    + 'anchor with its own inertia: a gull settles 72 m astern of a hull making 8 '
+    + 'm/s and an albatross 440 m, both measured against v*tau, and nothing in the '
+    + 'bird path reads the ship\u2019s heading at all (verify-wildlife holds that '
+    + 'structurally). They still follow a ship, because real seabirds do.'
+  ],
+  ['FIXED — a submerged whale dissolves instead of lying on the water as a slab.',
+    'The sea is opaque and she was drawn at full strength until sixteen metres down, '
+    + 'so what the eye got was the INTERSECTION of a twenty-metre body with the '
+    + 'water plane: a flat-topped grey shape with a hard waterline edge. She now '
+    + 'fades by Beer-Lambert into the sea\u2019s own colour — a shape at a metre, a '
+    + 'rumour at four, gone by ten — with the worst frame-to-frame opacity step over '
+    + 'the whole sounding cycle held under 0.06, so the dissolve is never a pop.'
+  ],
+  ['FIXED — the ocean mesh no longer shows its edge from a high lens.',
+    'The mesh is 720 m across and the fog closes at 620, so above about 45 m of eye '
+    + 'height its rim swung into frame as a hard polygonal boundary of bare sky. Its '
+    + 'outermost ring of vertices is now pushed out to 3000 m, which turns the last '
+    + 'band of quads into an apron reaching past the far plane: no new vertices, no '
+    + 'new draw call, no new material, and every fragment of it lies beyond the '
+    + 'fog\u2019s end, so what it draws is fog colour and nothing else.'
+  ],
+  ['OPEN — the windrow cue is weaker than it was, and that is the price of the '
+    + 'whitecaps having structure.',
+    'live-crest measures the white water\u2019s along/across correlation ratio as the '
+    + 'third and weakest of the three wind cues. It ran 0.509 in a breeze to 0.568 in '
+    + 'a gale — rising, which IS the claim. It now runs 0.448 to 0.385, falling. The '
+    + 'mechanism is not subtle: giving a whitecap internal structure necessarily '
+    + 'lowers the correlation of white water with itself, and there is more white '
+    + 'water in a gale. Shredding the spent tail with the WINDROW field rather than '
+    + 'an isotropic lace recovered part of it (0.375 -> 0.385) and no more. The '
+    + 'clause is left RED rather than widened. The other two cues — crest-line '
+    + 'bearing, and the downwind bias of the breaking at 1.78-1.98x — are untouched '
+    + 'and green.'
+  ],
+  ['OPEN — the appearance probe cannot yet prove its own registration.',
+    'scripts/live-appearance.mjs was written to be the trustworthy instrument the '
+    + 'sea v2 spec said did not exist: it freezes the sea, rectifies through the '
+    + 'frame\u2019s own matrices, bins by matched pairs within range x bearing cells so '
+    + 'range and fog and the corridor are held constant by construction, and carries '
+    + 'a false-registration control that re-bins the very same pixels by the break '
+    + 'field 7.3 m away. It also carries a REGISTRATION PRECONDITION — and it does '
+    + 'not currently meet it at the ranges section A measures, so it REPORTS rather '
+    + 'than asserts and says so on the console. The brightness guarantee is '
+    + 'therefore made in arithmetic (verify-glitter) rather than in pixels. Stated '
+    + 'rather than smoothed over: an instrument that answers when it cannot see is '
+    + 'the exact fault this whole exercise was about.'
+  ],
   ['CUT — a wind-veer clip was recorded twice and abandoned.',
-    'The plan was to show the wind-sea\'s fan slewing downwind at waves.js\'s own '
+    'The plan was to show the wind-sea\u2019s fan slewing downwind at waves.js\u2019s own '
     + 'AXIS_EASE rates (windTau 55 s, cap 0.030 rad/s) while the swell held its old '
     + 'line at 0.004, i.e. a crossed sea building on camera. It is genuinely in the '
     + 'height field, but from any camera that keeps the mesh edge out of frame the '
     + 'change in crest-line bearing over a minute is not legible — sampled frames at '
     + '2, 22, 42 and 60 s are hard to tell apart. Rather than ship a clip that '
-    + 'oversells, the slot went to `clip-gale-from-deck-height`. If the veer is worth '
+    + 'oversells, the slot went to clip-gale-from-deck-height. If the veer is worth '
     + 'publicising it needs an on-screen wind arrow or a split screen, not a longer '
-    + 'take.'],
+    + 'take.'
+  ],
+  ['NOTE — the three clips in this set are STALE and were not re-recorded.',
+    'They were shot before the appearance pass, so their water is the old water. The '
+    + 'owner\u2019s separate report on them stands: they run at gait-compressed speed, '
+    + 'which reads as fast-forward, and showreel.js does not force the sea state the '
+    + 'stills use, so a clip can open on whatever the ship happened to be riding. '
+    + 'Both are fixable in src/showreel.js and neither was touched here.'
+  ],
   ['NOTE — the wind-world pair (06 and 07) is framed WIND-RELATIVE, not sun-relative.',
     'Both use the identical lens, eye height and hour; the aim is a fixed angle off '
-    + 'the wind, and the two belts blow from different bearings, so the sun happens to '
-    + 'stand in frame at 54S and out of it at 1N. The sea and the whitecaps are the '
-    + 'comparison; the sky is not.'],
+    + 'the wind, and the two belts blow from different bearings, so the sun happens '
+    + 'to stand in frame at 54S and out of it at 1N. The sea and the whitecaps are '
+    + 'the comparison; the sky is not.'
+  ],
 ];
 
 const wanted = (key) => !ONLY.length || ONLY.some((o) => key.includes(o));
