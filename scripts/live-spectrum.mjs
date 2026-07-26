@@ -21,7 +21,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // on the globe, including mid oceans" (2026-07-25), so hunt them clean.
 const SPOT = { lat: 44, lon: -35 };
 const CAM_H = 150;     // nadir camera height (m)
-const FRAMES = 5;      // power spectra averaged per config
+const FRAMES = 12;     // power spectra averaged per config. Was 5, and 5 was
+                       // too few: the peak EW bin swung 2.4x run to run, which
+                       // is not a basis for convicting or clearing a sea
+                       // (2026-07-26). 12 holds it inside ~15%.
 const NLAM = 36, NANG = 36; // histogram bins: log-λ 1.2–80 m × band-angle 5°
 
 const browser = await puppeteer.launch({
@@ -248,11 +251,17 @@ try {
       }
       done({ hist: Array.from(hist), meanLum: +meanLum.toFixed(1),
         ew: { lambda: +ewPeak.lam.toFixed(2), power: +ewPeak.p.toExponential(2),
+          total: +ewTotal.toExponential(3),
           share: +(ewTotal ? ewPeak.p / ewTotal : 0).toFixed(3) },
         tier: window.saltstead.gfxQuality, bands: { ...window.saltstead.seaBands } });
     }), [CAM_H, FRAMES, NLAM, NANG]);
     console.log(`measured ${label} (tier ${res.tier}, swell ${res.bands.swell.toFixed(2)}, chop ${res.bands.chop.toFixed(2)}, meanLum ${res.meanLum})`);
-    console.log(`    EW-stripe: λ ${res.ew.lambda} m  power ${res.ew.power}  share-of-EW-band ${res.ew.share}`);
+    // BOTH numbers matter. The PEAK convicts a grating (one orientation, one
+    // wavelength, carrying the image); the TOTAL says how much narrow
+    // north-south structure the sea has at all, and it is the steadier of the
+    // two. A real sea raises the total and leaves the share near even.
+    console.log(`    EW-stripe: λ ${res.ew.lambda} m  peak ${res.ew.power}`
+      + `  band-total ${res.ew.total}  share-of-EW-band ${res.ew.share}`);
     await page.screenshot({ path: `${OUT}/spectrum-${label.replace(/\W+/g, '-')}.png` });
     return res;
   };
@@ -265,6 +274,12 @@ try {
   // Values are FORCED per config — releasing to the easing loop leaves the
   // sea flat for tens of seconds and measures nothing (the first run's bug).
   const CHOP = 1.05, SWELL = 0.55;
+  // A WARM-UP WHOSE RESULT IS THROWN AWAY. Whatever is measured first carries
+  // the boot transient — a draining wake map, the ship's own foam sprites still
+  // alive from before she was pinned, the first shader passes. Measured
+  // 2026-07-26: the flat reference read an EW peak of 1610 and then 3320 on two
+  // consecutive runs when it went first, and 33-49 once something else did.
+  await measure('warmup-discarded', { wakeOff: true, spritesOff: true, detailOff: true, chop: 0, swell: 0 });
   const ref = await measure('flat-reference', { wakeOff: true, detailOff: true, chop: 0, swell: 0 });
   const configs = [
     ['baseline', { chop: CHOP, swell: SWELL }],
