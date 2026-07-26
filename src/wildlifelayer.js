@@ -217,9 +217,17 @@ function buildWhaleBody(scene) {
   // material would put the shallowest animal's fade on the deepest one. Cloned
   // ONCE at construction, POD_MAX x 4 x 2 of them, nothing allocated per frame.
   const own = new Map();
+  // ...and every clone is born TRANSPARENT and stays that way. three decides
+  // `#define OPAQUE` from material.transparent when it first compiles the
+  // program, and flipping the flag later is NOT one of the state changes that
+  // rebuilds it (WebGLRenderer.setProgram only rebuilds on material.version or
+  // an enumerated list). A body whose first drawn frame had her at the surface
+  // — 49% of the sounding cycle — would therefore compile OPAQUE and never fade
+  // again for the whole session, which is the slab back with a blue tint. So the
+  // flag is set once and only the opacity moves.
   const mine = (m) => {
     let c = own.get(m);
-    if (!c) { c = m.clone(); own.set(m, c); }
+    if (!c) { c = m.clone(); c.transparent = true; own.set(m, c); }
     return c;
   };
   const add = (geo, dark, pale) => {
@@ -277,10 +285,8 @@ function buildWhaleBody(scene) {
     setFade(f) {
       if (Math.abs(f - this.fade) < 0.004) return;
       this.fade = f;
-      const solid = f > 0.995;
       for (const s of this.skin) {
         const m = s.m.material;
-        m.transparent = !solid;
         m.opacity = f;
         // depthWrite off once she is a ghost, or her own far faces punch holes
         // in her near ones through the alpha

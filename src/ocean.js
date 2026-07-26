@@ -73,9 +73,14 @@ const SIZE = 720, SEG = 180;
 // band of quads into an apron reaching well past the far plane. It costs NO new
 // vertices, NO new draw call and NO new material — the apron's fragments run the
 // same shader, and every one of them is beyond the fog's 620 m end, so what they
-// draw is fog colour and nothing else. The surface stays continuous: the ring
-// that was the rim is still the rim, still displaced by the same wave sum.
-const SKIRT = 3000;
+// draw is fog colour and nothing else — PAST 620 m. State the rest plainly: the
+// apron's first 264 m (356 to 620) is still partly visible, and there the surface
+// is a long quad whose height is INTERPOLATED between the 356 m ring and the far
+// one, so that band has no wave geometry of its own. Per-pixel shading still runs
+// off vWPos, so its colour and its normals are right; what is missing is the
+// silhouette, under 47-100% fog, in a band nobody looks at from a low lens. The
+// ring that was the rim is still the rim, still displaced by the same wave sum.
+const SKIRT = 1400;
 
 // the lens default: a 62 degree vertical field over a 900 px canvas (main.js's
 // own camera on a laptop). It stands only for the frames before the first
@@ -364,6 +369,7 @@ vec2 oCoastGradW(vec2 p) {
   // adds the patchiness, the windrows and the streaky fbm lace.
   float oFoam = 0.0;
   float oWhiteK = 1.0;         // how white this pixel's raft draws (age)
+  float oWcShare = 0.0;        // ...and how much of it is a BREAKER's, not the wake's
   vec2 oRagGrad = vec2(0.0);   // the raft's own relief, spent in the normal pass
   {
     // WHERE THE WATER IS ACTUALLY BREAKING, not where it happens to stand high.
@@ -439,10 +445,17 @@ vec2 oCoastGradW(vec2 p) {
       // normal pass below mixes that in as the foam's own surface. Whitecaps had
       // no relief at all — only the wake's churn roughened the normals — which
       // is half of why they read as torn paper stuck on the water.
+      // ...and it obeys the SAME two laws the lace does, because it is the same
+      // lattice: a 0.53 m feature is sub-pixel past about forty metres, so the
+      // relief fades with range exactly as the detail band does (the corduroy
+      // law's own reasoning — an un-faded sub-pixel normal is a shimmer
+      // generator), and it stands down close aboard where that lattice is the
+      // very magnified octave this pass removed from the opacity.
       float oRe = 0.30;
       oRagGrad = vec2(oFbm(oRp + vec2(oRe * ${GLITTER.ragFar}, 0.0)) - oR0,
         oFbm(oRp + vec2(0.0, oRe * ${GLITTER.ragFar})) - oR0)
-        / oRe * ${GLITTER.foamRelief.toFixed(3)};
+        / oRe * ${GLITTER.foamRelief.toFixed(3)}
+        * smoothstep(150.0, 30.0, vVDist) * mix(1.0, ${GLITTER.ragMagKeep.toFixed(2)}, oNearW);
       // AND THE TAIL IS THE PART THAT SHREDS. The break window is asymmetric by
       // construction, so oAge already says which end of a whitecap this is: the
       // tumbling head admits almost no lace, the sheet the crest has left behind
@@ -468,7 +481,10 @@ vec2 oCoastGradW(vec2 p) {
     oFoam = clamp(oFoamWk + oFoamWc, 0.0, 1.0);
     // a breaker's HEAD is thick water and draws near-white; its spent tail is a
     // thin sheet with the sea showing through. The churn is always thick.
-    if (oFoam > 1e-4) oWhiteK = (oFoamWk + oFoamWc * oGlThick(oAge)) / (oFoamWk + oFoamWc);
+    if (oFoam > 1e-4) {
+      oWhiteK = (oFoamWk + oFoamWc * oGlThick(oAge)) / (oFoamWk + oFoamWc);
+      oWcShare = oFoamWc / (oFoamWk + oFoamWc);
+    }
   }
   // crests pass light: looking through high water toward the sun finds
   // green glass (cheap subsurface scatter — reads huge, costs nothing)
@@ -608,12 +624,7 @@ vec2 oCoastGradW(vec2 p) {
     float oShat = smoothstep(${GLITTER.sparkOn0.toFixed(3)}, ${GLITTER.sparkOn1.toFixed(3)}, oGl)
       * (1.0 - oFoam);
     if (oShat > 0.002) {
-      vec2 oRg2 = normalize(vec2(-oV.x, -oV.z) + vec2(1e-5, 1e-5));
-      vec2 oAc2 = vec2(-oRg2.y, oRg2.x);
-      oTw = mix(1.0, oGlTwinkle(
-        dot(vWPos.xz, oRg2) / oGlSparkCell(oFt.y) + uTime * ${GLITTER.sparkDrift.toFixed(3)},
-        dot(vWPos.xz, oAc2) / oGlSparkCell(oFt.x)
-          + uTime * ${(GLITTER.sparkDrift * 0.61).toFixed(4)}), oShat);
+      oTw = mix(1.0, oGlTwinkleAt(vWPos.x, vWPos.z, uTime, oGlSparkNear(oFt.x)), oShat);
     }
   }
   outgoingLight += min(${GLITTER.clamp.toFixed(3)},
@@ -629,7 +640,7 @@ vec2 oCoastGradW(vec2 p) {
   // picture answered break strength except the facet's own tilt — which runs the
   // wrong way and is exactly how the hardest-breaking water came out darker than
   // water breaking half as hard. A deeper raft scatters more light back out.
-  outgoingLight += oFoam * oGlRaft(oBrk) * uGlitAmp * uGlitCol
+  outgoingLight += oFoam * mix(1.0, oGlRaft(oBrk), oWcShare) * uGlitAmp * uGlitCol
     * (${GLITTER.foamBack.toFixed(3)} + ${GLITTER.foamFwd.toFixed(3)} * oFwd * oFwd)
     * (${GLITTER.foamElevFloor.toFixed(3)}
       + ${(1 - GLITTER.foamElevFloor).toFixed(3)} * max(uSunDirW.y, 0.0));

@@ -57,7 +57,8 @@ ok(!/234\.34|435\.345/.test(srcOcean),
 // emits into it (the glint lattice and the near lace live there), so the search
 // runs over both — a scale that had quietly moved into the emitted block would
 // otherwise stop being measured without anything going red.
-const shaderText = `${srcOcean}\n${glslGlitter()}`;
+const srcGlit = readFileSync(new URL('../src/glitter.js', import.meta.url), 'utf8');
+const shaderText = `${srcOcean}\n${srcGlit}\n${glslGlitter()}`;
 for (const { scale, what, find, konst, recip } of OCEAN_NOISE_SCALES) {
   ok(shaderText.includes(find || `* ${scale}`),
     `the water still uses the ${what} scale ${scale}`);

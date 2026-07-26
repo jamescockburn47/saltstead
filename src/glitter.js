@@ -189,14 +189,42 @@ export const GLITTER = {
   // pointed, so panning does not slide the glints: only moving does, which is
   // what a real road of light does.
   sparkPx: 5.0,
-  // ...but a world coordinate has a float32 mantissa and play happens 15-80 km
-  // out. At 4 per metre the widest coordinate the earth can hand the hash is
-  // 3.2e5, where a float32 step is 0.031 of a cell; past about 7 per metre the
-  // cell fraction coarsens past verify-oceannoise's own 5% ceiling and the field
-  // starts to quantise. So the cell has a FLOOR in metres, and it is that
-  // arithmetic bound and not a taste: within ~40 m the glints simply run bigger,
-  // which is also what they do in life.
-  sparkCellMin: 0.25,
+  // ...AND IT IS SPENT AS A CROSS-FADE BETWEEN TWO FIXED WORLD LATTICES, NOT AS
+  // A PER-PIXEL DIVISOR. The first cut divided a WORLD coordinate by a per-pixel
+  // cell, and that is an aliasing machine for a reason that has nothing to do
+  // with float32: the screen gradient of W/c is (dW)/c - W (dc)/c^2, and the
+  // second term rides |W|. At the world origin the field ran the intended 0.19
+  // cells per pixel; seventeen kilometres out it ran 172, and at the far corner
+  // 914. In play the "five-pixel glint" was a ONE-PIXEL RANDOM SAMPLE — measured
+  // lag-1 correlation 0.87 at the origin against 0.02 at 17 km — so the road
+  // fizzed rather than shattered, and re-sorted every frame because the gain
+  // rides the eye's own position. A cold review caught it; the pixel probe could
+  // not, because it measures at one place.
+  //
+  // The cure is the one the lace already uses: two lattices at FIXED world
+  // scales, cross-faded by the footprint. Each level is world-locked, so its
+  // screen gradient is honestly (dW)/c and nothing else; only the BLEND moves
+  // with range, and it moves smoothly. Glints hold station on the water, and
+  // they merge and split as they run toward the eye because the blend hands them
+  // from one octave to the next — which is the phenomenon.
+  //
+  // The scales are set so whichever dominates is a HANDFUL of pixels over the
+  // range a road is actually seen at — 7.5 px at 40 m on the near level, 15 px
+  // at 100 m and 3.7 px at 400 m on the far one. The first cut of this cross-fade
+  // used 2.0/0.25 and traded the aliasing for the opposite fault: 15 px cells at
+  // 40 m are BLOBS, and the pixel probe measured the road straight back down to
+  // 3.2 separated maxima per 1000 px. 4 per metre is also the float32 ceiling
+  // (verify-oceannoise check 4b: 4 x 89 353 m of world leaves 3% of a cell).
+  //
+  // HONEST LIMIT: past about 600 m the far level goes sub-pixel too and the road
+  // returns to a smooth line. That is what a real road does at the horizon, and
+  // a third level would cost two more lattice reads on every corridor pixel to
+  // buy the last few hundred metres of it.
+  sparkNear: 4.0, sparkFar: 0.8,
+  // the hand-over: hold the NEAR level until one of its cells is down to a few
+  // pixels, then hand to the far one, which is sixteen times coarser and
+  // therefore back up to a dozen. Measured across the ladder in verify-glitter.
+  sparkPx0: 2.5, sparkPx1: 6.0,    // px per NEAR cell: where the cross-fade runs
   // the two lattices and the threshold. sparkDuty is E[oGlSpark] over the field
   // — MEASURED, not guessed, and verify-glitter re-measures it from the twins
   // and fails if it has drifted, because the floor/gain below are derived from
@@ -285,7 +313,7 @@ export const GLITTER = {
   // pixel's own footprint, both reusing oGlFoot: cross-fade to a finer lattice,
   // and taper the lace's CONTRAST as the cell is magnified, because a magnified
   // octave is standing in for structure the medium does not have at that scale.
-  // ragNear is held at 4 per metre by the same float32 bound as sparkCellMin.
+  // ragNear is held at 4 per metre by verify-oceannoise's own float32 bound.
   ragFar: 1.9, ragNear: 4.0,
   ragPx0: 22, ragPx1: 78,   // px per far cell: where the cross-fade runs
   ragMagKeep: 0.42,         // contrast left at full magnification
@@ -385,9 +413,13 @@ export function lobe(hAlong, hAcross, hUp, sigA, sigB) {
 // glints. These twins are the second, and verify-glitter runs their arithmetic
 // against the emitted GLSL exactly as it runs the lobe's.
 
-// one glint's cell, in metres, for a footprint of `foot` metres on that axis
-export function sparkCell(foot) {
-  return Math.max(foot * GLITTER.sparkPx, GLITTER.sparkCellMin);
+// which of the two glint lattices this pixel is on: 0 near (the 0.5 m cells),
+// 1 far (the 4 m ones). Driven by how many pixels one NEAR cell covers.
+export function sparkNearness(footA) {
+  const G = GLITTER;
+  const px = 1 / G.sparkNear / Math.max(footA, 1e-5);
+  const x = clamp01((G.sparkPx1 - px) / (G.sparkPx1 - G.sparkPx0));
+  return x * x * (3 - 2 * x);
 }
 
 // the field itself, in [0, 1]: two decorrelated value-noise lattices summed and
@@ -407,6 +439,20 @@ export function sparkField(px, pz) {
 export const SPARK_GAIN = (1 - GLITTER.sparkFloor) / GLITTER.sparkDuty;
 export function twinkle(px, pz) {
   return GLITTER.sparkFloor + SPARK_GAIN * sparkField(px, pz);
+}
+// the field the shader actually draws: the two fixed levels, cross-faded. Each
+// term has mean sparkDuty, so the blend does too and the twinkle's mean is
+// exactly 1 at every range.
+export function sparkAt(wx, wz, t, w) {
+  const G = GLITTER;
+  const a = sparkField(wx * G.sparkNear + t * G.sparkDrift,
+    wz * G.sparkNear + t * G.sparkDrift * 0.61);
+  const b = sparkField(wx * G.sparkFar - t * (G.sparkDrift * 0.5) + 53.1,
+    wz * G.sparkFar - t * (G.sparkDrift * 0.37) + 53.1);
+  return a + (b - a) * w;
+}
+export function twinkleAt(wx, wz, t, w) {
+  return GLITTER.sparkFloor + SPARK_GAIN * sparkAt(wx, wz, t, w);
 }
 
 // ---- THE RAFT ---------------------------------------------------------------
@@ -540,10 +586,13 @@ vec2 oGlFoot(float dist, float graze, float pixA) {
   return vec2(across, min(${n(G.maxFoot)}, across / max(graze, ${n(G.minGraze)})));
 }
 // ---- THE SHATTER ----------------------------------------------------------
-// one glint's cell, in metres, for a footprint of foot metres on that axis.
-// The floor is float32's, not taste (see GLITTER.sparkCellMin).
-float oGlSparkCell(float foot) {
-  return max(foot * ${n(G.sparkPx)}, ${n(G.sparkCellMin)});
+// which of the two FIXED glint lattices this pixel is on: 0 near, 1 far. Both
+// are world-locked on purpose — dividing a world coordinate by a per-pixel cell
+// aliases catastrophically away from the origin (see GLITTER.sparkNear) — so
+// only this blend moves with range.
+float oGlSparkNear(float footA) {
+  return smoothstep(${n(G.sparkPx1)}, ${n(G.sparkPx0)},
+    ${n(1 / G.sparkNear)} / max(footA, 1e-5));
 }
 // the glint field: two decorrelated lattices summed and thresholded high, so it
 // fires on about a fifth of the water and leaves the rest dark. oVnoise comes
@@ -554,10 +603,21 @@ float oGlSpark(float px, float pz) {
       pz * ${n(G.sparkOct)} + ${n(G.sparkOff)}));
   return smoothstep(${n(G.sparkLo)}, ${n(G.sparkHi)}, nsum);
 }
-// ...normalised so the corridor's MEAN is still the lobe's: the shatter is
+// the two levels, cross-faded. Both terms have mean sparkDuty, so the blend does
+// too and the corridor's MEAN is still the lobe's at every range: the shatter is
 // contrast, never brightness (floor + gain * sparkDuty = 1 by construction).
+float oGlSparkAt(float wx, float wz, float t, float w) {
+  float a = oGlSpark(wx * ${n(G.sparkNear)} + t * ${n(G.sparkDrift)},
+    wz * ${n(G.sparkNear)} + t * ${n(G.sparkDrift * 0.61)});
+  float b = oGlSpark(wx * ${n(G.sparkFar)} - t * ${n(G.sparkDrift * 0.5)} + 53.1,
+    wz * ${n(G.sparkFar)} - t * ${n(G.sparkDrift * 0.37)} + 53.1);
+  return a + (b - a) * w;
+}
 float oGlTwinkle(float px, float pz) {
   return ${n(G.sparkFloor)} + ${n(SPARK_GAIN)} * oGlSpark(px, pz);
+}
+float oGlTwinkleAt(float wx, float wz, float t, float w) {
+  return ${n(G.sparkFloor)} + ${n(SPARK_GAIN)} * oGlSparkAt(wx, wz, t, w);
 }
 // ---- THE RAFT -------------------------------------------------------------
 // how far the far lace has been magnified past its useful scale: 0 at ordinary

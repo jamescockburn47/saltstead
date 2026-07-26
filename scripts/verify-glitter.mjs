@@ -30,7 +30,8 @@ import { readFileSync } from 'node:fs';
 import {
   GLITTER, SIGMA_REF, SPARK_GAIN, belowFrac, coxMunkVar, sigmaFor, footprint, lobe,
   fresnelWater, pathValue, glslGlitter,
-  sparkCell, sparkField, twinkle, ragNearness, ragOf, shredOf, thickOf, raftOf,
+  sparkNearness, sparkField, sparkAt, twinkle, twinkleAt,
+  ragNearness, ragOf, shredOf, thickOf, raftOf,
 } from '../src/glitter.js';
 import { makeOceanNoise } from '../src/oceannoise.js';
 import { glitterSource, moonBrightness } from '../src/lightrig.js';
@@ -62,8 +63,8 @@ ok(!/\(1 - glit\.low\)/.test(srcOcean) && !/glit\.ax|glit\.az/.test(srcOcean),
   'ocean.js no longer synthesises a direction out of glit.low / glit.ax / glit.az');
 ok(/glit\.dir/.test(srcOcean), 'ocean.js takes the source direction whole');
 for (const fn of ['oGlBelow', 'oGlSigma', 'oGlLobe', 'oGlFresnel', 'oGlFoot',
-  'oGlSparkCell', 'oGlSpark', 'oGlTwinkle', 'oGlRagNear', 'oGlRag', 'oGlShred', 'oGlThick',
-  'oGlRaft'])
+  'oGlSparkNear', 'oGlSpark', 'oGlSparkAt', 'oGlTwinkle', 'oGlTwinkleAt',
+  'oGlRagNear', 'oGlRag', 'oGlShred', 'oGlThick', 'oGlRaft'])
   ok(glsl.includes(`float ${fn}(`) || glsl.includes(`vec2 ${fn}(`), `GLSL emits ${fn}`);
 // the shatter is built on oceannoise's lattice, so ocean.js MUST prepend that
 // module's GLSL before this one's or the fragment shader will not compile
@@ -87,7 +88,7 @@ for (const [name, v] of [
 for (const [name, v] of [
   ['gain', GLITTER.gain], ['clamp', GLITTER.clamp], ['foamSigma', GLITTER.foamSigma],
   ['foamBack', GLITTER.foamBack], ['foamFwd', GLITTER.foamFwd],
-  ['sparkDrift', GLITTER.sparkDrift], ['ragFar', GLITTER.ragFar],
+  ['ragFar', GLITTER.ragFar],
   ['ragNear', GLITTER.ragNear], ['foamRelief', GLITTER.foamRelief],
   ['foamFlat', GLITTER.foamFlat],
 ]) ok(srcOcean.includes(`GLITTER.${name}`), `ocean.js reads GLITTER.${name} rather than a literal`);
@@ -161,7 +162,7 @@ const jsTwins = (() => {
   ok(!leftover, `the GLSL transliteration covers every construct emitted`
     + (leftover ? ` — found "${leftover[1]}", so this gate is measuring nothing until it is taught that` : ''));
   const names = [...glsl.matchAll(/(?:float|vec2)\s+(oGl\w+)\s*\(/g)].map((m) => m[1]);
-  ok(names.length === 13, `all thirteen emitted functions found (${names.join(', ')})`);
+  ok(names.length === 15, `all fifteen emitted functions found (${names.join(', ')})`);
   return compile(s, names);
 })();
 {
@@ -204,10 +205,13 @@ const jsTwins = (() => {
     cmp('oGlFoot.across', gf[0], jf.across);
     cmp('oGlFoot.along', gf[1], jf.along);
     // ---- and the SHATTER and the RAFT, on the same terms ----
-    cmp('oGlSparkCell', jsTwins.oGlSparkCell(jf.across), sparkCell(jf.across));
+    cmp('oGlSparkNear', jsTwins.oGlSparkNear(jf.across), sparkNearness(jf.across));
     const spx = (rnd() * 2 - 1) * 4e4, spz = (rnd() * 2 - 1) * 4e4;
     cmp('oGlSpark', jsTwins.oGlSpark(spx, spz), sparkField(spx, spz));
     cmp('oGlTwinkle', jsTwins.oGlTwinkle(spx, spz), twinkle(spx, spz));
+    const sw = rnd(), st = rnd() * 3e4;
+    cmp('oGlSparkAt', jsTwins.oGlSparkAt(spx, spz, st, sw), sparkAt(spx, spz, st, sw));
+    cmp('oGlTwinkleAt', jsTwins.oGlTwinkleAt(spx, spz, st, sw), twinkleAt(spx, spz, st, sw));
     cmp('oGlRagNear', jsTwins.oGlRagNear(jf.across), ragNearness(jf.across));
     const rf = rnd() * 0.9375, rn = rnd() * 0.9375, rw = rnd();
     cmp('oGlRag', jsTwins.oGlRag(rf, rn, rw), ragOf(rf, rn, rw));
@@ -228,8 +232,7 @@ const jsTwins = (() => {
     ['the cos^-4 Jacobian dropped', (t) => t.replace('return (core + tail) * j;', 'return (core + tail);')],
     ['exp(-0.5 * q) become exp(-q)', (t) => t.replace('exp(-0.5 * q) * e', 'exp(-q) * e')],
     ["oGlFoot's two components swapped", (t) => t.replace(/return vec2\(across, (min[^;]+)\);/, 'return vec2($1, across);')],
-    ['the glint cell loses its pixel term', (t) => t.replace(`max(foot * ${num17(GLITTER.sparkPx)}`, 'max(0.0 * (foot')
-      .replace(`, ${num17(GLITTER.sparkCellMin)});`, `), ${num17(GLITTER.sparkCellMin)});`)],
+    ['the two glint levels stop cross-fading', (t) => t.replace('return a + (b - a) * w;', 'return a;')],
     ['the shred forgets the age', (t) => t.replace('* age * (1.0 - rag)', '* (1.0 - rag)')],
     ["the lace's contrast taper dropped", (t) => t.replace(`* mix(1.0, ${num17(GLITTER.ragMagKeep)}, w)`, '* 1.0')],
   ];
@@ -239,11 +242,11 @@ const jsTwins = (() => {
     let caught = false;
     try {
       const m = compile(translate(mutated),
-        ['oGlLobe', 'oGlFoot', 'oGlSparkCell', 'oGlShred', 'oGlRag']);
+        ['oGlLobe', 'oGlFoot', 'oGlSparkAt', 'oGlShred', 'oGlRag']);
       if (rel(m.oGlLobe([0.06, 0.02, 0.995], 0.16, 0.12), lobe(0.06, 0.02, 0.995, 0.16, 0.12)) > TOL) caught = true;
       const f = m.oGlFoot(300, 0.02, 1.4e-3), jf2 = footprint(300, 0.02, 1.4e-3);
       if (rel(f[0], jf2.across) > TOL || rel(f[1], jf2.along) > TOL) caught = true;
-      if (rel(m.oGlSparkCell(0.4), sparkCell(0.4)) > TOL) caught = true;
+      if (rel(m.oGlSparkAt(1e4, -2e4, 12, 0.4), sparkAt(1e4, -2e4, 12, 0.4)) > TOL) caught = true;
       if (rel(m.oGlShred(0.2, 0.4), shredOf(0.2, 0.4)) > TOL) caught = true;
       if (rel(m.oGlRag(0.2, 0.8, 0.6), ragOf(0.2, 0.8, 0.6)) > TOL) caught = true;
     } catch { caught = true; }
@@ -604,6 +607,29 @@ const jsTwins = (() => {
     'and it outshines open water well off the bearing, where a wake is usually seen');
 }
 
+// ---- 7b. AND THE SHADER MUST ACTUALLY CALL ALL OF IT ------------------------
+// A cold review mutated ocean.js five ways — deleted the macro-normal levelling,
+// switched the shatter off, deleted the raft depth, passed 0 for the break age —
+// and this file stayed green every time, because the only link was a string
+// search over ocean.js's own text INCLUDING ITS COMMENTS. A gate that proves an
+// arithmetic identity about a function nobody calls is proving nothing. These
+// match the CALL together with its ARGUMENT.
+{
+  const call = (re, what) => ok(re.test(srcOcean), `ocean.js really ${what}`);
+  call(/oNw = normalize\(mix\(oNw, oNf, \$\{GLITTER\.foamFlat[^}]*\} \* oFoam\)\)/,
+    'levels the foam\'s macro normal by foamFlat * oFoam');
+  call(/oGlTwinkleAt\(vWPos\.x, vWPos\.z, uTime, oGlSparkNear\(oFt\.x\)\)/,
+    'draws the shatter from the cross-faded world lattices');
+  call(/uSparkle \* \$\{GLITTER\.gain[^}]*\} \* oGl \* oTw/,
+    'multiplies the corridor by the twinkle');
+  call(/oFoam \* mix\(1\.0, oGlRaft\(oBrk\), oWcShare\) \* uGlitAmp/,
+    'scales the BREAKER raft\'s radiance by its depth, and leaves the wake alone');
+  call(/oGlShred\([^;]*\boAge\b[^;]*\)/, 'shreds the spent tail with the break AGE');
+  call(/oGlThick\(oAge\)/, 'draws the head whiter than the tail');
+  call(/oGlRag\(oR0, oFbm\(oRq\), oNearW\)/, 'cross-fades the lace onto the finer lattice');
+  call(/oGlRagNear\(oFootA\)/, 'drives that cross-fade from the pixel footprint');
+}
+
 // ---- 8. APPEARANCE, NOT PRESENCE -------------------------------------------
 // THIS SECTION EXISTS BECAUSE EVERY GATE IN THIS FILE WAS GREEN WHILE THE
 // PICTURE LOOKED BASIC. Coverage matched Monahan's photographs, the sunward
@@ -687,24 +713,35 @@ let sparkDutyMeasured = 0, glintDensity = 0, glintContrast = 0;
     + ` against ${was.contrast.toFixed(2)}x for the smooth twinkle it replaces`
     + ' (floor 1.8x of it)');
   ok(now.contrast > 2.5, `and ${now.contrast.toFixed(2)}x in absolute terms (floor 2.5)`);
-  ok(now.density > was.density * 0.7,
-    `without thinning the field out — ${now.density.toFixed(2)} maxima/m2 against`
-    + ` ${was.density.toFixed(2)} (a corridor of a dozen big blobs is not glitter either)`);
+  // DENSITY IS THE DISCRIMINATING STATISTIC AND IT IS GATED UPWARD. A cold review
+  // showed the contrast ratio above can be gamed by a deliberately SMOOTH field
+  // with a low floor (pow(vnoise, 16) scores 31x), because the median IS the
+  // floor when the field is dark over four fifths of its area. Separated maxima
+  // per square metre cannot be gamed that way: a smooth field has one broad
+  // maximum per cell and no more.
+  ok(now.density > was.density * 1.5,
+    `and it is made of MANY separate glints — ${now.density.toFixed(3)} maxima/m2`
+    + ` against ${was.density.toFixed(3)} for the smooth twinkle (floor 1.5x of it);`
+    + ' a corridor of a dozen big blobs is not glitter either');
 
-  // (c) AND THE CELL IS SIZED BY THE PIXEL, which is what stops the field
-  // averaging to its own mean at the range the road is actually seen at. The
-  // retired lattice was a fixed 0.435 m: at 300 m from the default lens one cell
-  // is a quarter of a pixel, so it drew nothing at all.
+  // (c) AND WHICHEVER LEVEL DOMINATES IS A HANDFUL OF PIXELS. The levels are
+  // FIXED world lattices — the first cut sized the cell per pixel and aliased
+  // everywhere but the world origin, which a cold review caught and this check
+  // now forecloses: nothing below reads a per-pixel divisor.
   const pixA = (2 * Math.tan((62 * Math.PI / 180) / 2)) / 1440;
-  for (const d of [40, 120, 400, 1000]) {
-    const f = footprint(d, Math.max(0.02, 3 / d), pixA);
-    const px = sparkCell(f.across) / f.across;
-    ok(px >= 3 && px <= 60, `a glint is ${px.toFixed(1)} px across at ${d} m`
-      + ' (wanted 3-60: finer aliases, coarser is a blob)');
-  }
-  // ...and the retired fixed lattice could not do that at BOTH ends of the road
-  // at once: one world scale is chunky close aboard and gone at range.
   {
+    for (const d of [20, 40, 100, 200, 400]) {
+      const f = footprint(d, Math.max(0.02, 3 / d), pixA);
+      const w = sparkNearness(f.across);
+      const px = (w < 0.5 ? 1 / GLITTER.sparkNear : 1 / GLITTER.sparkFar) / f.across;
+      ok(px >= 3 && px <= 20, `the dominant glint level is ${px.toFixed(1)} px across at`
+        + ` ${d} m (blend ${w.toFixed(2)}; wanted 3-20 — finer aliases, coarser is a blob,`
+        + ' and 15 px blobs are what the first cut of this cross-fade drew)');
+    }
+    ok(!/oGlSparkCell|\/ *oGlSpark/.test(glsl) && !/dot\(vWPos\.xz, o\w+\) *\//.test(srcOcean),
+      'and no world coordinate is divided by a per-pixel cell anywhere — that is'
+      + ' the aliasing machine the shatter was built on first');
+    // ...and the retired fixed 0.435 m lattice could not serve both ends at once
     const near = footprint(40, 0.075, pixA).across, far = footprint(400, 0.02, pixA).across;
     ok(0.435 / far < 2 && 0.435 / near > 8,
       `the retired 0.435 m lattice ran ${(0.435 / near).toFixed(1)} px at 40 m and`
