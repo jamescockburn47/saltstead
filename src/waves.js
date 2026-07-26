@@ -630,6 +630,31 @@ export const breakShore = (h, gs, d) => breakOf(h, gs, K_SHORE,
 // the criterion turned into an opacity — SHADING ONLY (see BREAK.foamGain)
 export const breakFoam = (b) => Math.min(1, b * BREAK.foamGain);
 
+// ---- HOW OLD THIS FOAM IS ---------------------------------------------------
+// breakOf already computes the local phase `d` and throws it away inside the
+// window. It is the one signal that says whether a pixel of white water is the
+// tumbling HEAD of a breaker or the shredded tail it left behind, and without it
+// a whitecap can only be drawn as a blob of uniform paint — which is exactly how
+// it looked in the v2 showcase (03-crest-gale-downwind-breaking.png: flat white
+// decals, no relief, no leading edge, no dissipating tail).
+//
+// The window is deliberately asymmetric — lead 0.50 rad puts its peak forward of
+// the crest, front 1.05 rad is the short lead-in down the forward face, trail
+// 2.10 rad is the long analytic decay over water the crest has already passed.
+// So the age is the TRAILING coordinate, normalised by that decay:
+//   0  at the peak and everywhere forward of it — thick, dense, fresh
+//   1  at the spent end of the tail — thin, shredded, holed
+// Shading only. The hull is shoved by breaking() and knows nothing of this.
+export function breakAge(h, gs, kRef) {
+  const hk = h * kRef;
+  let d = Math.atan2(hk, gs) - Math.PI / 2;
+  d -= TAU * Math.floor((d + Math.PI) / TAU);
+  const a = -(d - BREAK.lead) / BREAK.trail;
+  return a < 0 ? 0 : a > 1 ? 1 : a;
+}
+export const breakAgeOpen = (h, gs) => breakAge(h, gs, K_WIND);
+export const breakAgeShore = (h, gs) => breakAge(h, gs, K_SHORE);
+
 // breaking(x, z, t) in [0, 1] — the field the shader whitens and the hull feels.
 // The wind-sea band alone drives the open-water term: far-travelled swell under
 // light air does not break, and whitecaps ARE the local sea breaking.
@@ -875,6 +900,15 @@ float oBreakShore(float h, float gs, float sd) {
   return oBreak(h, gs, ${n(K_SHORE)}, ${n(BREAK.shoreS0 * BREAK.shoreRms)}, ${n(BREAK.shoreS1 * BREAK.shoreRms)})
     * (1.0 - smoothstep(${n(BREAK.surfIn)}, ${n(BREAK.surfOut)}, -sd)); }
 float oBreakFoam(float b) { return min(1.0, b * ${n(BREAK.foamGain)}); }
+// HOW OLD THIS FOAM IS — 0 at the tumbling head, 1 at the spent tail. See
+// breakAge above; the expression is the twin's, term for term.
+float oBreakAge(float h, float gs, float kRef) {
+  float hk = h * kRef;
+  float d = atan(hk, gs) - ${n(Math.PI / 2)};
+  d = d - ${n(TAU)} * floor((d + ${n(Math.PI)}) / ${n(TAU)});
+  return clamp(-(d - ${n(BREAK.lead)}) / ${n(BREAK.trail)}, 0.0, 1.0); }
+float oBreakAgeOpen(float h, float gs) { return oBreakAge(h, gs, ${n(K_WIND)}); }
+float oBreakAgeShore(float h, float gs) { return oBreakAge(h, gs, ${n(K_SHORE)}); }
 `;
 }
 

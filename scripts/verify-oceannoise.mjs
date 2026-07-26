@@ -31,6 +31,7 @@
 //      so this gate carries proof that it catches the thing it was built for.
 import { readFileSync } from 'node:fs';
 import { ONOISE, glslOceanNoise, makeOceanNoise, OCEAN_NOISE_SCALES } from '../src/oceannoise.js';
+import { glslGlitter, GLITTER } from '../src/glitter.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -52,8 +53,23 @@ ok(!/234\.34|435\.345/.test(srcOcean),
   'the dead float32-overrunning hash is gone from ocean.js');
 
 // ---- 2. the scales under test are the shader's own --------------------------
-for (const { scale, what } of OCEAN_NOISE_SCALES)
-  ok(srcOcean.includes(`* ${scale}`), `ocean.js still uses the ${what} scale ${scale}`);
+// The compiled fragment shader is ocean.js's own text PLUS the GLSL glitter.js
+// emits into it (the glint lattice and the near lace live there), so the search
+// runs over both — a scale that had quietly moved into the emitted block would
+// otherwise stop being measured without anything going red.
+const shaderText = `${srcOcean}\n${glslGlitter()}`;
+for (const { scale, what, find, konst, recip } of OCEAN_NOISE_SCALES) {
+  ok(shaderText.includes(find || `* ${scale}`),
+    `the water still uses the ${what} scale ${scale}`);
+  // where the scale reaches the shader through a named constant rather than a
+  // literal, the NUMBER has to be checked too, or this list could drift away
+  // from the field it claims to be measuring without a single string failing
+  if (konst) {
+    const v = recip ? 1 / GLITTER[konst] : GLITTER[konst];
+    ok(Math.abs(v - scale) < 1e-9,
+      `...and GLITTER.${konst} still makes it ${scale} per metre (${v})`);
+  }
+}
 
 // ---- the instrument --------------------------------------------------------
 const F32 = makeOceanNoise(Math.fround);

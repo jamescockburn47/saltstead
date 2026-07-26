@@ -140,13 +140,25 @@ export function makeOceanNoise(r) {
   return { h21, vnoise, fbm };
 }
 
-// The noise scales ocean.js actually asks for, so the gate measures the field
+// The noise scales the water actually asks for, so the gate measures the field
 // the water uses rather than a field of the gate's own choosing. Keep in step
 // with the shader body (verify-oceannoise asserts every one of them appears in
-// src/ocean.js).
+// src/ocean.js OR in the GLSL glitter.js emits into it).
+//
+// TWO OF THESE ARE NOW UPPER BOUNDS RATHER THAN LITERALS, and that is the
+// point. The glint lattice (glitter.js sparkCellMin) and the near lace
+// (glitter.js ragNear) size their cells from the PIXEL, so their scale is a
+// per-pixel quantity — but both are FLOORED in metres, and the floor is set by
+// check 4(b) below: at 4 per metre the widest coordinate the earth can hand the
+// hash is 3.2e5, where float32's step is 3% of a cell; past about 7 the cell
+// fraction coarsens through the 5% ceiling and the field begins to quantise.
+// So the floors are an arithmetic bound, and listing them here is what keeps
+// the bound measured rather than remembered.
 export const OCEAN_NOISE_SCALES = [
-  { scale: 2.3, what: 'sparkle twinkle' },
-  { scale: 1.9, what: 'churn rag' },
+  { scale: 4.0, what: 'near lace (its floor)', find: 'GLITTER.ragNear', konst: 'ragNear' },
+  { scale: 4.0, what: 'glint lattice (its floor)', find: '0.25000000000000000',
+    konst: 'sparkCellMin', recip: true },
+  { scale: 1.9, what: 'churn rag', find: 'GLITTER.ragFar', konst: 'ragFar' },
   { scale: 1.35, what: 'detail ripple, fine band' },
   { scale: 0.42, what: 'detail chop, fine band' },
   { scale: 0.28, what: 'gale windrow, across the wind' },

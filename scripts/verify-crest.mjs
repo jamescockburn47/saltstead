@@ -45,6 +45,7 @@ import {
   COMPONENTS, NWAVE, NSWELL, CREST_Q, CREST_DIMPLE, CREST_MAX_FRAC,
   CREST_COEF, crestQ, MAX_HARM_SWELL, MAX_HARM_CHOP,
   BREAK, breakWindow, breakOf, breakOpen, breakShore, breakFoam, breaking,
+  breakAge, breakAgeOpen, breakAgeShore,
   waveMix, waveGradMix, waveHeight, waveGradient, waveBandHeight, waveBandGrad,
   waveBandDir, waveAxisFor, setWaveAxes, setWaveOrigin, setSeaBands,
   setShoreSampler, shoreEnv, shoreHeight,
@@ -132,6 +133,7 @@ function translate(glsl) {
     .replace(/\bvec([24])\s*\(/g, '__v$1(')                           // constructors
     .replace(/(\w+)\s*\+=\s*(__v[24])\(([^;]*)\);/g, '__add($1, $2($3));')
     .replace(/\bsmoothstep\s*\(/g, '__ss(')
+    .replace(/\bclamp\s*\(/g, '__clamp(')
     .replace(/\batan\s*\(/g, 'Math.atan2(')
     .replace(/\b(sin|cos|sqrt|abs|floor|max|min|pow|exp|log)\s*\(/g, 'Math.$1(');
   const leftover = s.match(
@@ -141,10 +143,11 @@ function translate(glsl) {
       + ' until it is taught that' : ''));
   const names = [...glsl.matchAll(/(?:float|vec[234])\s+(o\w+)\s*\(/g)].map((m) => m[1]);
   // eslint-disable-next-line no-new-func
-  return new Function('__v2', '__v4', '__add', '__ss',
+  return new Function('__v2', '__v4', '__add', '__ss', '__clamp',
     `let uWave = null, uWaveQ = null, uWaveLOD = 1;\n${s}\n`
     + `return { __set: (a, b, l) => { uWave = a; uWaveQ = b; uWaveLOD = l; },`
-    + ` ${names.join(', ')} };`)(SHIMS.__v2, SHIMS.__v4, SHIMS.__add, SHIMS.__ss);
+    + ` ${names.join(', ')} };`)(SHIMS.__v2, SHIMS.__v4, SHIMS.__add, SHIMS.__ss,
+    (x, a, b) => Math.min(Math.max(x, a), b));
 }
 const waveBlock = glslWaves(), breakBlock = glslBreak();
 const G = translate(waveBlock);
@@ -165,9 +168,14 @@ ok(/uWaveLOD > 0\.5 \? 1\.0 : 0\.0/.test(oceanCode)
   'ocean.js applies the tier lever to the SHADING gradient at the call site');
 ok(/oWaveMix\(oWaveWind\(oLP\), uSwellS\)/.test(oceanCode),
   'and the fragment reads the FULL wind band, exactly as the hull does');
-for (const fn of ['oBreakWin', 'oBreak', 'oBreakOpen', 'oBreakShore']) {
+for (const fn of ['oBreakWin', 'oBreak', 'oBreakOpen', 'oBreakShore',
+  'oBreakAge', 'oBreakAgeOpen', 'oBreakAgeShore']) {
   ok(typeof B[fn] === 'function', `the break block's ${fn} transliterated`);
 }
+// the shader must SPEND the age, not merely be handed it: a whitecap drawn as one
+// flat opacity was the v2 showcase's "torn-paper decal" (03-crest-gale...png)
+ok(/oBreakAgeOpen\(/.test(srcOcean) && /oGlShred\(/.test(srcOcean),
+  'ocean.js reads the break window\'s own age and shreds the spent tail with it');
 
 const rel = (a, b) => (Math.abs(a) + Math.abs(b) < 1e-300 ? 0
   : Math.abs(a - b) / Math.max(1e-300, Math.abs(a), Math.abs(b)));
@@ -307,6 +315,44 @@ const uni = (t) => {
     const sd = -(rnd() * 600) + 20;
     cmp('oBreakShore', B.oBreakShore(h, gsl, sd), breakShore(h, gsl, sd));
     cmp('oBreakFoam', B.oBreakFoam(rnd0), breakFoam(rnd0));
+    cmp('oBreakAge', B.oBreakAge(h, gsl, kRef), breakAge(h, gsl, kRef));
+    cmp('oBreakAgeOpen', B.oBreakAgeOpen(h, gsl), breakAgeOpen(h, gsl));
+    cmp('oBreakAgeShore', B.oBreakAgeShore(h, gsl), breakAgeShore(h, gsl));
+  }
+  // ---- AND THE AGE MUST MEAN WHAT ITS NAME SAYS --------------------------
+  // 0 at the tumbling head, 1 at the spent end. The whole point of exposing it is
+  // that the shader can draw a whitecap with a shape; an age that ran the other
+  // way would put the holes in the head and the dense water in the wake, and the
+  // parity check above would not notice, because both sides would be wrong.
+  {
+    // sample the window by its own phase: hk = sin(phase-ish), gs = cos, so that
+    // d walks the circle exactly as breakOf builds it
+    const ageAt = (d) => {
+      const a = -(d - BREAK.lead) / BREAK.trail;
+      return a < 0 ? 0 : a > 1 ? 1 : a;
+    };
+    ok(ageAt(BREAK.lead) === 0 && ageAt(BREAK.lead + 0.5) === 0,
+      'the age is 0 at the window peak and everywhere forward of it');
+    ok(Math.abs(ageAt(BREAK.lead - BREAK.trail) - 1) < 1e-12,
+      'and exactly 1 where the trailing decay has run out');
+    let mono = true, prev = -1;
+    for (let k = 0; k <= 200; k++) {
+      const a = ageAt(BREAK.lead - (k / 200) * BREAK.trail);
+      if (a < prev - 1e-12) mono = false;
+      prev = a;
+    }
+    ok(mono, 'and it rises monotonically down the tail');
+    // the age must agree with the window it is cut from: wherever the window has
+    // died astern, the age has reached 1
+    ok(breakWindow(BREAK.lead - BREAK.trail) < 1e-12 && ageAt(BREAK.lead - BREAK.trail) === 1,
+      'the age and the window run out together');
+    // and the arithmetic the SHADER will run must land on the same numbers as
+    // this reasoning: drive breakAge through a real (h, gs) pair at the peak
+    const kRef0 = 0.5;
+    const hp = Math.sin(BREAK.lead + Math.PI / 2) / kRef0, gp = Math.cos(BREAK.lead + Math.PI / 2);
+    ok(breakAge(hp, gp, kRef0) < 1e-9,
+      `breakAge is 0 at the window's own peak driven through (h, gs)`
+      + ` (${breakAge(hp, gp, kRef0).toExponential(2)})`);
   }
   console.log(`  break-block GLSL/JS parity: ${n} comparisons, worst relative`
     + ` ${worst.toExponential(2)} (ceiling ${TOL})`);

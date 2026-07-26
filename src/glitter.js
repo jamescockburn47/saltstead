@@ -94,6 +94,13 @@
 // only for its slope STATISTICS, which are read, never written.
 
 import { COMPONENTS, SWELL_LEN, GRAD_BANDS } from './waves.js';
+import { makeOceanNoise } from './oceannoise.js';
+
+// the twin of the lattice the SHATTER is built on. ocean.js prepends
+// oceannoise.js's emitted GLSL BEFORE this module's, so `oVnoise` is in scope for
+// the glint field below; this is the float64 twin of that same function, and it
+// is what lets the gate run the shatter's arithmetic rather than read it.
+const VN = makeOceanNoise((x) => x);
 
 // ---- the drawn sea's own slope statistics, summed from the real table -------
 // A component of amplitude a and wavenumber k contributes a slope a*k*cos(phase)
@@ -154,10 +161,59 @@ export const GLITTER = {
   // pixel of the road at three sea states inside a window, and the probe now also
   // caps the sunward median and the clipped fraction.
   gain: 1.50, clamp: 3.2,
-  // how hard the twinkle noise breaks the corridor into individual glints,
-  // near the eye and far off. Contrast only — the mean is preserved, so the
-  // corridor's brightness is the lobe's and not the noise's.
-  twNear: 0.85, twFar: 0.22, twFade: 320,
+  // ---- THE ROAD MUST SHATTER (2026-07-26, from the v2 showcase) -----------
+  // What shipped: oTw = 1 + k * (2 * vnoise(worldXZ * 2.3) - 1), with k easing
+  // 0.85 near the eye to 0.22 at 320 m. Two faults, and the owner's verdict on
+  // the frames was "the glitter off waves/cresting is crap and basic":
+  //
+  //  (a) THE LATTICE WAS WORLD-LOCKED AT A FIXED SCALE. 2.3 per metre is a
+  //      0.435 m cell. At 40 m from a 62-degree lens over 1440 px that cell is
+  //      already under a pixel, so the noise averaged to its own mean and the
+  //      corridor went SMOOTH exactly where the road is — a painted searchlight
+  //      streak, which is what 08-glitter-sun-road-low-sun.png shows.
+  //  (b) A SMOOTH VALUE NOISE IS THE WRONG SHAPE. It has one broad maximum per
+  //      cell, so at full contrast it reads as soft lumps. A glint is a FACET
+  //      throwing the whole source at the eye: the signature is separation —
+  //      bright points with dark water between them, merging and splitting as
+  //      they run toward the viewer.
+  //
+  // The replacement fixes both. THE CELL IS MEASURED IN PIXELS, not metres:
+  // sparkPx pixels across the view ray and sparkPx along it, which at grazing
+  // incidence is many more metres down-range than across — so a glint is drawn
+  // the same size at 40 m and at 400 m, and the foreshortened dashes come out
+  // for free. And the field is a sum of two decorrelated lattices THRESHOLDED
+  // high, so it fires on about a fifth of the water and leaves the rest dark.
+  //
+  // The frame is the pixel's own (down-range, across-range). That frame is a
+  // property of the eye's POSITION and the water's, not of where the camera is
+  // pointed, so panning does not slide the glints: only moving does, which is
+  // what a real road of light does.
+  sparkPx: 5.0,
+  // ...but a world coordinate has a float32 mantissa and play happens 15-80 km
+  // out. At 4 per metre the widest coordinate the earth can hand the hash is
+  // 3.2e5, where a float32 step is 0.031 of a cell; past about 7 per metre the
+  // cell fraction coarsens past verify-oceannoise's own 5% ceiling and the field
+  // starts to quantise. So the cell has a FLOOR in metres, and it is that
+  // arithmetic bound and not a taste: within ~40 m the glints simply run bigger,
+  // which is also what they do in life.
+  sparkCellMin: 0.25,
+  // the two lattices and the threshold. sparkDuty is E[oGlSpark] over the field
+  // — MEASURED, not guessed, and verify-glitter re-measures it from the twins
+  // and fails if it has drifted, because the floor/gain below are derived from
+  // it to keep the corridor's MEAN brightness exactly the lobe's.
+  sparkOct: 2.11, sparkOff: 7.7, sparkMixA: 0.62, sparkMixB: 0.38,
+  sparkLo: 0.50, sparkHi: 0.80, sparkDuty: 0.1955,
+  sparkFloor: 0.30,
+  // glints scintillate: the lattice drifts about a third of a cell a second, so
+  // a spark lives a few seconds and is replaced. Added AFTER the division, so it
+  // is a drift in glints and not in metres.
+  sparkDrift: 0.33,
+  // where the shatter engages, in lobe strength. The tail lobe reaches the whole
+  // sea and a field peaking near four turns that into television static, so the
+  // glints ride in on the lobe's own value: nothing on the ambient sheen, all of
+  // it on the road. Measured on 03-crest-gale-downwind-breaking at a 30 degree
+  // sun, which is the worst case (a high source spreads its tail widest).
+  sparkOn0: 0.05, sparkOn1: 0.40,
   // plain tier keeps this fraction of the path: the lobe is arithmetic, not
   // noise, so the cheap tier can afford the phenomenon even though it cannot
   // afford the twinkle that breaks it into glints. The plain tier also drops
@@ -184,6 +240,55 @@ export const GLITTER = {
   // foam's other two amputations, restored in part: churn keeps this much of
   // its specular and this much of the sky
   foamSpecKeep: 0.55, foamSkyKeep: 0.45,
+
+  // ---- THE RAFT HAS A SHAPE (2026-07-26, from the v2 showcase) ------------
+  // 03-crest-gale-downwind-breaking.png shows whitecaps as flat white decals:
+  // no relief, no bright tumbling head, no dissipating tail, no relationship to
+  // the wave face they sit on. The break field already knows all of it — its
+  // window is asymmetric about the crest (lead 0.50, front 1.05, trail 2.10),
+  // so waves.js breakAge reads 0 at the head and 1 at the spent end — and the
+  // shader was throwing that coordinate away. These four numbers spend it.
+  //
+  //  foamShred  how much of a SPENT raft the lace may punch out. A tumbling head
+  //             is dense water and admits almost none; the sheet the crest has
+  //             left behind is thin and full of holes, and that contrast IS the
+  //             difference between a torn-paper decal and breaking water.
+  //  foamThin   how white the spent tail draws against the head.
+  //  foamRelief the raft's own bumpiness, as a slope added to the shading
+  //             normal. Foam is a bubble raft, not a decal on a plane.
+  //  foamFlat   and how far the raft's MACRO normal is levelled toward vertical.
+  //             This is the fix for the measured defect that the hardest-breaking
+  //             water rendered DARKER than unbroken water (117 luminance counts
+  //             against 122): the steepest forward face is the facet tilted
+  //             furthest from the sky, and foam keeps only foamSkyKeep of the sky
+  //             reflection, so geometry was cancelling the whitening. A raft of
+  //             bubbles is a DIFFUSE scatterer — its radiance barely depends on
+  //             the slope of the water under it — so levelling the macro normal
+  //             inside foam is not a cheat, it is the physics the flat-albedo
+  //             model was missing.
+  foamShred: 0.85, foamThin: 0.62, foamRelief: 0.55, foamFlat: 0.80,
+  // AND THE RAFT KEEPS THICKENING AFTER IT HAS STOPPED GETTING WIDER. breakFoam
+  // is min(1, 3b), so the drawn opacity saturates at b = 1/3 — a third of the
+  // way up a field that reaches 1. Past that point nothing about the picture
+  // changed with break strength except the facet's own tilt, and the tilt runs
+  // the WRONG way, so the very hardest-breaking water could still come out
+  // darker than water breaking half as hard. It is also just false: past
+  // optical thickness a breaker does not stop piling up bubbles, it piles up
+  // DEEPER ones, and a deeper raft scatters more of the light that enters it
+  // back out. So the raft's own radiance carries a thickness term over exactly
+  // the span where the opacity has nothing left to say.
+  foamThick: 0.60, raft0: 0.34, raft1: 0.80,
+  // THE LACE'S OWN SCALE. The churn rag runs at 1.9 per metre — a 0.526 m cell,
+  // which is lace at 30 m and a chain of half-metre HOLES at three (one cell
+  // covers about 130 px there, and the fbm's minima sit at 0.40 of its peak).
+  // That was the showcase's near-field defect. Two levers, both driven by the
+  // pixel's own footprint, both reusing oGlFoot: cross-fade to a finer lattice,
+  // and taper the lace's CONTRAST as the cell is magnified, because a magnified
+  // octave is standing in for structure the medium does not have at that scale.
+  // ragNear is held at 4 per metre by the same float32 bound as sparkCellMin.
+  ragFar: 1.9, ragNear: 4.0,
+  ragPx0: 22, ragPx1: 78,   // px per far cell: where the cross-fade runs
+  ragMagKeep: 0.42,         // contrast left at full magnification
   // the view ray's grazing sine is floored here — at the true horizon the
   // along-range footprint diverges, and a 500 m cutoff already saturates both
   // bands, so the floor costs nothing and keeps the arithmetic finite
@@ -273,6 +378,69 @@ export function lobe(hAlong, hAcross, hUp, sigA, sigB) {
   const tail = Math.exp(-0.5 * q / w) * G.tailK * (e / w);
   return (core + tail) * j;
 }
+
+// ---- THE SHATTER ------------------------------------------------------------
+// The corridor's envelope is `lobe` above and does not change. What changes is
+// what the envelope is filled WITH: a smooth function, or a field of separate
+// glints. These twins are the second, and verify-glitter runs their arithmetic
+// against the emitted GLSL exactly as it runs the lobe's.
+
+// one glint's cell, in metres, for a footprint of `foot` metres on that axis
+export function sparkCell(foot) {
+  return Math.max(foot * GLITTER.sparkPx, GLITTER.sparkCellMin);
+}
+
+// the field itself, in [0, 1]: two decorrelated value-noise lattices summed and
+// thresholded high. Sparse and separated by construction — that is the whole
+// point, and `sparkDuty` is its mean.
+export function sparkField(px, pz) {
+  const G = GLITTER;
+  const n = G.sparkMixA * VN.vnoise(px, pz)
+    + G.sparkMixB * VN.vnoise(px * G.sparkOct + G.sparkOff, pz * G.sparkOct + G.sparkOff);
+  const x = clamp01((n - G.sparkLo) / (G.sparkHi - G.sparkLo));
+  return x * x * (3 - 2 * x);
+}
+
+// floor + gain * E[field] = 1, so the road's MEAN brightness is still the
+// lobe's and the shatter is contrast only — the same promise the retired smooth
+// twinkle made, kept by construction instead of by symmetry.
+export const SPARK_GAIN = (1 - GLITTER.sparkFloor) / GLITTER.sparkDuty;
+export function twinkle(px, pz) {
+  return GLITTER.sparkFloor + SPARK_GAIN * sparkField(px, pz);
+}
+
+// ---- THE RAFT ---------------------------------------------------------------
+// How much of the far lace has been magnified past its useful scale: 0 at
+// ordinary range, 1 close aboard. `footA` is the pixel's across-range footprint
+// (oGlFoot's first component) and the numerator is one cell of the far lattice.
+export function ragNearness(footA) {
+  const G = GLITTER;
+  const px = 1 / G.ragFar / Math.max(footA, 1e-5);
+  const x = clamp01((px - G.ragPx0) / (G.ragPx1 - G.ragPx0));
+  return x * x * (3 - 2 * x);
+}
+// the lace, composed: cross-faded onto the finer lattice and tapered in
+// contrast, both by the same lever. `far`/`near` are the two fbm samples.
+export function ragOf(far, near, w) {
+  const m = mix(far, near, w) - 0.469;      // oFbm's own mean (verify-oceannoise)
+  return 0.469 + m * mix(1, GLITTER.ragMagKeep, w);
+}
+// what the lace does to a raft of a given age: nothing to a tumbling head,
+// holes to a spent tail
+export function shredOf(rag, age) {
+  return 1 - GLITTER.foamShred * age * (1 - rag);
+}
+// and how white that raft draws
+export function thickOf(age) { return mix(1, GLITTER.foamThin, age); }
+// the raft's DEPTH, over the span where its opacity has already saturated: 1 up
+// to raft0, climbing to 1 + foamThick by raft1. This is what keeps the hardest-
+// breaking water the whitest water in the frame.
+export function raftOf(brk) {
+  const x = clamp01((brk - GLITTER.raft0) / (GLITTER.raft1 - GLITTER.raft0));
+  return 1 + GLITTER.foamThick * x * x * (3 - 2 * x);
+}
+
+function mix(a, b, t) { return a + (b - a) * t; }
 
 // Schlick over water: the reason a low source is the cinematic one. c is the
 // cosine of the angle between the half-vector and the light — the incidence
@@ -370,5 +538,50 @@ float oGlFresnel(float c) {
 vec2 oGlFoot(float dist, float graze, float pixA) {
   float across = max(dist, 0.1) * pixA;
   return vec2(across, min(${n(G.maxFoot)}, across / max(graze, ${n(G.minGraze)})));
+}
+// ---- THE SHATTER ----------------------------------------------------------
+// one glint's cell, in metres, for a footprint of foot metres on that axis.
+// The floor is float32's, not taste (see GLITTER.sparkCellMin).
+float oGlSparkCell(float foot) {
+  return max(foot * ${n(G.sparkPx)}, ${n(G.sparkCellMin)});
+}
+// the glint field: two decorrelated lattices summed and thresholded high, so it
+// fires on about a fifth of the water and leaves the rest dark. oVnoise comes
+// from src/oceannoise.js, whose GLSL ocean.js prepends before this block.
+float oGlSpark(float px, float pz) {
+  float nsum = ${n(G.sparkMixA)} * oVnoise(vec2(px, pz))
+    + ${n(G.sparkMixB)} * oVnoise(vec2(px * ${n(G.sparkOct)} + ${n(G.sparkOff)},
+      pz * ${n(G.sparkOct)} + ${n(G.sparkOff)}));
+  return smoothstep(${n(G.sparkLo)}, ${n(G.sparkHi)}, nsum);
+}
+// ...normalised so the corridor's MEAN is still the lobe's: the shatter is
+// contrast, never brightness (floor + gain * sparkDuty = 1 by construction).
+float oGlTwinkle(float px, float pz) {
+  return ${n(G.sparkFloor)} + ${n(SPARK_GAIN)} * oGlSpark(px, pz);
+}
+// ---- THE RAFT -------------------------------------------------------------
+// how far the far lace has been magnified past its useful scale: 0 at ordinary
+// range, 1 close aboard, from the pixel's own across-range footprint
+float oGlRagNear(float footA) {
+  return smoothstep(${n(G.ragPx0)}, ${n(G.ragPx1)}, ${n(1 / G.ragFar)} / max(footA, 1e-5));
+}
+// the lace, cross-faded onto the finer lattice and tapered in contrast by the
+// same lever. 0.469 is oFbm's own mean (verify-oceannoise holds it there).
+float oGlRag(float far, float near, float w) {
+  float m = mix(far, near, w) - 0.469;
+  return 0.469 + m * mix(1.0, ${n(G.ragMagKeep)}, w);
+}
+// what the lace does to a raft of a given age: nothing to a tumbling head,
+// holes to a spent tail
+float oGlShred(float rag, float age) {
+  return 1.0 - ${n(G.foamShred)} * age * (1.0 - rag);
+}
+// and how white that raft draws
+float oGlThick(float age) { return mix(1.0, ${n(G.foamThin)}, age); }
+// the raft's DEPTH, over the span where its opacity has already saturated —
+// breakFoam saturates at a third of the field, and past there only the facet's
+// tilt was still changing, which runs the wrong way
+float oGlRaft(float brk) {
+  return 1.0 + ${n(G.foamThick)} * smoothstep(${n(G.raft0)}, ${n(G.raft1)}, brk);
 }`;
 }

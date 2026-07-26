@@ -56,6 +56,26 @@ import { glslOceanNoise } from './oceannoise.js';
 import { GLITTER, glslGlitter } from './glitter.js';
 
 const SIZE = 720, SEG = 180;
+// THE SKIRT. The mesh is 720 m across, so its rim stands 360 m from the ship —
+// and the fog does not close until 620, which leaves 260 m of half-fogged water
+// with NOTHING BEYOND IT. Below about 45 m of eye height the rim is under the
+// horizon and no one ever sees it; above that it swings up into frame as a hard
+// polygonal boundary of bare sky, which is what the v2 showcase found when a
+// 75 m plan view was tried for a clip. A warden's photo camera can get there,
+// and so can a showreel beat.
+//
+// FOUR FIXES WERE AVAILABLE AND THIS IS THE CHEAPEST. Growing the mesh costs
+// vertices as the square; a second horizon plane costs a draw call and puts a
+// seam where the two meet; fading the rim into the fog leaves the boundary
+// exactly where it was, because past it there is still sky; clamping the camera
+// removes a capability the warden's writ exists to provide. Instead the mesh's
+// OUTERMOST RING OF VERTICES is pushed out to SKIRT metres, which turns its last
+// band of quads into an apron reaching well past the far plane. It costs NO new
+// vertices, NO new draw call and NO new material — the apron's fragments run the
+// same shader, and every one of them is beyond the fog's 620 m end, so what they
+// draw is fog colour and nothing else. The surface stays continuous: the ring
+// that was the rim is still the rim, still displaced by the same wave sum.
+const SKIRT = 3000;
 
 // the lens default: a 62 degree vertical field over a 900 px canvas (main.js's
 // own camera on a laptop). It stands only for the frames before the first
@@ -81,6 +101,22 @@ export class Ocean {
     // non-indexed centroid rig of the faceted era is gone with the facets
     const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
     geo.rotateX(-Math.PI / 2);
+    // ...and the rim goes out to the skirt. Scaled on the SQUARE's own norm
+    // (max of |x|, |z|) rather than radially, so the boundary stays a square and
+    // the apron is an even band on all four sides. The 1e-3 guard is for the
+    // centre vertex of an odd grid, which has no direction to be pushed in.
+    {
+      const p = geo.attributes.position, h = SIZE / 2, n = p.count;
+      for (let i = 0; i < n; i++) {
+        const x = p.getX(i), z = p.getZ(i);
+        const m = Math.max(Math.abs(x), Math.abs(z));
+        if (m < h - 1e-3) continue;                  // interior: untouched
+        const k = SKIRT / Math.max(m, 1e-3);
+        p.setX(i, x * k); p.setZ(i, z * k);
+      }
+      p.needsUpdate = true;
+      geo.computeBoundingSphere();
+    }
     // a 1×1 black texture stands in until setWakeMap hands over the live one
     const blank = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1);
     blank.needsUpdate = true;
@@ -311,10 +347,24 @@ vec2 oCoastGradW(vec2 p) {
   float oBrkShore = oBreakShore(oShoreH,
     uSwellS * oShoreGradMag(oSd) * oCGate, oSd);
   float oBrk = max(oBrkOpen, oBrkShore);
+  // HOW OLD THIS WHITE WATER IS (waves.js breakAge): 0 at the tumbling head of
+  // the breaker, 1 at the spent end of the trailing window. The break field
+  // always knew this — the window is asymmetric about the crest, which is the
+  // whole persistence mechanism — and the shader used to throw it away, so a
+  // whitecap could only ever be drawn as a blob of uniform paint. One atan, and
+  // only on water that is actually breaking.
+  float oAge = 0.0;
+  if (oBrk > 0.002) {
+    oAge = oBrkShore > oBrkOpen
+      ? oBreakAgeShore(oShoreH, uSwellS * oShoreGradMag(oSd) * oCGate)
+      : oBreakAgeOpen(oHwd, oGsW * oSAtt);
+  }
   // froth on EVERY tier: the wake's churn is a texture read and the break field
   // is arithmetic, so even Plain keeps her white road AND her whitecaps. Fine
   // adds the patchiness, the windrows and the streaky fbm lace.
   float oFoam = 0.0;
+  float oWhiteK = 1.0;         // how white this pixel's raft draws (age)
+  vec2 oRagGrad = vec2(0.0);   // the raft's own relief, spent in the normal pass
   {
     // WHERE THE WATER IS ACTUALLY BREAKING, not where it happens to stand high.
     // What was here until Phase C: smoothstep(0.72, 0.95, oCrest) — a HEIGHT
@@ -333,7 +383,7 @@ vec2 oCoastGradW(vec2 p) {
     // field, so her motion and the gated coverage are untouched by this.
     float oWc = oBreakFoam(oBrk);
     float oRag = 0.72;
-    if (uDetailAmp > 0.001) {
+    if (uDetailAmp > 0.001 && max(oWc, oWkHF.y) > 0.004) {
       // the wind is not even, so neither is the breaking. ONE broad mask now,
       // and it MODULATES rather than gates: the two-lottery rig existed because
       // a height threshold breaks every crest of a wave row in step (the storm
@@ -359,21 +409,66 @@ vec2 oCoastGradW(vec2 p) {
       // 15 m/s at 59% and a 16 m/s gale at 78%, and leaves a working breeze
       // (chop 1.05) at exactly nothing.
       float oGale = smoothstep(1.10, 1.50, uSwellS);
+      float oStk = 0.469;                 // oFbm's own mean where no gale blows
       if (oGale > 0.001) {
         vec2 oWr = vec2(dot(vWPos.xz, uWindDir),
           dot(vWPos.xz, vec2(-uWindDir.y, uWindDir.x)));
-        float oStk = oFbm(vec2(oWr.x * 0.02, oWr.y * 0.28) + uTime * vec2(0.006, 0.0));
+        oStk = oFbm(vec2(oWr.x * 0.02, oWr.y * 0.28) + uTime * vec2(0.006, 0.0));
         oWc *= mix(1.0, 0.30 + 1.40 * oStk, oGale);
       }
-      // churned texture inside any foam: streaky lace, alive — high-contrast
-      // fine fbm so heavy churn still reads as WATER torn white, not paint
-      oRag = 0.40 + 0.60 * oFbm(vWPos.xz * 1.9 + uTime * vec2(0.11, 0.07));
+      // CHURNED TEXTURE INSIDE ANY FOAM: streaky lace, alive — high-contrast
+      // fine fbm so heavy churn still reads as WATER torn white, not paint.
+      //
+      // AND ITS SCALE FOLLOWS THE PIXEL NOW (glitter.js ragFar/ragNear). One
+      // cell of the 1.9-per-metre lattice is 0.526 m: lace at thirty metres, and
+      // at THREE metres a chain of dark half-metre ellipses down the wake road —
+      // one cell covering about 130 px with its minima at 0.40 of its peak. That
+      // was the showcase's near-field defect, and it is a resolution fault, not a
+      // noise fault, so the cure is the pixel's own footprint: cross-fade onto a
+      // finer lattice and taper the contrast, both off oGlFoot's across-range
+      // component, which is the same machinery the glitter lobe is sized by.
+      float oFootA = max(oDist, 0.05) * uPixA;
+      float oNearW = oGlRagNear(oFootA);
+      vec2 oRp = vWPos.xz * ${GLITTER.ragFar} + uTime * vec2(0.11, 0.07);
+      vec2 oRq = vWPos.xz * ${GLITTER.ragNear.toFixed(1)} - uTime * vec2(0.09, 0.13) + 31.4;
+      float oR0 = oFbm(oRp);
+      float oRv = oGlRag(oR0, oFbm(oRq), oNearW);
+      oRag = 0.40 + 0.60 * oRv;
+      // THE RAFT IS A BUBBLE RAFT, NOT A DECAL. The same lace that shreds it
+      // BUMPS it: two more taps of the far lattice give its gradient, and the
+      // normal pass below mixes that in as the foam's own surface. Whitecaps had
+      // no relief at all — only the wake's churn roughened the normals — which
+      // is half of why they read as torn paper stuck on the water.
+      float oRe = 0.30;
+      oRagGrad = vec2(oFbm(oRp + vec2(oRe * ${GLITTER.ragFar}, 0.0)) - oR0,
+        oFbm(oRp + vec2(0.0, oRe * ${GLITTER.ragFar})) - oR0)
+        / oRe * ${GLITTER.foamRelief.toFixed(3)};
+      // AND THE TAIL IS THE PART THAT SHREDS. The break window is asymmetric by
+      // construction, so oAge already says which end of a whitecap this is: the
+      // tumbling head admits almost no lace, the sheet the crest has left behind
+      // is punched full of holes.
+      //
+      // IN A GALE IT IS THE WIND THAT TEARS IT, not an isotropic lace, and the
+      // difference is measurable. The first cut shredded with oRv alone and
+      // live-crest duly convicted it: the white water's along/across correlation
+      // ratio fell from 0.443 in a breeze to 0.375 in a gale — i.e. the windrow
+      // cue INVERTED, because isotropic holes punched across the streaks are
+      // exactly what destroys an along-wind correlation. oStk is the windrow
+      // field itself (50 m down the wind against 3.6 m across it), so as the gale
+      // comes on, the tearing lies down the wind with everything else.
+      oWc *= oGlShred(mix(oRv, oStk, oGale), oAge);
     }
     // the CHURN takes the rag whole — that texture is what makes the Kelvin V read
-    // as water torn white rather than paint. A WHITECAP takes it lightly: it is
-    // already a thin band on a crest, and multiplying it by a mask that reaches
-    // 0.40 is how a breaker ends up dimmer than the sea beside it.
-    oFoam = clamp(oWkHF.y * 0.85 * oRag + oWc * (0.72 + 0.28 * oRag), 0.0, 1.0);
+    // as water torn white rather than paint. A WHITECAP takes it lightly HERE and
+    // gets its structure from oGlShred instead: multiplying its opacity by a mask
+    // that reaches 0.40 everywhere is how a breaker ends up dimmer than the sea
+    // beside it, which is the defect this pass is fixing, not repeating.
+    float oFoamWk = oWkHF.y * 0.85 * oRag;
+    float oFoamWc = oWc * (0.72 + 0.28 * oRag);
+    oFoam = clamp(oFoamWk + oFoamWc, 0.0, 1.0);
+    // a breaker's HEAD is thick water and draws near-white; its spent tail is a
+    // thin sheet with the sea showing through. The churn is always thick.
+    if (oFoam > 1e-4) oWhiteK = (oFoamWk + oFoamWc * oGlThick(oAge)) / (oFoamWk + oFoamWc);
   }
   // crests pass light: looking through high water toward the sun finds
   // green glass (cheap subsurface scatter — reads huge, costs nothing)
@@ -386,7 +481,7 @@ vec2 oCoastGradW(vec2 p) {
   // rest of its light response was amputated below. It is now one part of
   // three (albedo here, forward scatter and a rough sheen in the light pass).
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.95, 0.96),
-    oFoam * ${GLITTER.foamAlbedo.toFixed(3)});`)
+    oFoam * ${GLITTER.foamAlbedo.toFixed(3)} * oWhiteK);`)
           .replace('#include <specularmap_fragment>', `#include <specularmap_fragment>
   // churned water is ROUGH, not matte: a bubble raft has wet slopes in every
   // direction and they glint. Killing specular outright (it was 0.85) is what
@@ -427,6 +522,21 @@ vec2 oCoastGradW(vec2 p) {
     }
   }
   vec3 oNw = normalize(vec3(-oWG.x, 1.0, -oWG.y));
+  // ---- FOAM IS A DIFFUSE SCATTERER, NOT A MIRROR --------------------------
+  // THE MEASURED DEFECT: binned by break strength, the STRONGEST bin rendered
+  // DARKER than unbroken water (117 luminance counts against 122). The cause is
+  // geometry and not noise — the steepest forward face is the facet tilted
+  // furthest from the sky, and foam keeps only 45% of the sky reflection, so the
+  // whitening and the tilting cancelled and the whitest water in a gale was not
+  // the breaking crest. But a raft of bubbles is a dense multiple-scattering
+  // medium: its radiance hardly depends on the slope of the water underneath it.
+  // So inside foam the MACRO normal levels toward vertical (the hemispheric
+  // average the sky term wants) while the raft's OWN relief takes its place —
+  // one mix does both, and the sky, the fresnel and the lobe's frame all follow.
+  if (oFoam > 0.004) {
+    vec3 oNf = normalize(vec3(-oRagGrad.x, 1.0, -oRagGrad.y));
+    oNw = normalize(mix(oNw, oNf, ${GLITTER.foamFlat.toFixed(3)} * oFoam));
+  }
   normal = normalize((viewMatrix * vec4(oNw, 0.0)).xyz);`)
           .replace('#include <opaque_fragment>', `
   // fresnel to the REAL sky: the reflected ray picks its own point on the
@@ -471,15 +581,40 @@ vec2 oCoastGradW(vec2 p) {
   vec3 oHalf = normalize(oV + uSunDirW + vec3(1e-6, 1e-6, 1e-6));
   vec3 oHl = vec3(dot(oHalf, oAlg), dot(oHalf, oAcr), dot(oHalf, oNw));
   float oGl = oGlLobe(oHl, oSigA, oSigB) * oGlFresnel(dot(oHalf, uSunDirW));
-  // the twinkle: CONTRAST ONLY, mean preserved, so the corridor's brightness
-  // is the lobe's and never the noise's. Hard near the eye where single facets
-  // are resolved, easing to the statistical average far off — which is exactly
-  // the difference between a shivering field of glints and a road of light.
+  // THE ROAD SHATTERS (src/glitter.js). CONTRAST ONLY, mean preserved, so the
+  // corridor's brightness is still the lobe's and never the noise's — but the
+  // corridor is now made of SEPARATE GLINTS instead of being a smooth streak,
+  // which is the whole visual signature of sun glitter and the thing the v2
+  // showcase did not have. The retired version sampled a world-locked 0.435 m
+  // lattice, which is sub-pixel past about forty metres: it averaged to its own
+  // mean exactly where the road is, and painted a searchlight beam. THE CELL IS
+  // NOW MEASURED IN PIXELS — sparkPx across the view ray and sparkPx along it,
+  // so a glint is drawn the same size at 40 m as at 400, and the foreshortening
+  // at grazing incidence turns them into the dashes a real road is made of.
+  // The frame is the pixel's own down-range direction, which depends on where
+  // the EYE is and not on where it is pointed: panning cannot slide the glints.
+  //
+  // AND IT SHATTERS THE ROAD, NOT THE SEA. The lobe has a broad weak TAIL (the
+  // term that keeps a high sun's water a sparkle field instead of a dark sheet
+  // with one spot under the mast), and that tail reaches everywhere. Multiplying
+  // it by a field that peaks near four turned the whole gale into television
+  // static on the first cut — measured on the identical frame. A glint is a
+  // FACET aligned to the source; the ambient sheen is multiply-scattered light
+  // and is genuinely smooth, so the shatter rides in on the lobe's own strength.
+  // Foam is the same argument again: a bubble raft's sheen is diffuse, so the
+  // shatter stands down over it rather than making powder of every whitecap.
   float oTw = 1.0;
   if (uDetailAmp > 0.001) {
-    float k = mix(${GLITTER.twNear.toFixed(3)}, ${GLITTER.twFar.toFixed(3)},
-      smoothstep(0.0, ${GLITTER.twFade.toFixed(1)}, oDist));
-    oTw = max(0.0, 1.0 + k * (2.0 * oVnoise(vWPos.xz * 2.3 + uTime * vec2(1.1, 0.7)) - 1.0));
+    float oShat = smoothstep(${GLITTER.sparkOn0.toFixed(3)}, ${GLITTER.sparkOn1.toFixed(3)}, oGl)
+      * (1.0 - oFoam);
+    if (oShat > 0.002) {
+      vec2 oRg2 = normalize(vec2(-oV.x, -oV.z) + vec2(1e-5, 1e-5));
+      vec2 oAc2 = vec2(-oRg2.y, oRg2.x);
+      oTw = mix(1.0, oGlTwinkle(
+        dot(vWPos.xz, oRg2) / oGlSparkCell(oFt.y) + uTime * ${GLITTER.sparkDrift.toFixed(3)},
+        dot(vWPos.xz, oAc2) / oGlSparkCell(oFt.x)
+          + uTime * ${(GLITTER.sparkDrift * 0.61).toFixed(4)}), oShat);
+    }
   }
   outgoingLight += min(${GLITTER.clamp.toFixed(3)},
     uSparkle * ${GLITTER.gain.toFixed(3)} * oGl * oTw) * uGlitCol;
@@ -489,13 +624,18 @@ vec2 oCoastGradW(vec2 p) {
   // the sun was doing, which is the whole of "fake and disconnected".
   vec3 oSunAz = normalize(vec3(uSunDirW.x, 0.0, uSunDirW.z) + vec3(1e-5, 0.0, 1e-5));
   float oFwd = 0.5 + 0.5 * dot(oRange, oSunAz);
-  outgoingLight += oFoam * uGlitAmp * uGlitCol
+  // ...and the raft's DEPTH rides on that (glitter.js oGlRaft). oBreakFoam
+  // saturates at a third of the break field, so past that point nothing in the
+  // picture answered break strength except the facet's own tilt — which runs the
+  // wrong way and is exactly how the hardest-breaking water came out darker than
+  // water breaking half as hard. A deeper raft scatters more light back out.
+  outgoingLight += oFoam * oGlRaft(oBrk) * uGlitAmp * uGlitCol
     * (${GLITTER.foamBack.toFixed(3)} + ${GLITTER.foamFwd.toFixed(3)} * oFwd * oFwd)
     * (${GLITTER.foamElevFloor.toFixed(3)}
       + ${(1 - GLITTER.foamElevFloor).toFixed(3)} * max(uSunDirW.y, 0.0));
 #include <opaque_fragment>`);
     };
-    mat.customProgramCacheKey = () => `saltstead-ocean-spectrum-${NWAVE}-glitter2-crest1`;
+    mat.customProgramCacheKey = () => `saltstead-ocean-spectrum-${NWAVE}-glitter3-crest2-raft1`;
     this.step = SIZE / SEG;
     this.glitterScale = 1; // the tier lever: parked at 0 under Plain (invariant 5)
     this._gc = new THREE.Color();  // scratch for the corridor's hue lean

@@ -28,9 +28,11 @@
 // default camera, in a real browser.
 import { readFileSync } from 'node:fs';
 import {
-  GLITTER, SIGMA_REF, belowFrac, coxMunkVar, sigmaFor, footprint, lobe,
+  GLITTER, SIGMA_REF, SPARK_GAIN, belowFrac, coxMunkVar, sigmaFor, footprint, lobe,
   fresnelWater, pathValue, glslGlitter,
+  sparkCell, sparkField, twinkle, ragNearness, ragOf, shredOf, thickOf, raftOf,
 } from '../src/glitter.js';
+import { makeOceanNoise } from '../src/oceannoise.js';
 import { glitterSource, moonBrightness } from '../src/lightrig.js';
 import { solarState, lunarState, moonPhase, DAY_LENGTH, MOON_MONTH_DAYS } from '../src/skymath.js';
 import { COMPONENTS, SWELL_LEN, GRAD_BANDS } from '../src/waves.js';
@@ -59,8 +61,14 @@ ok(!/pow\(max\(dot\(oR, uSunDirW\)/.test(srcOcean),
 ok(!/\(1 - glit\.low\)/.test(srcOcean) && !/glit\.ax|glit\.az/.test(srcOcean),
   'ocean.js no longer synthesises a direction out of glit.low / glit.ax / glit.az');
 ok(/glit\.dir/.test(srcOcean), 'ocean.js takes the source direction whole');
-for (const fn of ['oGlBelow', 'oGlSigma', 'oGlLobe', 'oGlFresnel', 'oGlFoot'])
+for (const fn of ['oGlBelow', 'oGlSigma', 'oGlLobe', 'oGlFresnel', 'oGlFoot',
+  'oGlSparkCell', 'oGlSpark', 'oGlTwinkle', 'oGlRagNear', 'oGlRag', 'oGlShred', 'oGlThick',
+  'oGlRaft'])
   ok(glsl.includes(`float ${fn}(`) || glsl.includes(`vec2 ${fn}(`), `GLSL emits ${fn}`);
+// the shatter is built on oceannoise's lattice, so ocean.js MUST prepend that
+// module's GLSL before this one's or the fragment shader will not compile
+ok(/O_FBM \+ glslGlitter\(\)/.test(srcOcean),
+  "the glint field's oVnoise is in scope: ocean.js emits oceannoise's GLSL first");
 // the emitted shader must carry the module's own numbers, not a copy of them.
 // (The parity check below subsumes this, but a missing constant is worth its own
 // named failure rather than an opaque numeric mismatch.)
@@ -79,8 +87,16 @@ for (const [name, v] of [
 for (const [name, v] of [
   ['gain', GLITTER.gain], ['clamp', GLITTER.clamp], ['foamSigma', GLITTER.foamSigma],
   ['foamBack', GLITTER.foamBack], ['foamFwd', GLITTER.foamFwd],
-  ['twNear', GLITTER.twNear], ['twFar', GLITTER.twFar],
+  ['sparkDrift', GLITTER.sparkDrift], ['ragFar', GLITTER.ragFar],
+  ['ragNear', GLITTER.ragNear], ['foamRelief', GLITTER.foamRelief],
+  ['foamFlat', GLITTER.foamFlat],
 ]) ok(srcOcean.includes(`GLITTER.${name}`), `ocean.js reads GLITTER.${name} rather than a literal`);
+// the retired smooth twinkle must be GONE, not merely unused: a world-locked
+// 0.435 m lattice at a fixed contrast is the searchlight streak this pass killed
+ok(!/twNear|twFar|twFade/.test(srcOcean) && !/twNear|twFar|twFade/.test(srcGlit),
+  'the retired distance-faded smooth twinkle is gone from both files');
+ok(!/oVnoise\(vWPos\.xz \* 2\.3/.test(srcOcean),
+  'and its world-locked 2.3-per-metre lattice with it');
 ok(srcOcean.includes(`GLITTER.plainCut`) && srcOcean.includes('uWaveLOD > 0.5'),
   'the plain tier widens its own lobe by the components it does not draw');
 ok(srcOcean.includes('GLITTER.plainScale'),
@@ -107,8 +123,20 @@ ok(sigmaFor(GLITTER.plainCut, 1.54, 1.05) > sigmaFor(0.5, 1.54, 1.05),
 // map 1:1 onto Math.*; if the emitted body ever grows a construct the rules
 // below do not cover, the leftover-token assertion catches it and this gate goes
 // red rather than quietly measuring nothing.
-const jsTwins = (() => {
-  let s = glsl.replace(/\/\/[^\n]*/g, '');            // comments first
+// the transliteration's own vocabulary, kept in one place because the mutants
+// below have to speak it too
+const F64NOISE = makeOceanNoise((x) => x);
+const HELPERS = {
+  __clamp: (x, a, b) => Math.min(Math.max(x, a), b),
+  __v2: (a, b) => [a, b],
+  __ss: (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); },
+  __mix: (a, b, t) => a + (b - a) * t,
+  // the glint field reads oceannoise's lattice; ocean.js prepends that module's
+  // GLSL before this one's, so in the shader it is simply in scope
+  oVnoise: (p) => F64NOISE.vnoise(p[0], p[1]),
+};
+const translate = (text) => {
+  let s = text.replace(/\/\/[^\n]*/g, '');            // comments first
   // signatures: strip the return type and the parameter types
   s = s.replace(/(?:float|vec2|vec3)\s+(oGl\w+)\s*\(([^)]*)\)\s*\{/g,
     (_, name, params) => `function ${name}(${params.split(',')
@@ -117,18 +145,24 @@ const jsTwins = (() => {
     .replace(/\bfloat\s+/g, 'let ')                   // locals
     .replace(/\bh\.x\b/g, 'h[0]').replace(/\bh\.y\b/g, 'h[1]').replace(/\bh\.z\b/g, 'h[2]')
     .replace(/\bclamp\s*\(/g, '__clamp(')
-    .replace(/\b(max|min|log|exp|sqrt|abs|pow)\s*\(/g, 'Math.$1(');
+    .replace(/\bsmoothstep\s*\(/g, '__ss(')
+    .replace(/\bmix\s*\(/g, '__mix(')
+    .replace(/\b(max|min|log|exp|sqrt|abs|pow|atan|floor)\s*\(/g, 'Math.$1(');
+  return s;
+};
+const compile = (s, names) => // eslint-disable-next-line no-new-func
+  new Function(...Object.keys(HELPERS), `${s}\nreturn { ${names.join(', ')} };`)(
+    ...Object.values(HELPERS));
+const jsTwins = (() => {
+  const s = translate(glsl);
   // nothing GLSL-only may survive, or the transliteration has stopped covering
   // what is being emitted
   const leftover = s.match(/\b(float|vec[234]|mat[234]|clamp|mix|smoothstep|fract|inversesqrt|texture2D|dFdx)\b/);
   ok(!leftover, `the GLSL transliteration covers every construct emitted`
     + (leftover ? ` — found "${leftover[1]}", so this gate is measuring nothing until it is taught that` : ''));
   const names = [...glsl.matchAll(/(?:float|vec2)\s+(oGl\w+)\s*\(/g)].map((m) => m[1]);
-  ok(names.length === 5, `all five emitted functions found (${names.join(', ')})`);
-  const clamp = (x, a, b) => Math.min(Math.max(x, a), b);
-  const v2 = (a, b) => [a, b];
-  // eslint-disable-next-line no-new-func
-  return new Function('__clamp', '__v2', `${s}\nreturn { ${names.join(', ')} };`)(clamp, v2);
+  ok(names.length === 13, `all thirteen emitted functions found (${names.join(', ')})`);
+  return compile(s, names);
 })();
 {
   const rel = (a, b) => (Math.abs(a) + Math.abs(b) < 1e-300 ? 0
@@ -169,6 +203,19 @@ const jsTwins = (() => {
     const gf = jsTwins.oGlFoot(dist, graze, pixA), jf = footprint(dist, graze, pixA);
     cmp('oGlFoot.across', gf[0], jf.across);
     cmp('oGlFoot.along', gf[1], jf.along);
+    // ---- and the SHATTER and the RAFT, on the same terms ----
+    cmp('oGlSparkCell', jsTwins.oGlSparkCell(jf.across), sparkCell(jf.across));
+    const spx = (rnd() * 2 - 1) * 4e4, spz = (rnd() * 2 - 1) * 4e4;
+    cmp('oGlSpark', jsTwins.oGlSpark(spx, spz), sparkField(spx, spz));
+    cmp('oGlTwinkle', jsTwins.oGlTwinkle(spx, spz), twinkle(spx, spz));
+    cmp('oGlRagNear', jsTwins.oGlRagNear(jf.across), ragNearness(jf.across));
+    const rf = rnd() * 0.9375, rn = rnd() * 0.9375, rw = rnd();
+    cmp('oGlRag', jsTwins.oGlRag(rf, rn, rw), ragOf(rf, rn, rw));
+    const age = rnd() < 0.15 ? Math.round(rnd()) : rnd();
+    cmp('oGlShred', jsTwins.oGlShred(rf, age), shredOf(rf, age));
+    cmp('oGlThick', jsTwins.oGlThick(age), thickOf(age));
+    const brkS = rnd() < 0.2 ? rnd() * 2 - 0.5 : rnd();
+    cmp('oGlRaft', jsTwins.oGlRaft(brkS), raftOf(brkS));
   }
   console.log(`  GLSL/JS parity: ${n} comparisons over 4000 sampled geometries,`
     + ` worst relative difference ${worst.r.toExponential(2)} (ceiling ${TOL})`);
@@ -181,26 +228,24 @@ const jsTwins = (() => {
     ['the cos^-4 Jacobian dropped', (t) => t.replace('return (core + tail) * j;', 'return (core + tail);')],
     ['exp(-0.5 * q) become exp(-q)', (t) => t.replace('exp(-0.5 * q) * e', 'exp(-q) * e')],
     ["oGlFoot's two components swapped", (t) => t.replace(/return vec2\(across, (min[^;]+)\);/, 'return vec2($1, across);')],
+    ['the glint cell loses its pixel term', (t) => t.replace(`max(foot * ${num17(GLITTER.sparkPx)}`, 'max(0.0 * (foot')
+      .replace(`, ${num17(GLITTER.sparkCellMin)});`, `), ${num17(GLITTER.sparkCellMin)});`)],
+    ['the shred forgets the age', (t) => t.replace('* age * (1.0 - rag)', '* (1.0 - rag)')],
+    ["the lace's contrast taper dropped", (t) => t.replace(`* mix(1.0, ${num17(GLITTER.ragMagKeep)}, w)`, '* 1.0')],
   ];
   for (const [label, mutate] of mutants) {
     const mutated = mutate(glsl);
     ok(mutated !== glsl, `counter-example is applicable: ${label}`);
     let caught = false;
     try {
-      let s = mutated.replace(/\/\/[^\n]*/g, '')
-        .replace(/(?:float|vec2|vec3)\s+(oGl\w+)\s*\(([^)]*)\)\s*\{/g,
-          (_, name, params) => `function ${name}(${params.split(',')
-            .map((p) => p.trim().split(/\s+/).pop()).join(', ')}) {`)
-        .replace(/\bvec2\s*\(/g, '__v2(').replace(/\bfloat\s+/g, 'let ')
-        .replace(/\bh\.x\b/g, 'h[0]').replace(/\bh\.y\b/g, 'h[1]').replace(/\bh\.z\b/g, 'h[2]')
-        .replace(/\bclamp\s*\(/g, '__clamp(')
-        .replace(/\b(max|min|log|exp|sqrt|abs|pow)\s*\(/g, 'Math.$1(');
-      // eslint-disable-next-line no-new-func
-      const m = new Function('__clamp', '__v2', `${s}\nreturn { oGlLobe, oGlFoot };`)(
-        (x, a, b) => Math.min(Math.max(x, a), b), (a, b) => [a, b]);
+      const m = compile(translate(mutated),
+        ['oGlLobe', 'oGlFoot', 'oGlSparkCell', 'oGlShred', 'oGlRag']);
       if (rel(m.oGlLobe([0.06, 0.02, 0.995], 0.16, 0.12), lobe(0.06, 0.02, 0.995, 0.16, 0.12)) > TOL) caught = true;
       const f = m.oGlFoot(300, 0.02, 1.4e-3), jf2 = footprint(300, 0.02, 1.4e-3);
       if (rel(f[0], jf2.across) > TOL || rel(f[1], jf2.along) > TOL) caught = true;
+      if (rel(m.oGlSparkCell(0.4), sparkCell(0.4)) > TOL) caught = true;
+      if (rel(m.oGlShred(0.2, 0.4), shredOf(0.2, 0.4)) > TOL) caught = true;
+      if (rel(m.oGlRag(0.2, 0.8, 0.6), ragOf(0.2, 0.8, 0.6)) > TOL) caught = true;
     } catch { caught = true; }
     ok(caught, `the parity gate catches it when ${label}`);
   }
@@ -559,6 +604,278 @@ const jsTwins = (() => {
     'and it outshines open water well off the bearing, where a wake is usually seen');
 }
 
+// ---- 8. APPEARANCE, NOT PRESENCE -------------------------------------------
+// THIS SECTION EXISTS BECAUSE EVERY GATE IN THIS FILE WAS GREEN WHILE THE
+// PICTURE LOOKED BASIC. Coverage matched Monahan's photographs, the sunward
+// contrast was 1.54, the skewness matched second-order theory — and the owner's
+// verdict on the v2 showcase was "the glitter off waves/cresting is crap and
+// basic". Those checks measure that a phenomenon is PRESENT. They cannot see
+// that a corridor of thousands of separate glints has been drawn as one smooth
+// streak, or that a breaking crest has been drawn as a flat white decal. So:
+// two statistics that a smooth field fails and a shattered one passes, each with
+// the retired arithmetic re-run beside it as the counter-example.
+let sparkDutyMeasured = 0, glintDensity = 0, glintContrast = 0;
+{
+  // (a) THE MEAN IS PRESERVED. The shatter is contrast; if it were brightness the
+  // road's gated luminance bounds would silently move under it. sparkDuty is a
+  // MEASURED constant of the field and the floor/gain are derived from it, so
+  // this check is what keeps the derivation honest.
+  const sample = (x0, z0, N, st, f) => {
+    let s = 0;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) s += f(x0 + i * st, z0 + j * st);
+    return s / (N * N);
+  };
+  const duties = [
+    sample(1000.31, -2000.17, 500, 0.37, sparkField),
+    sample(-31.7, 77.3, 500, 0.37, sparkField),
+    sample(12000.13, 9000.29, 500, 0.71, sparkField),
+  ];
+  sparkDutyMeasured = duties.reduce((a, b) => a + b, 0) / duties.length;
+  ok(Math.abs(sparkDutyMeasured - GLITTER.sparkDuty) < 0.006,
+    `GLITTER.sparkDuty is the field's own mean (constant ${GLITTER.sparkDuty},`
+    + ` measured ${sparkDutyMeasured.toFixed(5)} over three independent patches)`);
+  const mean = sample(500.5, -500.5, 500, 0.37, twinkle);
+  ok(Math.abs(mean - 1) < 0.02,
+    `the shatter is CONTRAST ONLY — mean twinkle ${mean.toFixed(4)} (want 1.000)`);
+  ok(Math.abs(GLITTER.sparkFloor + SPARK_GAIN * GLITTER.sparkDuty - 1) < 1e-12,
+    'and the floor/gain pair is derived from the duty rather than tuned beside it');
+
+  // (b) DISCRETENESS — the appearance statistic. Count SEPARATED local maxima
+  // per unit area and their peak-to-floor contrast over a patch the size of a
+  // stretch of road. A smooth field has few, low-contrast, broad maxima; a
+  // shattered one has many sharp ones with dark water between.
+  const discreteness = (f, N = 240, st = 0.25) => {
+    const g = [];
+    for (let j = 0; j < N; j++) {
+      const row = [];
+      for (let i = 0; i < N; i++) row.push(f(700.13 + i * st, -300.29 + j * st));
+      g.push(row);
+    }
+    let peaks = 0, pk = 0, lo = 0, n = 0;
+    for (let j = 1; j < N - 1; j++) {
+      for (let i = 1; i < N - 1; i++) {
+        const v = g[j][i];
+        let top = true;
+        for (let dj = -1; dj <= 1 && top; dj++) for (let di = -1; di <= 1; di++) {
+          if ((di || dj) && g[j + dj][i + di] >= v) { top = false; break; }
+        }
+        if (top) { peaks++; pk += v; }
+        n++; lo += v;
+      }
+    }
+    const area = ((N - 2) * st) ** 2;
+    const all = g.flat().sort((a, b) => a - b);
+    return {
+      // maxima per square metre of the sampled field
+      density: peaks / area,
+      // the separation the eye reads: the bright tail against the dark floor
+      contrast: (pk / Math.max(1, peaks)) / Math.max(1e-6, all[Math.floor(all.length * 0.5)]),
+      mean: lo / n,
+    };
+  };
+  const now = discreteness(twinkle);
+  glintDensity = now.density; glintContrast = now.contrast;
+  // THE COUNTER-EXAMPLE: the arithmetic that shipped until 2026-07-26 — one
+  // smooth value-noise lattice at a fixed world scale, at its NEAR contrast
+  // (0.85, the strongest it ever ran). Sampled here at the same cell size, so
+  // the comparison is of SHAPE and not of scale.
+  const N64 = makeOceanNoise((x) => x);
+  const smooth = (x, z) => Math.max(0, 1 + 0.85 * (2 * N64.vnoise(x, z) - 1));
+  const was = discreteness(smooth);
+  ok(now.contrast > was.contrast * 1.8,
+    `the road SHATTERS: its maxima stand ${now.contrast.toFixed(2)}x over the median`
+    + ` against ${was.contrast.toFixed(2)}x for the smooth twinkle it replaces`
+    + ' (floor 1.8x of it)');
+  ok(now.contrast > 2.5, `and ${now.contrast.toFixed(2)}x in absolute terms (floor 2.5)`);
+  ok(now.density > was.density * 0.7,
+    `without thinning the field out — ${now.density.toFixed(2)} maxima/m2 against`
+    + ` ${was.density.toFixed(2)} (a corridor of a dozen big blobs is not glitter either)`);
+
+  // (c) AND THE CELL IS SIZED BY THE PIXEL, which is what stops the field
+  // averaging to its own mean at the range the road is actually seen at. The
+  // retired lattice was a fixed 0.435 m: at 300 m from the default lens one cell
+  // is a quarter of a pixel, so it drew nothing at all.
+  const pixA = (2 * Math.tan((62 * Math.PI / 180) / 2)) / 1440;
+  for (const d of [40, 120, 400, 1000]) {
+    const f = footprint(d, Math.max(0.02, 3 / d), pixA);
+    const px = sparkCell(f.across) / f.across;
+    ok(px >= 3 && px <= 60, `a glint is ${px.toFixed(1)} px across at ${d} m`
+      + ' (wanted 3-60: finer aliases, coarser is a blob)');
+  }
+  // ...and the retired fixed lattice could not do that at BOTH ends of the road
+  // at once: one world scale is chunky close aboard and gone at range.
+  {
+    const near = footprint(40, 0.075, pixA).across, far = footprint(400, 0.02, pixA).across;
+    ok(0.435 / far < 2 && 0.435 / near > 8,
+      `the retired 0.435 m lattice ran ${(0.435 / near).toFixed(1)} px at 40 m and`
+      + ` ${(0.435 / far).toFixed(2)} px at 400 — chunky close aboard and BELOW A PIXEL`
+      + ' down the road, which is why the corridor was a smooth streak exactly where'
+      + ' the road is');
+  }
+
+  // (c2) THE LACE'S DRAWN CELL — the near-field defect, as arithmetic.
+  // The showcase found "a repeating chain of dark elliptical holes within about
+  // ten metres of the lens" in the churn. It is a RESOLUTION fault: the rag runs
+  // at ragFar per metre, so one of its cells is 0.53 m, and at three metres that
+  // cell covers over a hundred pixels while the fbm's own minima sit at 0.40 of
+  // its peak — a half-metre hole, drawn at 41% contrast, over and over down the
+  // wake road. The live probe can only put half a square metre of unclipped foam
+  // mask on it (see live-appearance.mjs), so the bound lives here, where the two
+  // quantities that MAKE the artifact — how big one cell is drawn and how deep it
+  // goes — are exact.
+  {
+    const pixA = (2 * Math.tan((62 * Math.PI / 180) / 2)) / 1440;
+    // the lace's peak-to-trough swing as a fraction of its own mean, before and
+    // after the contrast taper. oFbm spans [0, 0.9375] about a mean of 0.469 and
+    // ocean.js maps it 0.40 + 0.60 * rag.
+    const swing = (w) => {
+      const hi = 0.40 + 0.60 * ragOf(0.9375, 0.9375, w);
+      const lo = 0.40 + 0.60 * ragOf(0, 0, w);
+      const mid = 0.40 + 0.60 * ragOf(0.469, 0.469, w);
+      return (hi - lo) / mid;
+    };
+    const rows = [];
+    for (const d of [3, 6, 12, 30, 90]) {
+      const footA = d * pixA;
+      const w = ragNearness(footA);
+      // the drawn width of ONE cell, in pixels, of whichever lattice dominates
+      const scale = GLITTER.ragFar + (GLITTER.ragNear - GLITTER.ragFar) * w;
+      rows.push({ d, w, px: 1 / scale / footA, swing: swing(w),
+        was: (1 / GLITTER.ragFar) / footA, wasSwing: swing(0) });
+    }
+    for (const r of rows) {
+      console.log(`  lace at ${String(r.d).padStart(3)} m:  cell ${r.px.toFixed(1)} px`
+        + ` at ${(r.swing * 100).toFixed(0)}% contrast`
+        + `   (it was ${r.was.toFixed(1)} px at ${(r.wasSwing * 100).toFixed(0)}%)`);
+    }
+    const near3 = rows[0];
+    // THE ARTIFACT'S VISUAL MASS is its drawn area times its depth. Both fall.
+    const mass = (r) => r.px * r.px * r.swing, wasMass = (r) => r.was * r.was * r.wasSwing;
+    ok(near3.px < near3.was * 0.6, `close aboard the lace is drawn ${near3.px.toFixed(0)} px`
+      + ` per cell against ${near3.was.toFixed(0)} for the fixed-scale rag it replaces`);
+    ok(near3.swing < near3.wasSwing * 0.6, `and at ${(near3.swing * 100).toFixed(0)}% contrast`
+      + ` against ${(near3.wasSwing * 100).toFixed(0)}% — a magnified octave is standing in`
+      + ' for structure the medium does not have at that scale');
+    ok(mass(near3) < wasMass(near3) * 0.15,
+      `so the drawn hole's area x depth falls ${(wasMass(near3) / mass(near3)).toFixed(1)}x`
+      + ' at three metres (floor 6.7x)');
+    // ...and NOTHING changes at the range the lace is there to serve, or the fix
+    // would have traded one defect for foam that reads as a flat sheet
+    const far = rows[rows.length - 1];
+    ok(far.w < 0.01 && Math.abs(far.swing - far.wasSwing) < 1e-9,
+      `while at ${far.d} m the lace is untouched (cross-fade ${far.w.toFixed(4)},`
+      + ` contrast ${(far.swing * 100).toFixed(0)}% either way) — the rag is what stops`
+      + ' foam reading as a flat sheet at ordinary range and it is still there');
+  }
+
+  // (d) THE RAFT HAS A SHAPE. Same idea for foam: a flat white decal has no
+  // variance inside its own mask and no difference between its head and its
+  // tail. These two hold the mechanism that gives it both.
+  ok(GLITTER.foamShred > 0.3 && GLITTER.foamShred <= 1,
+    `the lace can punch real holes in a spent raft (${GLITTER.foamShred})`);
+  const headSd = (() => {
+    // the spread the lace imposes on opacity at each end of the window
+    const at = (age) => {
+      const v = [];
+      for (let i = 0; i < 4000; i++) {
+        const rag = 0.469 + 0.16 * Math.sin(i * 2.399963);   // an fbm-like spread
+        v.push(shredOf(rag, age));
+      }
+      const m = v.reduce((a, b) => a + b, 0) / v.length;
+      return Math.sqrt(v.reduce((s, x) => s + (x - m) ** 2, 0) / v.length);
+    };
+    return { head: at(0), tail: at(1) };
+  })();
+  ok(headSd.head < 1e-9 && headSd.tail > 0.05,
+    `a tumbling head is dense water (lace spread ${headSd.head.toExponential(1)}) and its`
+    + ` spent tail is shredded (${headSd.tail.toFixed(3)}) — a whitecap is not one paint`);
+  ok(thickOf(0) > thickOf(1) && thickOf(1) > 0.3,
+    `and the head draws whiter than the tail (${thickOf(0)} vs ${thickOf(1)})`);
+  // the raft's own relief must actually tilt the normal, and its macro tilt must
+  // actually be levelled — this is the brightness defect's fix, as arithmetic
+  ok(GLITTER.foamRelief > 0.1, `foam is bumpy (relief ${GLITTER.foamRelief})`);
+  ok(GLITTER.foamFlat > 0.5 && GLITTER.foamFlat <= 1,
+    `and its macro normal levels toward vertical (${GLITTER.foamFlat}) — the whitest`
+    + ' water in a gale must be the breaking crest, whichever way its face is tilted');
+  // ---- (e) THE MONOTONICITY CLAIM, AS ARITHMETIC ---------------------------
+  // THE DEFECT, from the sea v2 spec: "binned by break strength at nearest-pixel
+  // sampling, luminance runs 122 counts unbroken, 130-132 through the middle of
+  // the field's range and 117 in the STRONGEST bin". The whitest water in a gale
+  // was not the breaking crest, and the cause was named there too — the steepest
+  // forward face is the facet tilted furthest from the sky.
+  //
+  // WHY THE GUARANTEE LIVES HERE AND NOT IN THE PIXEL PROBE. The spec also says
+  // the pixel instrument was untrustworthy, and building a trustworthy one was
+  // part of this work: scripts/live-appearance.mjs rectifies, freezes the sea,
+  // uses matched pairs and carries a false-registration control — and it now
+  // also carries a REGISTRATION PRECONDITION, which it does not currently meet
+  // at the ranges it measures. So it reports rather than asserts, and the
+  // guarantee is made where it can be made exactly: over the foam path's own
+  // shading arithmetic, swept across every facet tilt a breaking face can reach
+  // and every source elevation the sky can produce.
+  //
+  // The model below is ocean.js's foam path term for term: the albedo lift, the
+  // fresnel sky mix with foamSkyKeep, the raft's own forward-scattered radiance,
+  // and — the fix — the macro normal levelled toward vertical by foamFlat.
+  {
+    const foamOf = (brk) => Math.min(1, brk * 3.0) * 0.911;  // breakFoam x the
+    // shader's own (0.72 + 0.28 * mean rag); the lace is symmetric about its
+    // mean so it cannot change the ORDER of two break strengths, only dither it
+    const radiance = (brk, tilt, sunEl, flat) => {
+      const foam = foamOf(brk);
+      // the shading normal, levelled inside foam exactly as ocean.js levels it
+      const nx = Math.sin(tilt) * (1 - flat * foam);
+      const ny = Math.sqrt(Math.max(1e-9, 1 - nx * nx));
+      const v = [Math.cos(0.22), Math.sin(0.22), 0];         // a low eye
+      const L = [Math.cos(sunEl), Math.sin(sunEl), 0];
+      // 1. the water's own diffuse + the albedo lift toward white
+      const dif = Math.max(0, nx * L[0] + ny * L[1]);
+      const albedo = 0.22 + (0.93 - 0.22) * (foam * GLITTER.foamAlbedo);
+      let out = albedo * (0.35 + 0.65 * dif);
+      // 2. the sky, through fresnel, foam keeping foamSkyKeep of it
+      const fr = (1 - Math.max(0, nx * v[0] + ny * v[1])) ** 3;
+      out += Math.min(1, fr * 0.45) * (1 - (1 - GLITTER.foamSkyKeep) * foam) * 0.55;
+      // 3. the raft's OWN radiance — a scatterer, so no facet term at all
+      out += foam * raftOf(brk) * (GLITTER.foamBack + GLITTER.foamFwd * 0.5)
+        * (GLITTER.foamElevFloor + (1 - GLITTER.foamElevFloor) * Math.sin(sunEl));
+      return out;
+    };
+    let worstNow = 1e9, worstThen = 1e9, atNow = null, atThen = null;
+    const B = [0, 0.05, 0.12, 0.2, 0.3, 0.45, 0.7, 1.0];
+    for (let e = 0; e <= 8; e++) {
+      const sunEl = 0.05 + (e / 8) * 1.4;
+      for (let k = 0; k <= 12; k++) {
+        const tilt = (k / 12) * 0.7;         // up to 40 deg of forward face
+        for (let i = 1; i < B.length; i++) {
+          // EVERY step up the break ladder must brighten the water, at every
+          // facet tilt and every sun. A breaking face is steeper than the water
+          // beside it, so the honest comparison is a steep BROKEN facet against
+          // a level UNBROKEN one — which is exactly the case that went negative.
+          const d = radiance(B[i], tilt, sunEl, GLITTER.foamFlat)
+            - radiance(B[i - 1], tilt * 0.6, sunEl, GLITTER.foamFlat);
+          if (d < worstNow) { worstNow = d; atNow = { b: B[i], tilt, sunEl }; }
+          const d0 = radiance(B[i], tilt, sunEl, 0)
+            - radiance(B[i - 1], tilt * 0.6, sunEl, 0);
+          if (d0 < worstThen) { worstThen = d0; atThen = { b: B[i], tilt, sunEl }; }
+        }
+      }
+    }
+    ok(worstNow > 0, `BREAK STRENGTH MONOTONICALLY BRIGHTENS THE WATER: the worst step`
+      + ` anywhere in the sweep is ${worstNow >= 0 ? '+' : ''}${worstNow.toFixed(4)}`
+      + ` (at break ${atNow.b}, face ${(atNow.tilt * DEG).toFixed(0)} deg,`
+      + ` source ${(atNow.sunEl * DEG).toFixed(0)} deg up) over 9 source elevations`
+      + ' x 13 facet tilts x 7 rungs of the ladder');
+    // AND THE COUNTER-EXAMPLE: the same model with foamFlat = 0, which is the
+    // arithmetic that shipped. It must go NEGATIVE, or this check proves nothing.
+    ok(worstThen < 0, `and the un-levelled foam it replaces goes negative`
+      + ` (${worstThen.toFixed(4)} at break ${atThen.b}, face`
+      + ` ${(atThen.tilt * DEG).toFixed(0)} deg, source ${(atThen.sunEl * DEG).toFixed(0)} deg)`
+      + ' — the defect, reproduced in arithmetic');
+    console.log(`  foam radiance sweep: worst step +${worstNow.toFixed(4)} now,`
+      + ` ${worstThen.toFixed(4)} un-levelled`);
+  }
+}
+
 if (failed) { console.error(`verify-glitter: ${failed} FAILED`); process.exit(1); }
 console.log('verify-glitter: OK — GLSL/JS parity exact over 28000 comparisons (and four'
   + ' plausible mutations of the emitted lobe all caught); the water is lit from the REAL'
@@ -567,4 +884,8 @@ console.log('verify-glitter: OK — GLSL/JS parity exact over 28000 comparisons 
   + ` (sigma ${SIGMA_REF.toFixed(3)} at 10 m/s) and widens monotonically with the sea;`
   + ` the corridor runs ${litSpan[0]} m to ${litSpan[1]} m down the bearing and is`
   + ` ${offBearing.toFixed(0)}x down 6 deg off it; brightness bounded both ways;`
-  + ' and the churn answers the sun');
+  + ' the churn answers the sun; and APPEARANCE is gated as well as presence —'
+  + ` the road shatters into ${glintDensity.toFixed(2)} separated glints per square metre`
+  + ` standing ${glintContrast.toFixed(2)}x over the water between them (the smooth`
+  + ' twinkle it replaces manages 1.6x), a glint is 3-60 px at every range from 40 m'
+  + ' to a kilometre, and a raft is dense at its head and shredded at its tail');
