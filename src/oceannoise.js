@@ -146,18 +146,21 @@ export function makeOceanNoise(r) {
 // src/ocean.js OR in the GLSL glitter.js emits into it).
 //
 // EVERY SCALE HERE IS A FIXED WORLD SCALE, and that is not an accident — it is
-// the lesson of a cold review. The glint lattice's first cut divided a WORLD
-// coordinate by a PER-PIXEL cell, which aliases catastrophically away from the
-// origin for reasons that have nothing to do with float32 (see glitter.js
-// sparkNear). Range is now spent as a CROSS-FADE between fixed levels, for the
-// lace and for the glints alike, so every lattice the shader can ask for is a
-// constant and can be listed and bounded here. 4 per metre is the ceiling check
-// 4(b) allows: the widest coordinate the earth can hand the hash is then 3.2e5,
-// where a float32 step is 3% of a cell.
+// the lesson of a cold review. A lattice whose cell is sized PER PIXEL aliases
+// catastrophically away from the origin for reasons that have nothing to do with
+// float32: the screen gradient of W/c carries a term in |W|, which at seventeen
+// kilometres out turns a "five-pixel cell" into a one-pixel random sample. Range
+// is spent as a CROSS-FADE between fixed levels instead, so every lattice the
+// shader can ask for is a constant and can be listed and bounded here. 4 per
+// metre is the ceiling check 4(b) allows: the widest coordinate the earth can
+// hand the hash is then 3.2e5, where a float32 step is 3% of a cell.
+//
+// THE GLINT LATTICE IS GONE FROM THIS TABLE (2026-07-26, second pass) and that
+// is the point: the sun's road is no longer made of noise at all. Its glints are
+// the reflection taken against the drawn surface's own normal, so there is
+// nothing here to bound — see glitter.js oGlGlint.
 export const OCEAN_NOISE_SCALES = [
   { scale: 4.0, what: 'near lace', find: 'GLITTER.ragNear', konst: 'ragNear' },
-  { scale: 4.0, what: 'glint lattice, near level', find: 'sparkNear', konst: 'sparkNear' },
-  { scale: 0.8, what: 'glint lattice, far level', find: 'sparkFar', konst: 'sparkFar' },
   { scale: 1.9, what: 'churn rag', find: 'GLITTER.ragFar', konst: 'ragFar' },
   { scale: 1.35, what: 'detail ripple, fine band' },
   { scale: 0.42, what: 'detail chop, fine band' },

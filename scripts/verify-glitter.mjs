@@ -28,20 +28,29 @@
 // default camera, in a real browser.
 import { readFileSync } from 'node:fs';
 import {
-  GLITTER, SIGMA_REF, SPARK_GAIN, belowFrac, coxMunkVar, sigmaFor, footprint, lobe,
+  GLITTER, SIGMA_REF, MIRROR_EXP, belowFrac, coxMunkVar, sigmaFor, sigmaFull,
+  footprint, lobe, glintSplit, glintOf,
   fresnelWater, pathValue, glslGlitter,
-  sparkNearness, sparkField, sparkAt, twinkle, twinkleAt,
   ragNearness, ragOf, shredOf, thickOf, raftOf,
 } from '../src/glitter.js';
 import { makeOceanNoise } from '../src/oceannoise.js';
 import { glitterSource, moonBrightness } from '../src/lightrig.js';
 import { solarState, lunarState, moonPhase, DAY_LENGTH, MOON_MONTH_DAYS } from '../src/skymath.js';
-import { COMPONENTS, SWELL_LEN, GRAD_BANDS } from '../src/waves.js';
+import {
+  COMPONENTS, SWELL_LEN, GRAD_BANDS,
+  setSeaBands, setWaveAxes, setWaveOrigin, waveAxisFor, waveGradient,
+} from '../src/waves.js';
 import { seaBandsFor } from '../src/weather.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
 const DEG = 180 / Math.PI;
+// the three-vector arithmetic section 8 needs to rebuild the shader's own frames
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0]];
+const unit = (a) => { const n = Math.hypot(...a) || 1; return a.map((q) => q / n); };
+const clampT = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 // carried out of the corridor checks so the closing line quotes what was
 // measured rather than what was expected
 let offBearing = 0, litSpan = [0, 0];
@@ -62,14 +71,18 @@ ok(!/pow\(max\(dot\(oR, uSunDirW\)/.test(srcOcean),
 ok(!/\(1 - glit\.low\)/.test(srcOcean) && !/glit\.ax|glit\.az/.test(srcOcean),
   'ocean.js no longer synthesises a direction out of glit.low / glit.ax / glit.az');
 ok(/glit\.dir/.test(srcOcean), 'ocean.js takes the source direction whole');
-for (const fn of ['oGlBelow', 'oGlSigma', 'oGlLobe', 'oGlFresnel', 'oGlFoot',
-  'oGlSparkNear', 'oGlSpark', 'oGlSparkAt', 'oGlTwinkle', 'oGlTwinkleAt',
+for (const fn of ['oGlBelow', 'oGlSigma', 'oGlSigmaFull', 'oGlLobe', 'oGlFresnel',
+  'oGlFoot', 'oGlSplit', 'oGlGlint',
   'oGlRagNear', 'oGlRag', 'oGlShred', 'oGlThick', 'oGlRaft'])
   ok(glsl.includes(`float ${fn}(`) || glsl.includes(`vec2 ${fn}(`), `GLSL emits ${fn}`);
-// the shatter is built on oceannoise's lattice, so ocean.js MUST prepend that
-// module's GLSL before this one's or the fragment shader will not compile
+// ocean.js still prepends oceannoise's GLSL first — the lace and the detail
+// bands read oFbm — but THE GLITTER PATH ITSELF NO LONGER READS ANY NOISE AT ALL.
+// That is the appearance fix, stated structurally: the road's discreteness comes
+// from the drawn surface, so a thresholded lattice cannot creep back into it.
 ok(/O_FBM \+ glslGlitter\(\)/.test(srcOcean),
-  "the glint field's oVnoise is in scope: ocean.js emits oceannoise's GLSL first");
+  "ocean.js emits oceannoise's GLSL first (the lace and the detail bands need it)");
+ok(!/oVnoise\s*\(|oFbm\s*\(|fract\s*\(/.test(glsl.replace(/\/\/[^\n]*/g, '')),
+  'and the emitted glitter GLSL reads NO noise: the glints are geometry, not texture');
 // the emitted shader must carry the module's own numbers, not a copy of them.
 // (The parity check below subsumes this, but a missing constant is worth its own
 // named failure rather than an opaque numeric mismatch.)
@@ -84,22 +97,30 @@ for (const [name, v] of [
   ['energyCap', GLITTER.energyCap], ['tailK', GLITTER.tailK],
   ['maxFoot', GLITTER.maxFoot], ['minGraze', GLITTER.minGraze],
   ['tailW', GLITTER.tailW],
+  ['glintSigma', GLITTER.glintSigma], ['glintFloor', GLITTER.glintFloor],
 ]) ok(glsl.includes(num17(v)), `the emitted GLSL carries GLITTER.${name} (${num17(v)})`);
 for (const [name, v] of [
   ['gain', GLITTER.gain], ['clamp', GLITTER.clamp], ['foamSigma', GLITTER.foamSigma],
   ['foamBack', GLITTER.foamBack], ['foamFwd', GLITTER.foamFwd],
   ['ragFar', GLITTER.ragFar],
   ['ragNear', GLITTER.ragNear], ['foamRelief', GLITTER.foamRelief],
-  ['foamFlat', GLITTER.foamFlat],
+  ['foamFlat', GLITTER.foamFlat], ['detailSd', GLITTER.detailSd],
 ]) ok(srcOcean.includes(`GLITTER.${name}`), `ocean.js reads GLITTER.${name} rather than a literal`);
-// the retired smooth twinkle must be GONE, not merely unused: a world-locked
-// 0.435 m lattice at a fixed contrast is the searchlight streak this pass killed
+// EVERY PAINTED-ON SPARKLE THIS FILE HAS RETIRED MUST STAY RETIRED. Two of them
+// now: the distance-faded smooth twinkle (a world-locked 0.435 m lattice at a
+// fixed contrast — the searchlight streak), and the thresholded two-lattice
+// "shatter" that replaced it (texture on a smooth function, with a duty constant
+// that knew nothing about the light or the water).
 ok(!/twNear|twFar|twFade/.test(srcOcean) && !/twNear|twFar|twFade/.test(srcGlit),
   'the retired distance-faded smooth twinkle is gone from both files');
 ok(!/oVnoise\(vWPos\.xz \* 2\.3/.test(srcOcean),
   'and its world-locked 2.3-per-metre lattice with it');
+ok(!/\b(sparkDuty|sparkFloor|sparkNear|sparkFar|sparkLo|sparkHi|sparkOct|sparkPx|sparkDrift|sparkOn0|SPARK_GAIN|sparkField|sparkAt|twinkleAt|oGlSpark|oGlTwinkle)\b/
+  .test(srcGlit + srcOcean),
+  'and the noise-lattice shatter that followed it — not one of its constants,'
+  + ' functions or call sites survives in either file');
 ok(srcOcean.includes(`GLITTER.plainCut`) && srcOcean.includes('uWaveLOD > 0.5'),
-  'the plain tier widens its own lobe by the components it does not draw');
+  'the plain tier widens its own glint by the components it does not draw');
 ok(srcOcean.includes('GLITTER.plainScale'),
   'the plain tier keeps a share of the corridor rather than parking it at 0');
 // the plain cutoff must BE the shading LOD's own band boundary, not a number
@@ -132,9 +153,6 @@ const HELPERS = {
   __v2: (a, b) => [a, b],
   __ss: (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); },
   __mix: (a, b, t) => a + (b - a) * t,
-  // the glint field reads oceannoise's lattice; ocean.js prepends that module's
-  // GLSL before this one's, so in the shader it is simply in scope
-  oVnoise: (p) => F64NOISE.vnoise(p[0], p[1]),
 };
 const translate = (text) => {
   let s = text.replace(/\/\/[^\n]*/g, '');            // comments first
@@ -145,6 +163,7 @@ const translate = (text) => {
   s = s.replace(/\bvec2\s*\(/g, '__v2(')              // vec2(a, b) -> [a, b]
     .replace(/\bfloat\s+/g, 'let ')                   // locals
     .replace(/\bh\.x\b/g, 'h[0]').replace(/\bh\.y\b/g, 'h[1]').replace(/\bh\.z\b/g, 'h[2]')
+    .replace(/\bm\.x\b/g, 'm[0]').replace(/\bm\.y\b/g, 'm[1]').replace(/\bm\.z\b/g, 'm[2]')
     .replace(/\bclamp\s*\(/g, '__clamp(')
     .replace(/\bsmoothstep\s*\(/g, '__ss(')
     .replace(/\bmix\s*\(/g, '__mix(')
@@ -162,7 +181,7 @@ const jsTwins = (() => {
   ok(!leftover, `the GLSL transliteration covers every construct emitted`
     + (leftover ? ` — found "${leftover[1]}", so this gate is measuring nothing until it is taught that` : ''));
   const names = [...glsl.matchAll(/(?:float|vec2)\s+(oGl\w+)\s*\(/g)].map((m) => m[1]);
-  ok(names.length === 15, `all fifteen emitted functions found (${names.join(', ')})`);
+  ok(names.length === 13, `all thirteen emitted functions found (${names.join(', ')})`);
   return compile(s, names);
 })();
 {
@@ -191,11 +210,25 @@ const jsTwins = (() => {
     cmp('oGlBelow(wind)', jsTwins.oGlBelow(lam, GLITTER.windA,
       1 / Math.log(GLITTER.windB / GLITTER.windA)), belowFrac(lam, GLITTER.windA, GLITTER.windB));
     cmp('oGlSigma', jsTwins.oGlSigma(lam, swG, chG, flr), sigmaFor(lam, swG, chG, flr));
+    cmp('oGlSigmaFull', jsTwins.oGlSigmaFull(swG, chG), sigmaFull(swG, chG));
     const sigA = sigmaFor(lam, swG, chG, flr), sigB = sigmaFor(lam * (0.05 + rnd()), swG, chG, flr);
     // half-vectors from near-vertical to absurdly grazing, and a few negatives
     const hz = rnd() < 0.1 ? rnd() * 0.02 - 0.01 : 0.6 + rnd() * 0.4;
     const hx = (rnd() * 2 - 1) * 0.8, hy = (rnd() * 2 - 1) * 0.8;
-    cmp('oGlLobe', jsTwins.oGlLobe([hx, hy, hz], sigA, sigB), lobe(hx, hy, hz, sigA, sigB));
+    const gl = rnd() < 0.2 ? 1 : rnd() * 12;
+    cmp('oGlLobe', jsTwins.oGlLobe([hx, hy, hz], sigA, sigB, gl), lobe(hx, hy, hz, sigA, sigB, gl));
+    // ---- and THE SPLIT and THE GLINT, on the same terms ----
+    const det = rnd() < 0.3 ? 0 : rnd() * 0.01;
+    const spA = jsTwins.oGlSplit(lam, swG, chG, flr, det), jsA = glintSplit(lam, swG, chG, flr, det);
+    cmp('oGlSplit.sigma', spA[0], jsA[0]);
+    cmp('oGlSplit.resVar', spA[1], jsA[1]);
+    const spB = glintSplit(lam * (0.05 + rnd()), swG, chG, flr, det);
+    const mx = (rnd() * 2 - 1) * 0.5, my = (rnd() * 2 - 1) * 0.5;
+    const mz = rnd() < 0.1 ? rnd() * 0.02 : 0.7 + rnd() * 0.3;
+    const sigE = sigmaFull(swG, chG);
+    cmp('oGlGlint', jsTwins.oGlGlint([hx, hy, hz], [mx, my, mz],
+      jsA[0], jsA[1], spB[0], spB[1], sigE),
+    glintOf(hx, hy, hz, mx, my, mz, jsA[0], jsA[1], spB[0], spB[1], sigE));
     const c = rnd() < 0.15 ? rnd() * 2.4 - 1.2 : rnd(); // out of range on purpose
     cmp('oGlFresnel', jsTwins.oGlFresnel(c), fresnelWater(c));
     const dist = rnd() < 0.1 ? rnd() * 0.2 : Math.exp(rnd() * Math.log(1e5));
@@ -205,13 +238,6 @@ const jsTwins = (() => {
     cmp('oGlFoot.across', gf[0], jf.across);
     cmp('oGlFoot.along', gf[1], jf.along);
     // ---- and the SHATTER and the RAFT, on the same terms ----
-    cmp('oGlSparkNear', jsTwins.oGlSparkNear(jf.across), sparkNearness(jf.across));
-    const spx = (rnd() * 2 - 1) * 4e4, spz = (rnd() * 2 - 1) * 4e4;
-    cmp('oGlSpark', jsTwins.oGlSpark(spx, spz), sparkField(spx, spz));
-    cmp('oGlTwinkle', jsTwins.oGlTwinkle(spx, spz), twinkle(spx, spz));
-    const sw = rnd(), st = rnd() * 3e4;
-    cmp('oGlSparkAt', jsTwins.oGlSparkAt(spx, spz, st, sw), sparkAt(spx, spz, st, sw));
-    cmp('oGlTwinkleAt', jsTwins.oGlTwinkleAt(spx, spz, st, sw), twinkleAt(spx, spz, st, sw));
     cmp('oGlRagNear', jsTwins.oGlRagNear(jf.across), ragNearness(jf.across));
     const rf = rnd() * 0.9375, rn = rnd() * 0.9375, rw = rnd();
     cmp('oGlRag', jsTwins.oGlRag(rf, rn, rw), ragOf(rf, rn, rw));
@@ -230,9 +256,15 @@ const jsTwins = (() => {
     ['sigA and sigB swapped in oGlLobe', (t) => t.replace('(sy * sy) / (sigB * sigB)', '(sy * sy) / (sigA * sigA)')
       .replace('(sx * sx) / (sigA * sigA)', '(sx * sx) / (sigB * sigB)')],
     ['the cos^-4 Jacobian dropped', (t) => t.replace('return (core + tail) * j;', 'return (core + tail);')],
-    ['exp(-0.5 * q) become exp(-q)', (t) => t.replace('exp(-0.5 * q) * e', 'exp(-q) * e')],
+    ['exp(-0.5 * q) become exp(-q)', (t) => t.replace('exp(-0.5 * q) * e * glint', 'exp(-q) * e * glint')],
+    ['the glint stops reaching the core', (t) => t.replace('exp(-0.5 * q) * e * glint', 'exp(-0.5 * q) * e')],
+    ["the drawn surface stops standing in for the population", (t) => t
+      .replace('float sx = h.x / up + kA * (m.x / mup);', 'float sx = h.x / up;')
+      .replace('float sy = h.y / up + kB * (m.y / mup);', 'float sy = h.y / up;')],
     ["oGlFoot's two components swapped", (t) => t.replace(/return vec2\(across, (min[^;]+)\);/, 'return vec2($1, across);')],
-    ['the two glint levels stop cross-fading', (t) => t.replace('return a + (b - a) * w;', 'return a;')],
+    ["the glint's normalisation dropped", (t) => t.replace('/ max(d, 1e-4)', '')],
+    ["oGlSplit's two halves swapped", (t) => t.replace('return vec2(sg, max(0.0, sw + wd - below) + detVar);',
+      'return vec2(max(0.0, sw + wd - below) + detVar, sg);')],
     ['the shred forgets the age', (t) => t.replace('* age * (1.0 - rag)', '* (1.0 - rag)')],
     ["the lace's contrast taper dropped", (t) => t.replace(`* mix(1.0, ${num17(GLITTER.ragMagKeep)}, w)`, '* 1.0')],
   ];
@@ -242,11 +274,15 @@ const jsTwins = (() => {
     let caught = false;
     try {
       const m = compile(translate(mutated),
-        ['oGlLobe', 'oGlFoot', 'oGlSparkAt', 'oGlShred', 'oGlRag']);
-      if (rel(m.oGlLobe([0.06, 0.02, 0.995], 0.16, 0.12), lobe(0.06, 0.02, 0.995, 0.16, 0.12)) > TOL) caught = true;
+        ['oGlLobe', 'oGlFoot', 'oGlSplit', 'oGlGlint', 'oGlShred', 'oGlRag']);
+      if (rel(m.oGlLobe([0.06, 0.02, 0.995], 0.16, 0.12, 2.5),
+        lobe(0.06, 0.02, 0.995, 0.16, 0.12, 2.5)) > TOL) caught = true;
       const f = m.oGlFoot(300, 0.02, 1.4e-3), jf2 = footprint(300, 0.02, 1.4e-3);
       if (rel(f[0], jf2.across) > TOL || rel(f[1], jf2.along) > TOL) caught = true;
-      if (rel(m.oGlSparkAt(1e4, -2e4, 12, 0.4), sparkAt(1e4, -2e4, 12, 0.4)) > TOL) caught = true;
+      const sp = m.oGlSplit(3.0, 1.54, 1.05, 7e-4, 1e-3), js = glintSplit(3.0, 1.54, 1.05, 7e-4, 1e-3);
+      if (rel(sp[0], js[0]) > TOL || rel(sp[1], js[1]) > TOL) caught = true;
+      if (rel(m.oGlGlint([0.02, 0.01, 0.999], [0.09, -0.04, 0.99], js[0], js[1], js[0], js[1], 0.19),
+        glintOf(0.02, 0.01, 0.999, 0.09, -0.04, 0.99, js[0], js[1], js[0], js[1], 0.19)) > TOL) caught = true;
       if (rel(m.oGlShred(0.2, 0.4), shredOf(0.2, 0.4)) > TOL) caught = true;
       if (rel(m.oGlRag(0.2, 0.8, 0.6), ragOf(0.2, 0.8, 0.6)) > TOL) caught = true;
     } catch { caught = true; }
@@ -618,10 +654,29 @@ const jsTwins = (() => {
   const call = (re, what) => ok(re.test(srcOcean), `ocean.js really ${what}`);
   call(/oNw = normalize\(mix\(oNw, oNf, \$\{GLITTER\.foamFlat[^}]*\} \* oFoam\)\)/,
     'levels the foam\'s macro normal by foamFlat * oFoam');
-  call(/oGlTwinkleAt\(vWPos\.x, vWPos\.z, uTime, oGlSparkNear\(oFt\.x\)\)/,
-    'draws the shatter from the cross-faded world lattices');
-  call(/uSparkle \* \$\{GLITTER\.gain[^}]*\} \* oGl \* oTw/,
-    'multiplies the corridor by the twinkle');
+  // THE APPEARANCE FIX, AS FIVE CALLS. Each of these was mutated away by hand
+  // and every one of them takes this file red.
+  call(/vec2 oSpA = oGlSplit\(max\(2\.0 \* oFt\.y, oCut\), uSwellL, uSwellS, oSFlr, oDetV\)/,
+    "sizes the glint from the pixel's own DOWN-RANGE footprint and the detail bands");
+  call(/vec2 oSpB = oGlSplit\(max\(2\.0 \* oFt\.x, oCut\), uSwellL, uSwellS, oSFlr, oDetV\)/,
+    'and from its ACROSS-range footprint on the other axis');
+  call(/float oGlint = oGlGlint\(oHl, oHm, oSpA\.x, oSpA\.y, oSpB\.x, oSpB\.y, oSigE\)/,
+    'takes the glint against oHl — the residual over the EXACT drawn normal —'
+    + ' with oHm and oSigE for the stand-in term that lets it reach the corridor');
+  call(/oGlint = mix\(oGlint, 1\.0, oFoam\)/,
+    "stands the glints down over foam, whose sheen is diffuse");
+  call(/float oGl = oGlLobe\(oHm, oSigE, oSigE, oGlint\)/,
+    'fills the MEAN-surface corridor with them (oHm, not oHl — the envelope is'
+    + ' the statistics and the glint is the geometry, and swapping the two frames'
+    + ' collapses this back to one term)');
+  call(/vec3 oHm = vec3\(dot\(oHalf, oRange\), dot\(oHalf, oAcrM\), oHalf\.y\)/,
+    "builds that mean-surface half-vector from world up and the eye's own bearing");
+  call(/float oSigE = oGlSigmaFull\(uSwellL, uSwellS\)/,
+    "widens the corridor by Cox & Munk's full sd and not by the footprint");
+  call(/oDetV \+= oDAmp \* oDAmp \* /,
+    "counts the shading detail bands' own slope into the glint's normalisation");
+  call(/uSparkle \* \$\{GLITTER\.gain[^}]*\} \* oGl\) \* uGlitCol/,
+    'and spends the result once, with no second multiplier on it');
   call(/oFoam \* mix\(1\.0, oGlRaft\(oBrk\), oWcShare\) \* uGlitAmp/,
     'scales the BREAKER raft\'s radiance by its depth, and leaves the wake alone');
   call(/oGlShred\([^;]*\boAge\b[^;]*\)/, 'shreds the spent tail with the break AGE');
@@ -632,122 +687,281 @@ const jsTwins = (() => {
 
 // ---- 8. APPEARANCE, NOT PRESENCE -------------------------------------------
 // THIS SECTION EXISTS BECAUSE EVERY GATE IN THIS FILE WAS GREEN WHILE THE
-// PICTURE LOOKED BASIC. Coverage matched Monahan's photographs, the sunward
-// contrast was 1.54, the skewness matched second-order theory — and the owner's
-// verdict on the v2 showcase was "the glitter off waves/cresting is crap and
-// basic". Those checks measure that a phenomenon is PRESENT. They cannot see
-// that a corridor of thousands of separate glints has been drawn as one smooth
-// streak, or that a breaking crest has been drawn as a flat white decal. So:
-// two statistics that a smooth field fails and a shattered one passes, each with
-// the retired arithmetic re-run beside it as the counter-example.
-let sparkDutyMeasured = 0, glintDensity = 0, glintContrast = 0;
+// PICTURE LOOKED BASIC — TWICE. First: coverage matched Monahan's photographs,
+// the sunward contrast was 1.54, the skewness matched second-order theory, and
+// the owner's verdict on the v2 showcase was "the glitter off waves/cresting is
+// crap and basic". Then a noise lattice was thresholded onto the lobe and THIS
+// SECTION WENT GREEN ON IT — 3.72 separated maxima per square metre at 5.6x
+// contrast — while the rendered road still read as soft blobs, because the
+// statistic was measured on the NOISE FIELD ITSELF and not on anything the
+// shader draws. A field can be as spiky as you like in isolation and still
+// vanish once it is averaged over a pixel and multiplied into a smooth envelope.
+//
+// So the measurement moved onto the water. What follows builds a real stretch of
+// road — waves.js's own drawn surface at a real sea state, the detail bands
+// ocean.js adds to the shading normal, a real eye height and a real low sun —
+// and evaluates the corridor over it EXACTLY as the fragment shader does, term
+// for term. Then it counts separated maxima and their contrast against the water
+// between them. The counter-example beside it is not a synthetic smooth field:
+// it is the arithmetic that shipped before this pass, run on the same surface
+// with the same geometry, so the comparison is of the two ROADS and not of two
+// noise functions.
+let glintDensity = 0, glintContrast = 0, glintMeanRatio = 0;
 {
-  // (a) THE MEAN IS PRESERVED. The shatter is contrast; if it were brightness the
-  // road's gated luminance bounds would silently move under it. sparkDuty is a
-  // MEASURED constant of the field and the floor/gain are derived from it, so
-  // this check is what keeps the derivation honest.
-  const sample = (x0, z0, N, st, f) => {
-    let s = 0;
-    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) s += f(x0 + i * st, z0 + j * st);
-    return s / (N * N);
+  const pixA = (2 * Math.tan((62 * Math.PI / 180) / 2)) / 1440;
+  // the sea 08-glitter-sun-road-low-sun is shot on, and a low sun down +x
+  setSeaBands(2.17, 1.32);
+  setWaveOrigin(0, 0);
+  setWaveAxes(waveAxisFor(2.1), waveAxisFor(2.1));
+  const swellG = 2.17, chopG = 1.32;
+  const EYE = 2.8, ELEV = 6 / DEG, T = 61.5;
+  const NOISE = makeOceanNoise((x) => x);
+  // ocean.js's FINE detail band, term for term (the broad far-field band adds
+  // 0.0005 rad against this one's 0.03 and is left out of both sides alike)
+  const detail = (x, z) => {
+    const p1x = x * 1.35 + T * 0.18, p1z = z * 1.35 + T * 0.05;
+    const p2x = x * 0.42 - T * 0.06 + 13.7, p2z = z * 0.42 - T * 0.11 + 13.7;
+    const f = (ax, az, bx, bz) => NOISE.fbm(ax, az) * 0.55 + NOISE.fbm(bx, bz) * 0.45;
+    const d0 = f(p1x, p1z, p2x, p2z);
+    const dx = f(p1x + 0.35 * 1.35, p1z, p2x + 0.35 * 0.42, p2z);
+    const dz = f(p1x, p1z + 0.35 * 1.35, p2x, p2z + 0.35 * 0.42);
+    return [(dx - d0) / 0.35, (dz - d0) / 0.35];
   };
-  const duties = [
-    sample(1000.31, -2000.17, 500, 0.37, sparkField),
-    sample(-31.7, 77.3, 500, 0.37, sparkField),
-    sample(12000.13, 9000.29, 500, 0.71, sparkField),
-  ];
-  sparkDutyMeasured = duties.reduce((a, b) => a + b, 0) / duties.length;
-  ok(Math.abs(sparkDutyMeasured - GLITTER.sparkDuty) < 0.006,
-    `GLITTER.sparkDuty is the field's own mean (constant ${GLITTER.sparkDuty},`
-    + ` measured ${sparkDutyMeasured.toFixed(5)} over three independent patches)`);
-  const mean = sample(500.5, -500.5, 500, 0.37, twinkle);
-  ok(Math.abs(mean - 1) < 0.02,
-    `the shatter is CONTRAST ONLY — mean twinkle ${mean.toFixed(4)} (want 1.000)`);
-  ok(Math.abs(GLITTER.sparkFloor + SPARK_GAIN * GLITTER.sparkDuty - 1) < 1e-12,
-    'and the floor/gain pair is derived from the duty rather than tuned beside it');
-
-  // (b) DISCRETENESS — the appearance statistic. Count SEPARATED local maxima
-  // per unit area and their peak-to-floor contrast over a patch the size of a
-  // stretch of road. A smooth field has few, low-contrast, broad maxima; a
-  // shattered one has many sharp ones with dark water between.
-  const discreteness = (f, N = 240, st = 0.25) => {
+  // one pixel of road, both ways. `mode` 'now' is the shader as it stands;
+  // 'was' is the smooth Cox lobe taken against the same drawn normal, which is
+  // what 68e8eae shipped and what the noise shatter was painted onto.
+  const road = (x, z, mode) => {
+    const P = [x, 0, z];
+    const E = [0, EYE, 0];
+    const dv = [E[0] - P[0], E[1] - P[1], E[2] - P[2]];
+    const dist = Math.hypot(...dv) || 1;
+    const V = dv.map((q) => q / dist);
+    const g = waveGradient(x, z, T);
+    const dF = (() => {                       // ocean.js's own distance fade
+      const t = clampT((dist - 120) / (22 - 120));
+      return t * t * (3 - 2 * t);
+    })();
+    const dAmp = 0.16 * dF * (0.55 + 0.45 * chopG);
+    const dd = detail(x, z);
+    const gx = g[0] + dd[0] * dAmp, gz = g[1] + dd[1] * dAmp;
+    const nl = Math.hypot(gx, 1, gz);
+    const N = [-gx / nl, 1 / nl, -gz / nl];
+    const L = [Math.cos(ELEV), Math.sin(ELEV), 0];   // the sun down +x, at the eye's back
+    let H = [V[0] + L[0], V[1] + L[1], V[2] + L[2]];
+    const hn = Math.hypot(...H) || 1;
+    H = H.map((q) => q / hn);
+    // the pixel's footprint, and the two frames the shader builds
+    const foot = footprint(dist, Math.max(V[1], 0), pixA);
+    const rn = Math.hypot(-V[0], -V[2]) || 1;
+    const R = [-V[0] / rn, 0, -V[2] / rn];
+    const acr = cross(N, R), al = cross(unit(acr), N);
+    const ac = unit(acr);
+    const hl = [dot(H, al), dot(H, ac), dot(H, N)];
+    const fres = fresnelWater(dot(H, L));
+    if (mode === 'was') {
+      const flr = pixA * 0.5;
+      return lobe(hl[0], hl[1], hl[2],
+        sigmaFor(2 * foot.along, swellG, chopG, flr),
+        sigmaFor(2 * foot.across, swellG, chopG, flr)) * fres;
+    }
+    const detV = dAmp * dAmp * GLITTER.detailSd * GLITTER.detailSd;
+    const [sgA, rvA] = glintSplit(2 * foot.along, swellG, chopG, pixA * 0.5, detV);
+    const [sgB, rvB] = glintSplit(2 * foot.across, swellG, chopG, pixA * 0.5, detV);
+    const acrM = [R[2], 0, -R[0]];
+    const hm = [dot(H, R), dot(H, acrM), H[1]];
+    const sigE = sigmaFull(swellG, chopG);
+    const gl = glintOf(hl[0], hl[1], hl[2], hm[0], hm[1], hm[2], sgA, rvA, sgB, rvB, sigE);
+    return lobe(hm[0], hm[1], hm[2], sigE, sigE, gl) * fres;
+  };
+  // A STRIP OF ROAD: 16 m down the sun's own bearing by 2.4 m across it, from
+  // the mirror point outward, sampled at 4 cm — finer than one glint, so a
+  // maximum is a maximum of the field and not of the sampling. Narrow on
+  // purpose: six degrees off the bearing the corridor is 20x down (check 6b), so
+  // a square patch would be mostly water with no road on it at all and would
+  // measure the corridor's edge rather than its substance.
+  const measure = (mode, x0 = 26.0, halfZ = 1.2, st = 0.04, NX = 400) => {
+    const NZ = 2 * Math.round(halfZ / st) + 1, z0 = -halfZ;
     const g = [];
-    for (let j = 0; j < N; j++) {
+    for (let j = 0; j < NZ; j++) {
       const row = [];
-      for (let i = 0; i < N; i++) row.push(f(700.13 + i * st, -300.29 + j * st));
+      for (let i = 0; i < NX; i++) row.push(road(x0 + i * st, z0 + j * st, mode));
       g.push(row);
     }
-    let peaks = 0, pk = 0, lo = 0, n = 0;
-    for (let j = 1; j < N - 1; j++) {
-      for (let i = 1; i < N - 1; i++) {
+    const all = g.flat().sort((a, b) => a - b);
+    const med = Math.max(1e-12, all[Math.floor(all.length * 0.5)]);
+    let peaks = 0, pk = 0, sum = 0, n = 0, lit = 0;
+    for (let j = 1; j < NZ - 1; j++) {
+      for (let i = 1; i < NX - 1; i++) {
         const v = g[j][i];
         let top = true;
         for (let dj = -1; dj <= 1 && top; dj++) for (let di = -1; di <= 1; di++) {
           if ((di || dj) && g[j + dj][i + di] >= v) { top = false; break; }
         }
-        if (top) { peaks++; pk += v; }
-        n++; lo += v;
+        // A GLINT IS A MAXIMUM THAT STANDS OUT, and the threshold is what makes
+        // this statistic mean anything: a smooth field is covered in shallow
+        // maxima (the first cut of this check counted them and scored the SMOOTH
+        // lobe higher than the glint field, 7.9/m2 against 1.5, which is true and
+        // entirely beside the point). Twice the median is the bar.
+        if (top && v > 2 * med) { peaks++; pk += v; }
+        if (v > 2 * med) lit++;
+        n++; sum += v;
       }
     }
-    const area = ((N - 2) * st) ** 2;
-    const all = g.flat().sort((a, b) => a - b);
     return {
-      // maxima per square metre of the sampled field
-      density: peaks / area,
-      // the separation the eye reads: the bright tail against the dark floor
-      contrast: (pk / Math.max(1, peaks)) / Math.max(1e-6, all[Math.floor(all.length * 0.5)]),
-      mean: lo / n,
+      density: peaks / (((NX - 2) * st) * ((NZ - 2) * st)),
+      contrast: (pk / Math.max(1, peaks)) / med,
+      mean: sum / n,
+      // the mean AREA of one glint, in square metres: lit area over glint count
+      area: (lit * st * st) / Math.max(1, peaks),
     };
   };
-  const now = discreteness(twinkle);
+  const now = measure('now'), was = measure('was');
   glintDensity = now.density; glintContrast = now.contrast;
-  // THE COUNTER-EXAMPLE: the arithmetic that shipped until 2026-07-26 — one
-  // smooth value-noise lattice at a fixed world scale, at its NEAR contrast
-  // (0.85, the strongest it ever ran). Sampled here at the same cell size, so
-  // the comparison is of SHAPE and not of scale.
-  const N64 = makeOceanNoise((x) => x);
-  const smooth = (x, z) => Math.max(0, 1 + 0.85 * (2 * N64.vnoise(x, z) - 1));
-  const was = discreteness(smooth);
-  ok(now.contrast > was.contrast * 1.8,
-    `the road SHATTERS: its maxima stand ${now.contrast.toFixed(2)}x over the median`
-    + ` against ${was.contrast.toFixed(2)}x for the smooth twinkle it replaces`
-    + ' (floor 1.8x of it)');
-  ok(now.contrast > 2.5, `and ${now.contrast.toFixed(2)}x in absolute terms (floor 2.5)`);
-  // DENSITY IS THE DISCRIMINATING STATISTIC AND IT IS GATED UPWARD. A cold review
-  // showed the contrast ratio above can be gamed by a deliberately SMOOTH field
-  // with a low floor (pow(vnoise, 16) scores 31x), because the median IS the
-  // floor when the field is dark over four fifths of its area. Separated maxima
-  // per square metre cannot be gamed that way: a smooth field has one broad
-  // maximum per cell and no more.
-  ok(now.density > was.density * 1.5,
-    `and it is made of MANY separate glints — ${now.density.toFixed(3)} maxima/m2`
-    + ` against ${was.density.toFixed(3)} for the smooth twinkle (floor 1.5x of it);`
-    + ' a corridor of a dozen big blobs is not glitter either');
-
-  // (c) AND WHICHEVER LEVEL DOMINATES IS A HANDFUL OF PIXELS. The levels are
-  // FIXED world lattices — the first cut sized the cell per pixel and aliased
-  // everywhere but the world origin, which a cold review caught and this check
-  // now forecloses: nothing below reads a per-pixel divisor.
-  const pixA = (2 * Math.tan((62 * Math.PI / 180) / 2)) / 1440;
+  glintMeanRatio = now.mean / was.mean;
+  console.log(`  road at 26-42 m under a 6 deg sun, on waves.js's own water:`
+    + ` ${now.density.toFixed(2)} glints/m2 standing ${now.contrast.toFixed(1)}x over the`
+    + ` water between them, against ${was.density.toFixed(2)} at ${was.contrast.toFixed(2)}x`
+    + ' for the smooth lobe it replaces');
+  // (a) DISCRETENESS. Both statistics, both against the arithmetic that shipped.
+  ok(now.contrast > was.contrast * 4,
+    `THE ROAD IS MADE OF SEPARATE GLINTS: they stand ${now.contrast.toFixed(1)}x over the`
+    + ` water between them against ${was.contrast.toFixed(2)}x for the smooth lobe this`
+    + ' replaces (floor 4x of it) — a searchlight beam scores near 1');
+  ok(now.contrast > 8, `and ${now.contrast.toFixed(1)}x in absolute terms (floor 8)`);
+  ok(now.density > 0.4 && now.density > was.density * 4,
+    `and there are MANY of them — ${now.density.toFixed(2)} per square metre of road`
+    + ` against ${was.density.toFixed(2)} (floors: 0.4 absolute, 4x the smooth lobe);`
+    + ' a dozen big blobs is not glitter either');
+  // (b) AND THE MEAN IS PRESERVED — BY CONSTRUCTION, which is a stronger claim
+  // than a measurement and is checked as such: integrate the glint against the
+  // very slope distribution its normaliser assumes and it must come back at
+  // 1.000, at every range and every sea state, with nothing tuned. Quadrature
+  // and not Monte Carlo, deliberately: a 5.7% bias here turned out to be the
+  // sampler and not the model, which is exactly the kind of thing a gate should
+  // not have to guess about.
   {
-    for (const d of [20, 40, 100, 200, 400]) {
-      const f = footprint(d, Math.max(0.02, 3 / d), pixA);
-      const w = sparkNearness(f.across);
-      const px = (w < 0.5 ? 1 / GLITTER.sparkNear : 1 / GLITTER.sparkFar) / f.across;
-      ok(px >= 3 && px <= 20, `the dominant glint level is ${px.toFixed(1)} px across at`
-        + ` ${d} m (blend ${w.toFixed(2)}; wanted 3-20 — finer aliases, coarser is a blob,`
-        + ' and 15 px blobs are what the first cut of this cross-fade drew)');
+    let worst = 0, worstAt = '';
+    for (const [sw, ch] of [[1.54, 1.05], [2.17, 1.32], [0.7, 0.6], [2.4, 1.9]]) {
+      for (const lam of [0.2, 5, 40, 400]) {
+        for (const det of [0, 0.0012]) {
+          const [sg, rv] = glintSplit(lam, sw, ch, 7e-4, det);
+          const S = Math.sqrt(Math.max(rv, 1e-14));
+          let num = 0, den = 0;
+          for (let i = -60; i <= 60; i++) {
+            for (let j = -60; j <= 60; j++) {
+              const sx = i * 0.1 * S, sy = j * 0.1 * S;
+              const w = Math.exp(-(sx * sx + sy * sy) / (2 * Math.max(rv, 1e-14)));
+              // at the corridor's heart the mean-surface demand is zero, so the
+              // stand-in term vanishes and this is the normaliser's own claim
+              num += w * glintOf(sx, sy, 1, 0, 0, 1, sg, rv, sg, rv, sigmaFull(sw, ch));
+              den += w;
+            }
+          }
+          const m = num / den;
+          if (Math.abs(m - 1) > worst) {
+            worst = Math.abs(m - 1); worstAt = `${sw}/${ch} at ${lam} m, detVar ${det}`;
+          }
+        }
+      }
     }
-    ok(!/oGlSparkCell|\/ *oGlSpark/.test(glsl) && !/dot\(vWPos\.xz, o\w+\) *\//.test(srcOcean),
-      'and no world coordinate is divided by a per-pixel cell anywhere — that is'
-      + ' the aliasing machine the shatter was built on first');
-    // ...and the retired fixed 0.435 m lattice could not serve both ends at once
-    const near = footprint(40, 0.075, pixA).across, far = footprint(400, 0.02, pixA).across;
-    ok(0.435 / far < 2 && 0.435 / near > 8,
-      `the retired 0.435 m lattice ran ${(0.435 / near).toFixed(1)} px at 40 m and`
-      + ` ${(0.435 / far).toFixed(2)} px at 400 — chunky close aboard and BELOW A PIXEL`
-      + ' down the road, which is why the corridor was a smooth streak exactly where'
-      + ' the road is');
+    ok(worst < 0.01, `THE GLINTS ARE CONTRAST, NOT BRIGHTNESS: over the slope distribution`
+      + ` the normaliser assumes, E[glint] is 1 to ${worst.toExponential(2)} across four sea`
+      + ` states x four footprints x two detail loads (worst at ${worstAt}) —`
+      + ' floor + (1 - floor) * E = 1 by construction, so no duty constant is measured'
+      + ' or tuned anywhere');
+  }
+  // ...and on the real water, where the surface is not Gaussian and the strip is
+  // a finite realisation that spans two and a half degrees of bearing, the same
+  // stretch of road comes out at roughly what the smooth lobe put there. It is
+  // BELOW 1 on purpose and for the reason the phenomenon requires: the glints
+  // thin as the corridor thins, so a strip that includes the corridor's flanks
+  // loses a little of what a smooth lobe would have spread evenly over them.
+  ok(glintMeanRatio > 0.5 && glintMeanRatio < 1.5,
+    `on the water the same strip integrates to ${glintMeanRatio.toFixed(3)}x what the`
+    + ' smooth lobe put there (wanted 0.5-1.5)');
+  // (c) THE ANTI-ALIASING IS THE FOOTPRINT AND NOTHING ELSE. Close aboard the
+  // glint runs at the mirror's own hardness; down the road the footprint swallows
+  // the spectrum, the glint lobe overtakes what is left of the resolved slope,
+  // the normalisation runs toward 1 and the road softens on its own. That ladder
+  // must be monotone, or the road would harden with range somewhere.
+  {
+    let prevPeak = 1e9, prevSig = 0, mono = true;
+    const rows = [];
+    for (const d of [10, 20, 40, 80, 160, 320, 640]) {
+      const r = pathValue(2.8, d, ELEV, 0, swellG, chopG, pixA);
+      rows.push({ d, sig: r.sigA, peak: r.peak });
+      if (r.peak > prevPeak + 1e-12 || r.sigA < prevSig - 1e-12) mono = false;
+      prevPeak = r.peak; prevSig = r.sigA;
+    }
+    console.log('  glint hardness down the road: '
+      + rows.map((r) => `${r.d} m ${r.peak.toFixed(2)}x`).join(', '));
+    ok(mono, 'the glint softens MONOTONICALLY with range — it never hardens further off');
+    ok(rows[0].peak > 3, `close aboard one glint peaks ${rows[0].peak.toFixed(2)}x over the`
+      + ' mean field it sits in (floor 3x)');
+    ok(rows[rows.length - 1].peak < rows[0].peak * 0.6,
+      `and by ${rows[rows.length - 1].d} m it is down to ${rows[rows.length - 1].peak.toFixed(2)}x`
+      + ' — the road softens toward the horizon, which is what a real one does. It does'
+      + ' NOT go all the way back to the smooth lobe, and should not: the ACROSS-range'
+      + ' footprint is only dist * pixA at any distance, so the surface stays resolved'
+      + ' across the road even where it is smeared along it.');
+  }
+  // (c2) AND THE GLINT'S HARDNESS IS BRACKETED AT BOTH ENDS, then measured in
+  // PIXELS in between — the discipline the retired noise lattice's own ladder
+  // had, on a geometric quantity rather than a lattice constant. The two bounds
+  // are not tastes: below the source's own angular radius the model claims to
+  // resolve the disc and every glint lands inside one pixel; at the retired
+  // mirror's width a glint comes out about a metre across on this water, which
+  // is sixty pixels at fifteen metres and reads as a blob.
+  {
+    const SRC = 0.00465 / 2 / 2;   // sun/moon angular radius -> facet-slope sigma
+    const MIR = Math.acos(0.5 ** (1 / MIRROR_EXP)) / 2 / Math.sqrt(2 * Math.LN2);
+    ok(Math.abs(MIR - 0.030995) < 1e-5,
+      `the ceiling IS the retired mirror's own width (pow(...,${MIRROR_EXP}) is`
+      + ` half-maximum at 2.09 deg of facet tilt, sigma ${MIR.toFixed(5)})`);
+    ok(GLITTER.glintSigma > SRC * 4 && GLITTER.glintSigma < MIR,
+      `and the glint sits between them: ${GLITTER.glintSigma} is ${(GLITTER.glintSigma / SRC).toFixed(0)}x`
+      + ` the source's own disc (${SRC.toFixed(5)}) and ${(GLITTER.glintSigma / MIR).toFixed(2)} of`
+      + ` the mirror (${MIR.toFixed(4)})`);
+    // THE DRAWN SIZE, from the measured field: total lit area divided by the
+    // number of glints in it, converted to pixels at the range it was sampled.
+    // Measured at BOTH ends of the road, because the surface changes under it —
+    // close aboard the detail bands are what break the light up, and past their
+    // fade it is the wave gradient alone, so a glint is bigger in METRES far away
+    // and still smaller in PIXELS. The bar is the one the retired lattice was
+    // held to: a handful of pixels, because finer aliases and coarser is a blob.
+    const far = measure('now', 240, 12, 0.16, 250);
+    for (const [r, m] of [[33, now], [280, far]]) {
+      const px = Math.sqrt(m.area) / (r * pixA);
+      console.log(`  one drawn glint at ${r} m: ${(Math.sqrt(m.area) * 100).toFixed(0)} cm`
+        + ` of water, ${px.toFixed(1)} px across`);
+      ok(px >= 2.5 && px <= 30, `a glint is ${px.toFixed(1)} px across at ${r} m — wanted`
+        + ' 2.5 to 30. At the retired mirror\'s own width the same measurement gives a metre'
+        + ' of water close aboard and sixty pixels, which is the soft blob the browser'
+        + ' frames showed at glintSigma 0.028.');
+    }
+  }
+  // (c1) AND detailSd IS THE DETAIL BANDS' OWN SLOPE, re-measured from
+  // oceannoise's twin using ocean.js's own construction. If either drifts the
+  // glint's normalisation is taken over the wrong distribution and the road runs
+  // bright close aboard, where the bands are strongest — a defect nothing else
+  // here would see.
+  {
+    let s = 0, s2 = 0, n = 0;
+    for (let j = 0; j < 300; j++) {
+      for (let i = 0; i < 300; i++) {
+        const x = 1234.5 + i * 0.83, z = -987.25 + j * 0.83;
+        const f = (ax, az) => NOISE.fbm(ax * 1.35, az * 1.35) * 0.55
+          + NOISE.fbm(ax * 0.42, az * 0.42) * 0.45;
+        const gq = (f(x + 0.35, z) - f(x, z)) / 0.35;
+        s += gq; s2 += gq * gq; n++;
+      }
+    }
+    const sd = Math.sqrt(s2 / n - (s / n) ** 2);
+    ok(Math.abs(sd - GLITTER.detailSd) < 0.004,
+      `GLITTER.detailSd is the fine detail band's own slope sd at unit amplitude`
+      + ` (constant ${GLITTER.detailSd}, re-measured ${sd.toFixed(5)})`);
+    for (const lit of ['1.35', '0.42', '0.55', '0.45', 'oDe = 0.35'])
+      ok(srcOcean.includes(lit), `and ocean.js still builds that band from ${lit}`);
   }
 
   // (c2) THE LACE'S DRAWN CELL — the near-field defect, as arithmetic.
@@ -914,15 +1128,19 @@ let sparkDutyMeasured = 0, glintDensity = 0, glintContrast = 0;
 }
 
 if (failed) { console.error(`verify-glitter: ${failed} FAILED`); process.exit(1); }
-console.log('verify-glitter: OK — GLSL/JS parity exact over 28000 comparisons (and four'
-  + ' plausible mutations of the emitted lobe all caught); the water is lit from the REAL'
+console.log('verify-glitter: OK — GLSL/JS parity exact over 64000 comparisons (and nine'
+  + ' plausible mutations of the emitted arithmetic all caught); the water is lit from the REAL'
   + ' source (0 deg over a full lunar month, against 29.6 deg for the retired'
   + ` reconstruction); the roughness sits on Cox & Munk's line by construction`
   + ` (sigma ${SIGMA_REF.toFixed(3)} at 10 m/s) and widens monotonically with the sea;`
   + ` the corridor runs ${litSpan[0]} m to ${litSpan[1]} m down the bearing and is`
   + ` ${offBearing.toFixed(0)}x down 6 deg off it; brightness bounded both ways;`
-  + ' the churn answers the sun; and APPEARANCE is gated as well as presence —'
-  + ` the road shatters into ${glintDensity.toFixed(2)} separated glints per square metre`
-  + ` standing ${glintContrast.toFixed(2)}x over the water between them (the smooth`
-  + ' twinkle it replaces manages 1.6x), a glint is 3-60 px at every range from 40 m'
-  + ' to a kilometre, and a raft is dense at its head and shredded at its tail');
+  + ' the churn answers the sun; and APPEARANCE is gated as well as presence, ON THE'
+  + ` WATER rather than on a noise field — a real stretch of road over waves.js's own`
+  + ` surface carries ${glintDensity.toFixed(2)} separated glints per square metre standing`
+  + ` ${glintContrast.toFixed(1)}x over the water between them, where the smooth lobe it`
+  + ' replaces has no maximum anywhere that stands twice its own median; the glints are'
+  + ` CONTRAST (E[glint] = 1 by construction; the strip integrates to`
+  + ` ${glintMeanRatio.toFixed(2)}x what the smooth lobe put there); they soften with the`
+  + ' pixel footprint and nothing else; and a raft is dense at its head and shredded at'
+  + ' its tail');

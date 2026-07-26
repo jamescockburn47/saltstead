@@ -13,14 +13,19 @@
 // ISOTROPIC — no periodic ripple fields, no sin() in the detail bands.
 //
 // Light on the water, in order:
-//  - THE GLITTER PATH (src/glitter.js, 2026-07-26): a slope-space Gaussian over
-//    the half-vector with Cox & Munk roughness and Schlick's Fresnel, broadened
-//    by whatever the pixel's own footprint cannot resolve. It replaces the
-//    pow(dot(R, sun), 260.0) mirror that shipped before — an exponent of 260 is
-//    a 2-degree pinpoint, and the corridor asks for 5 degrees of facet tilt at
-//    the horizon, so the road was never drawn and the owner had to hunt for the
-//    reflection with the camera. The lobe IS the sparkle pass, the corridor and
-//    the wake's wet sheen, all one term.
+//  - THE GLITTER PATH (src/glitter.js, 2026-07-26), and it is TWO terms because
+//    the sea's facets come in two populations. The CORRIDOR is a slope-space
+//    Gaussian at Cox & Munk's full roughness over the MEAN surface, with
+//    Schlick's Fresnel: it decides where a road can be at all and how it opens
+//    with sea state and range, which the pow(dot(R, sun), 260.0) mirror that
+//    shipped before provably could not (an exponent of 260 is a 2-degree
+//    pinpoint and the corridor asks for 5 degrees of facet tilt at the horizon).
+//    The GLINT is that same mirror, restored, taken against the EXACT per-pixel
+//    drawn normal and normalised so its expectation is 1 — because a corridor
+//    drawn at its statistical mean is a soft continuous smear, and real glitter
+//    is thousands of separate binary events. Hard near the eye; softened only by
+//    the pixel's own footprint, which is the honest anti-aliasing bound.
+//    The corridor also carries the wake's wet sheen, in the same term.
 //  - Phong's own specular from the real sun/moon DirectionalLights still runs
 //    over the perturbed normal; it is a narrow highlight near the source's
 //    mirror image and the glitter path is additive over it.
@@ -367,6 +372,11 @@ vec2 oCoastGradW(vec2 p) {
   // froth on EVERY tier: the wake's churn is a texture read and the break field
   // is arithmetic, so even Plain keeps her white road AND her whitecaps. Fine
   // adds the patchiness, the windrows and the streaky fbm lace.
+  // the SHADING detail bands' own per-axis slope variance, accumulated below in
+  // the normal pass from their live amplitudes and spent by the glint's
+  // normalisation (glitter.js oGlSplit). It fades with range and stands down
+  // entirely on the plain tier, both because the bands themselves do.
+  float oDetV = 0.0;
   float oFoam = 0.0;
   float oWhiteK = 1.0;         // how white this pixel's raft draws (age)
   float oWcShare = 0.0;        // ...and how much of it is a BREAKER's, not the wake's
@@ -519,6 +529,11 @@ vec2 oCoastGradW(vec2 p) {
       float oDz = oFbm(oP1 + vec2(0.0, oDe * 1.35)) * 0.55 + oFbm(oP2 + vec2(0.0, oDe * 0.42)) * 0.45;
       float oDAmp = 0.16 * uDetailAmp * oDF * (0.55 + 0.45 * uSwellS) * (1.0 + 1.5 * oWkHF.y);
       oWG += vec2(oDx - oD0, oDz - oD0) / oDe * oDAmp;
+      // ...and the glint's normalisation has to know this slope is there, or the
+      // road runs bright exactly where the bands are strongest. GLITTER.detailSd
+      // is the per-axis sd of the construction above at unit amplitude, measured
+      // from oceannoise's own twin (verify-glitter re-measures it).
+      oDetV += oDAmp * oDAmp * ${(GLITTER.detailSd ** 2).toPrecision(8)};
     }
     // THE FAR FIELD (2026-07-24): past the fine band's 120 m the normals were
     // the bare wave sum — periodic, and periodic normals under a low sun are
@@ -577,58 +592,53 @@ vec2 oCoastGradW(vec2 p) {
   // slightly broader along the road than across it.
   vec2 oFt = oGlFoot(oDist, max(oV.y, 0.0), uPixA);
   // the plain tier drops the sub-20 m components from its shading entirely, so
-  // ITS lobe must carry them at every distance
+  // ITS glint must carry them at every distance
   float oCut = uWaveLOD > 0.5 ? 0.0 : ${GLITTER.plainCut.toFixed(1)};
-  // and no lobe may be narrower than half a pixel's own angle: on river water
-  // Cox & Munk's line clamps to zero and the drawn spectrum alone asks for a
-  // 6e-4 rad lobe, which is 0.03 of a pixel — an aliased reflection, not a sharp
-  // one, and in practice no reflection at all
+  // and no lobe may be narrower than half a pixel's own angle: a reflection
+  // narrower than the pixel it is drawn into is not a sharper one, it is an
+  // aliased one
   float oSFlr = uPixA * 0.5;
-  float oSigA = oGlSigma(max(2.0 * oFt.y, oCut), uSwellL, uSwellS, oSFlr);
-  float oSigB = oGlSigma(max(2.0 * oFt.x, oCut), uSwellL, uSwellS, oSFlr);
-  // churn is rough water: the wake takes a BROAD lobe, not no lobe. This one
-  // line is what makes the Kelvin V answer the sun instead of ignoring it.
-  float oFS = ${GLITTER.foamSigma.toFixed(3)};
-  oSigA = mix(oSigA, max(oSigA, oFS), oFoam);
-  oSigB = mix(oSigB, max(oSigB, oFS), oFoam);
+  // THE TWO POPULATIONS (src/glitter.js). oGlSplit hands back, per axis, the
+  // width of the HARD glint — the drawn spectrum this pixel cannot resolve, plus
+  // the mirror's own hardness — and the slope variance the drawn normal actually
+  // carries, which is what the glint's normalisation is taken over.
+  vec2 oSpA = oGlSplit(max(2.0 * oFt.y, oCut), uSwellL, uSwellS, oSFlr, oDetV);
+  vec2 oSpB = oGlSplit(max(2.0 * oFt.x, oCut), uSwellL, uSwellS, oSFlr, oDetV);
   // the epsilon is not decoration: at twilight, at grazing range, looking away
   // from a source that has just set, oV and uSunDirW can genuinely oppose and
   // the sum goes to zero. This is the one normalize here whose inputs can.
   vec3 oHalf = normalize(oV + uSunDirW + vec3(1e-6, 1e-6, 1e-6));
+  // THE GLINT, against the EXACT per-pixel drawn normal. This is the whole of
+  // the appearance: a near-mirror on geometry the shader genuinely knows, so a
+  // pixel either catches the source or it does not, and the lit set is isolated
+  // points a few centimetres across rather than a smooth field. It supersedes the
+  // thresholded noise lattice that stood here — that was texture painted onto a
+  // smooth function, with a duty that knew nothing about the light or the water.
   vec3 oHl = vec3(dot(oHalf, oAlg), dot(oHalf, oAcr), dot(oHalf, oNw));
-  float oGl = oGlLobe(oHl, oSigA, oSigB) * oGlFresnel(dot(oHalf, uSunDirW));
-  // THE ROAD SHATTERS (src/glitter.js). CONTRAST ONLY, mean preserved, so the
-  // corridor's brightness is still the lobe's and never the noise's — but the
-  // corridor is now made of SEPARATE GLINTS instead of being a smooth streak,
-  // which is the whole visual signature of sun glitter and the thing the v2
-  // showcase did not have. The retired version sampled a world-locked 0.435 m
-  // lattice, which is sub-pixel past about forty metres: it averaged to its own
-  // mean exactly where the road is, and painted a searchlight beam. THE CELL IS
-  // NOW MEASURED IN PIXELS — sparkPx across the view ray and sparkPx along it,
-  // so a glint is drawn the same size at 40 m as at 400, and the foreshortening
-  // at grazing incidence turns them into the dashes a real road is made of.
-  // The frame is the pixel's own down-range direction, which depends on where
-  // the EYE is and not on where it is pointed: panning cannot slide the glints.
-  //
-  // AND IT SHATTERS THE ROAD, NOT THE SEA. The lobe has a broad weak TAIL (the
-  // term that keeps a high sun's water a sparkle field instead of a dark sheet
-  // with one spot under the mast), and that tail reaches everywhere. Multiplying
-  // it by a field that peaks near four turned the whole gale into television
-  // static on the first cut — measured on the identical frame. A glint is a
-  // FACET aligned to the source; the ambient sheen is multiply-scattered light
-  // and is genuinely smooth, so the shatter rides in on the lobe's own strength.
-  // Foam is the same argument again: a bubble raft's sheen is diffuse, so the
-  // shatter stands down over it rather than making powder of every whitecap.
-  float oTw = 1.0;
-  if (uDetailAmp > 0.001) {
-    float oShat = smoothstep(${GLITTER.sparkOn0.toFixed(3)}, ${GLITTER.sparkOn1.toFixed(3)}, oGl)
-      * (1.0 - oFoam);
-    if (oShat > 0.002) {
-      oTw = mix(1.0, oGlTwinkleAt(vWPos.x, vWPos.z, uTime, oGlSparkNear(oFt.x)), oShat);
-    }
-  }
+  // ...AND THE CORRIDOR, against the MEAN surface at Cox & Munk's full width.
+  // This is the part 68e8eae got right and it is kept whole: it decides WHERE on
+  // the water a road can be at all and how it opens with sea state and range,
+  // which a mirror provably cannot (a 10 degree sun asks for 5 degrees of facet
+  // tilt at the horizon). No footprint enters it — the envelope is the average
+  // over the whole facet population and is a property of the sea, not the lens.
+  // Churn is rough water and takes a broader one still, which is what makes the
+  // Kelvin V answer the sun instead of ignoring it.
+  float oFS = ${GLITTER.foamSigma.toFixed(3)};
+  float oSigE = oGlSigmaFull(uSwellL, uSwellS);
+  oSigE = mix(oSigE, max(oSigE, oFS), oFoam);
+  vec3 oAcrM = vec3(oRange.z, 0.0, -oRange.x);
+  vec3 oHm = vec3(dot(oHalf, oRange), dot(oHalf, oAcrM), oHalf.y);
+  // the glint needs BOTH frames: the residual it fires on, and the corridor's own
+  // demand, which is what lets the drawn surface stand in for a facet population
+  // three times rougher than itself instead of only lighting the road's axis.
+  float oGlint = oGlGlint(oHl, oHm, oSpA.x, oSpA.y, oSpB.x, oSpB.y, oSigE);
+  // a bubble raft does not glint, it GLOWS: its sheen is multiply-scattered and
+  // genuinely smooth, so the glints stand down over foam rather than making
+  // powder of every whitecap.
+  oGlint = mix(oGlint, 1.0, oFoam);
+  float oGl = oGlLobe(oHm, oSigE, oSigE, oGlint) * oGlFresnel(dot(oHalf, uSunDirW));
   outgoingLight += min(${GLITTER.clamp.toFixed(3)},
-    uSparkle * ${GLITTER.gain.toFixed(3)} * oGl * oTw) * uGlitCol;
+    uSparkle * ${GLITTER.gain.toFixed(3)} * oGl) * uGlitCol;
   // the churn's forward scatter: a bubble raft is a dense scattering medium and
   // scattering has a direction — dazzling from the sunward side, merely pale
   // from the antisolar one. Without this the wake was the same white whatever
@@ -646,7 +656,7 @@ vec2 oCoastGradW(vec2 p) {
       + ${(1 - GLITTER.foamElevFloor).toFixed(3)} * max(uSunDirW.y, 0.0));
 #include <opaque_fragment>`);
     };
-    mat.customProgramCacheKey = () => `saltstead-ocean-spectrum-${NWAVE}-glitter3-crest2-raft1`;
+    mat.customProgramCacheKey = () => `saltstead-ocean-spectrum-${NWAVE}-glitter4-crest2-raft1`;
     this.step = SIZE / SEG;
     this.glitterScale = 1; // the tier lever: parked at 0 under Plain (invariant 5)
     this._gc = new THREE.Color();  // scratch for the corridor's hue lean
@@ -717,11 +727,13 @@ vec2 oCoastGradW(vec2 p) {
       // sparkle pass and the scene's DirectionalLight on two different suns —
       // 29.6 degrees apart at noon (see lightrig.js glitterSource).
       this.uniforms.uSunDirW.value.fromArray(glit.dir).normalize();
-      // THE GLITTER PATH IS NOT A FINE-TIER LUXURY. The lobe is arithmetic —
-      // two logs and two exps, no fbm — so Plain can afford the phenomenon
-      // even though it cannot afford the twinkle that breaks it into glints.
-      // Parking it at 0 there (invariant 5 read too literally) left the cheap
-      // tier with no sun on its water at all.
+      // THE GLITTER PATH IS NOT A FINE-TIER LUXURY. The whole of it — corridor
+      // AND glints — is arithmetic: four logs, three exps, two square roots and
+      // not one noise read, so Plain gets the phenomenon entire. What it does not
+      // get is the glint DENSITY, because it draws no detail bands and no sub-20 m
+      // components, so its resolved surface is smoother. Parking the path at 0
+      // there (invariant 5 read too literally) left the cheap tier with no sun on
+      // its water at all.
       this.uniforms.uSparkle.value = glit.amp * (fine ? 1 : GLITTER.plainScale);
       this.uniforms.uGlitAmp.value = glit.amp; // foam's light response: both tiers
       this.uniforms.uScatter.value = glit.amp * 0.55;

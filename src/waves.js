@@ -221,12 +221,26 @@ export const MAX_WAVE_HEIGHT = COMPONENTS.reduce((s, c) => s + c.amp, 0);
 export const MAX_SWELL_HEIGHT = COMPONENTS.filter((c) => c.band === 0)
   .reduce((s, c) => s + c.amp, 0);
 export const MAX_CHOP_HEIGHT = MAX_WAVE_HEIGHT - MAX_SWELL_HEIGHT;
-// significant wave height of a band at state 1 — Hs = 4 sqrt(sum a^2 / 2).
-// This, not the amplitude sum, is the number a sailor would recognise.
+// A BAND'S SIGNIFICANT HEIGHT AT BAND GAIN 1 — Hs = 4 sqrt(sum a^2 / 2). This,
+// not the amplitude sum, is the number a sailor would recognise.
+//
+// IT IS A CONSTANT OF THE SPECTRUM AND NOT A MEASURE OF THE LIVE SEA, and the
+// name has caught people out: it reads the component table and nothing else, so
+// setSeaState(1.9) and setSeaBands(1.54, 1.05) both leave it at 1.93 m even
+// though those are a 3.67 m sea and a 2.88 m one. Every caller that wants the
+// live figure must scale each band by its own gain and combine in quadrature —
+// which is what seaSignificantHeight() below does, and what anything quoting
+// "the sea's Hs" should call instead. verify-waves holds the two apart.
 export function significantHeight(band = null) {
   let v = 0;
   for (const c of COMPONENTS) if (band === null || c.band === band) v += c.amp * c.amp / 2;
   return 4 * Math.sqrt(v);
+}
+// ...and the LIVE one: the two bands at their current gains, in quadrature,
+// because they are independent populations. Pass gains explicitly to ask about a
+// sea the game is not currently drawing.
+export function seaSignificantHeight(swellG = seaSwell, chopG = seaChop) {
+  return Math.hypot(significantHeight(0) * swellG, significantHeight(1) * chopG);
 }
 // the energy-weighted mean wavelength of a band — "how long are the rollers"
 export function meanWavelength(band = 0) {

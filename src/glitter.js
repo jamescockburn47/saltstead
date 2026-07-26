@@ -90,17 +90,84 @@
 //     them. It is what keeps a HIGH sun's sea a sparkle field instead of a dark
 //     sheet with one bright spot under the mast.
 //
+// ================== AND THE ROAD IS MADE OF SEPARATE GLINTS ==================
+// (2026-07-26, second pass — the regression the owner caught.)
+//
+// Everything above is a MEAN. It is the right mean, and it was measured against
+// photographs; and a mean is not what the eye sees. Sun glitter is thousands of
+// INDEPENDENT BINARY EVENTS — a facet either throws the whole disc of the sun at
+// you or it throws none of it — and the picture that makes is small, hard, sparse
+// and very high contrast. The lobe alone draws the ensemble average of that,
+// which is a soft continuous smear: a searchlight beam painted on the water.
+// That is what 08-glitter-sun-road-low-sun.png showed, and the first attempt to
+// cure it (a thresholded noise lattice MULTIPLIED onto the smooth lobe) was
+// texture, not geometry — the field's duty was a constant, so it knew nothing
+// about where the light was or which way the water was facing, and it still read
+// as blobs.
+//
+// THE SPLIT. A pixel's reflection is the sum over the facets it covers, and
+// those facets come in two populations that the model must keep apart:
+//
+//   RESOLVED   — the drawn surface. The fragment shader already computes its
+//                normal EXACTLY, per pixel, from the closed-form wave gradient
+//                plus the detail bands. Against that normal a near-MIRROR is
+//                legitimate, because the geometry is genuinely known: the pixel
+//                either satisfies the reflection condition or it does not.
+//   UNRESOLVED — everything shorter than the pixel's own footprint, plus the
+//                capillary sea nobody draws. Only its STATISTICS are known, so
+//                it can only be a lobe.
+//
+// So: the CORRIDOR is `lobe` at the FULL Cox & Munk width, evaluated over the
+// MEAN surface — it decides where on the water the road can be at all, how wide
+// it is, and how it opens with sea state and range, which is exactly the part
+// 68e8eae got right and which a mirror provably cannot draw (a 10 degree sun
+// asks for 5 degrees of facet tilt at the horizon; the retired pow(...,260) was
+// half-maximum at 2.09). INSIDE it, the light is placed by `glint` — the same
+// reflection taken against the exact drawn normal at the hardness the retired
+// mirror had, and NORMALISED so that its expectation over the sea's own slope
+// statistics is exactly 1. The corridor's mean brightness is therefore still the
+// lobe's, by construction and not by a measured duty constant; what changed is
+// that the light is now delivered in separate hard hits instead of spread evenly.
+//
+// WHY THE GLINT IS ALLOWED TO BE HARD, AND WHERE IT SOFTENS. The width of the
+// glint lobe is the honest anti-aliasing bound and nothing else:
+//     sigma_g^2 = glintSigma^2 + (drawn spectrum BELOW this pixel's footprint)
+//                 + (half the pixel's own angular size)^2
+// Close aboard the middle term is nothing, so the glint is as hard as the mirror
+// was — and it does not alias, because the lit set of a two-component slope
+// condition is a set of ISOLATED POINTS on the surface, each a fraction of a
+// metre across, not a curve. Down the road the footprint swallows the spectrum,
+// sigma_g overtakes what is left of the resolved slope, the normalisation runs to
+// 1 and the road returns smoothly to the smooth lobe — which is what a real road
+// does at the horizon, for the same reason.
+//
+// ONE APPROXIMATION, STATED. The drawn spectrum carries under a third of a real
+// sea's slope sd (point 2 above), so on a strict reading only that share of the
+// glitter can be placed geometrically and the rest would have to stay smooth.
+// The stand-in is deliberate: the resolved surface carries the discreteness of
+// the whole facet population, because the alternative is a smooth road, and a
+// smooth road is a worse lie about what the sea looks like than a glint field
+// whose glints sit on the drawn waves rather than on capillaries nobody can
+// afford to draw. glintFloor is the share left smooth.
+//
 // Nothing here touches the height field. This is shading: waves.js is consulted
 // only for its slope STATISTICS, which are read, never written.
 
 import { COMPONENTS, SWELL_LEN, GRAD_BANDS } from './waves.js';
-import { makeOceanNoise } from './oceannoise.js';
 
-// the twin of the lattice the SHATTER is built on. ocean.js prepends
-// oceannoise.js's emitted GLSL BEFORE this module's, so `oVnoise` is in scope for
-// the glint field below; this is the float64 twin of that same function, and it
-// is what lets the gate run the shatter's arithmetic rather than read it.
-const VN = makeOceanNoise((x) => x);
+// THE RETIRED MIRROR'S OWN WIDTH, recovered as a slope-space sigma. The sparkle
+// pass that shipped before 68e8eae was pow(max(dot(reflect(-V,N), sun), 0), 260):
+// half-maximum at acos(0.5^(1/260)) = 4.182 deg in reflection space, so 2.091 deg
+// of facet tilt, and a Gaussian is half-maximum at sqrt(2 ln 2) sigma. That term
+// could not draw the corridor — but it IS the term the owner recognised as
+// glitter, so it is what the glint's hardness is pinned to rather than a number
+// chosen by eye. (The physical floor is far tighter still: the sun and the moon
+// both subtend about 0.53 deg, which is a facet-slope sigma of 0.0012 — 27 times
+// narrower. A lobe that tight would be a genuine mirror and would put every
+// glint inside a single pixel, which is the aliasing the footprint term exists
+// to prevent; there is no need to go there to get hard sparks.)
+export const MIRROR_EXP = 260;
+const MIRROR_SIGMA = Math.acos(0.5 ** (1 / MIRROR_EXP)) / 2 / Math.sqrt(2 * Math.LN2);
 
 // ---- the drawn sea's own slope statistics, summed from the real table -------
 // A component of amplitude a and wavenumber k contributes a slope a*k*cos(phase)
@@ -160,91 +227,58 @@ export const GLITTER = {
   // two-sided bound lives in verify-glitter (check 6b), which holds the brightest
   // pixel of the road at three sea states inside a window, and the probe now also
   // caps the sunward median and the clipped fraction.
-  gain: 1.50, clamp: 3.2,
-  // ---- THE ROAD MUST SHATTER (2026-07-26, from the v2 showcase) -----------
-  // What shipped: oTw = 1 + k * (2 * vnoise(worldXZ * 2.3) - 1), with k easing
-  // 0.85 near the eye to 0.22 at 320 m. Two faults, and the owner's verdict on
-  // the frames was "the glitter off waves/cresting is crap and basic":
+  gain: 1.90, clamp: 3.2,
+  // ---- THE GLINT (2026-07-26, second pass) ---------------------------------
+  // The hardness of one reflection off the RESOLVED surface, as a slope-space
+  // sigma. It is the ONE taste in this file and it is stated as one — it sets
+  // how big a drawn glint is and nothing else depends on it — but it is BRACKETED
+  // at both ends by things that are not tastes at all:
   //
-  //  (a) THE LATTICE WAS WORLD-LOCKED AT A FIXED SCALE. 2.3 per metre is a
-  //      0.435 m cell. At 40 m from a 62-degree lens over 1440 px that cell is
-  //      already under a pixel, so the noise averaged to its own mean and the
-  //      corridor went SMOOTH exactly where the road is — a painted searchlight
-  //      streak, which is what 08-glitter-sun-road-low-sun.png shows.
-  //  (b) A SMOOTH VALUE NOISE IS THE WRONG SHAPE. It has one broad maximum per
-  //      cell, so at full contrast it reads as soft lumps. A glint is a FACET
-  //      throwing the whole source at the eye: the signature is separation —
-  //      bright points with dark water between them, merging and splitting as
-  //      they run toward the viewer.
+  //   FLOOR   the source's own angular radius. The sun and the moon both subtend
+  //           about 0.53 degrees, which is a facet-slope sigma of 0.00116. Below
+  //           that the model would be claiming to resolve the disc itself, and
+  //           every glint would land inside one pixel — the aliasing the whole
+  //           footprint apparatus exists to prevent. 0.014 is twelve times it.
+  //   CEILING MIRROR_SIGMA, the retired pow(...,260) — 0.0310. A glint's drawn
+  //           size on the water is sigma divided by how fast the surface's slope
+  //           changes across it, and the drawn sea's finest shading structure is
+  //           the 0.74 m detail lattice, so at the ceiling a glint comes out
+  //           about a metre across: sixty pixels at fifteen metres, which is a
+  //           soft blob and not a spark. Shot in the browser at 0.028 and at
+  //           0.014 on the identical staged frame; 0.014 is the one that reads as
+  //           glitter.
   //
-  // The replacement fixes both. THE CELL IS MEASURED IN PIXELS, not metres:
-  // sparkPx pixels across the view ray and sparkPx along it, which at grazing
-  // incidence is many more metres down-range than across — so a glint is drawn
-  // the same size at 40 m and at 400 m, and the foreshortened dashes come out
-  // for free. And the field is a sum of two decorrelated lattices THRESHOLDED
-  // high, so it fires on about a fifth of the water and leaves the rest dark.
-  //
-  // The frame is the pixel's own (down-range, across-range). That frame is a
-  // property of the eye's POSITION and the water's, not of where the camera is
-  // pointed, so panning does not slide the glints: only moving does, which is
-  // what a real road of light does.
-  sparkPx: 5.0,
-  // ...AND IT IS SPENT AS A CROSS-FADE BETWEEN TWO FIXED WORLD LATTICES, NOT AS
-  // A PER-PIXEL DIVISOR. The first cut divided a WORLD coordinate by a per-pixel
-  // cell, and that is an aliasing machine for a reason that has nothing to do
-  // with float32: the screen gradient of W/c is (dW)/c - W (dc)/c^2, and the
-  // second term rides |W|. At the world origin the field ran the intended 0.19
-  // cells per pixel; seventeen kilometres out it ran 172, and at the far corner
-  // 914. In play the "five-pixel glint" was a ONE-PIXEL RANDOM SAMPLE — measured
-  // lag-1 correlation 0.87 at the origin against 0.02 at 17 km — so the road
-  // fizzed rather than shattered, and re-sorted every frame because the gain
-  // rides the eye's own position. A cold review caught it; the pixel probe could
-  // not, because it measures at one place.
-  //
-  // The cure is the one the lace already uses: two lattices at FIXED world
-  // scales, cross-faded by the footprint. Each level is world-locked, so its
-  // screen gradient is honestly (dW)/c and nothing else; only the BLEND moves
-  // with range, and it moves smoothly. Glints hold station on the water, and
-  // they merge and split as they run toward the eye because the blend hands them
-  // from one octave to the next — which is the phenomenon.
-  //
-  // The scales are set so whichever dominates is a HANDFUL of pixels over the
-  // range a road is actually seen at — 7.5 px at 40 m on the near level, 15 px
-  // at 100 m and 3.7 px at 400 m on the far one. The first cut of this cross-fade
-  // used 2.0/0.25 and traded the aliasing for the opposite fault: 15 px cells at
-  // 40 m are BLOBS, and the pixel probe measured the road straight back down to
-  // 3.2 separated maxima per 1000 px. 4 per metre is also the float32 ceiling
-  // (verify-oceannoise check 4b: 4 x 89 353 m of world leaves 3% of a cell).
-  //
-  // HONEST LIMIT: past about 600 m the far level goes sub-pixel too and the road
-  // returns to a smooth line. That is what a real road does at the horizon, and
-  // a third level would cost two more lattice reads on every corridor pixel to
-  // buy the last few hundred metres of it.
-  sparkNear: 4.0, sparkFar: 0.8,
-  // the hand-over: hold the NEAR level until one of its cells is down to a few
-  // pixels, then hand to the far one, which is sixteen times coarser and
-  // therefore back up to a dozen. Measured across the ladder in verify-glitter.
-  sparkPx0: 2.5, sparkPx1: 6.0,    // px per NEAR cell: where the cross-fade runs
-  // the two lattices and the threshold. sparkDuty is E[oGlSpark] over the field
-  // — MEASURED, not guessed, and verify-glitter re-measures it from the twins
-  // and fails if it has drifted, because the floor/gain below are derived from
-  // it to keep the corridor's MEAN brightness exactly the lobe's.
-  sparkOct: 2.11, sparkOff: 7.7, sparkMixA: 0.62, sparkMixB: 0.38,
-  sparkLo: 0.50, sparkHi: 0.80, sparkDuty: 0.1955,
-  sparkFloor: 0.30,
-  // glints scintillate: the lattice drifts about a third of a cell a second, so
-  // a spark lives a few seconds and is replaced. Added AFTER the division, so it
-  // is a drift in glints and not in metres.
-  sparkDrift: 0.33,
-  // where the shatter engages, in lobe strength. The tail lobe reaches the whole
-  // sea and a field peaking near four turns that into television static, so the
-  // glints ride in on the lobe's own value: nothing on the ambient sheen, all of
-  // it on the road. Measured on 03-crest-gale-downwind-breaking at a 30 degree
-  // sun, which is the worst case (a high source spreads its tail widest).
-  sparkOn0: 0.05, sparkOn1: 0.40,
-  // plain tier keeps this fraction of the path: the lobe is arithmetic, not
-  // noise, so the cheap tier can afford the phenomenon even though it cannot
-  // afford the twinkle that breaks it into glints. The plain tier also drops
+  // verify-glitter MEASURES the drawn glint's size in pixels over a real stretch
+  // of water rather than trusting either bound — the same discipline the retired
+  // noise lattice's pixel ladder had, on a geometric quantity instead of a
+  // lattice constant.
+  glintSigma: 0.018,
+  // ...and the share of the corridor that stays SMOOTH between them. This is
+  // where the approximation in the header is paid for: the drawn spectrum cannot
+  // honestly place every facet, so a floor of the corridor's light is left as the
+  // lobe drew it and the rest is delivered as hits. floor + (1 - floor) * E[hit]
+  // = 1 by construction, so the mean is preserved at any range and at any sea
+  // state without a measured duty constant anywhere. It is also what keeps a road
+  // a ROAD: at 0.22 the corridor's flanks went to black between glints and the
+  // phenomenon read as sparks scattered on empty water.
+  glintFloor: 0.50,
+  // THE SHADING DETAIL BANDS CARRY SLOPE TOO, and the normalisation has to know
+  // about it or the road runs bright close aboard, where the bands are strongest.
+  // This is the per-axis slope sd of ocean.js's FINE detail construction at unit
+  // amplitude — fbm(p * 1.35) * 0.55 + fbm(p * 0.42) * 0.45, differenced over
+  // 0.35 m, which is that block term for term. MEASURED from oceannoise's own
+  // float64 twin; verify-glitter re-measures it and fails if it has drifted.
+  // (The broad far-field band's own figure is 0.0082 at unit amplitude, i.e.
+  // 0.0005 rad once its 0.065 amplitude is applied against the fine band's
+  // 0.0315 — a rounding, and it is left out rather than carried.)
+  detailSd: 0.19207,
+  // plain tier keeps this fraction of the path: the whole of it — corridor AND
+  // glints — is arithmetic now, two exponentials and a square root with not one
+  // noise read in it, so the cheap tier gets the phenomenon entire. What it does
+  // not get is the DENSITY, because it draws no detail bands and no sub-20 m
+  // components, so its resolved surface is smoother and its glints are fewer and
+  // broader. That is a resolution difference and not a switch.
+  // The plain tier also drops
   // every component shorter than GRAD_BANDS.mid from its shading (waves.js
   // oWaveGradShort under uWaveLOD 0), so its lobe has to carry them at every
   // distance: plainCut is the cutoff floor it works at, and it IS that band
@@ -370,6 +404,19 @@ export function sigmaFor(lamC, swellG, chopG, floor = 0) {
   return Math.sqrt(Math.max(v, floor * floor, 1e-9));
 }
 
+// The CORRIDOR'S own width: the same line with nothing resolved at all, i.e.
+// Cox & Munk's full per-axis sd (or the drawn spectrum's, on the one contrived
+// state where that is larger). It is what sigmaFor returns as lamC -> infinity,
+// written out so the shader does not pay two logarithms for a smoothstep whose
+// answer is 1. This is the width of the ENVELOPE — the average over the whole
+// facet population, resolved and unresolved together — and it is a property of
+// the sea and not of the camera, which is why no footprint enters it.
+export function sigmaFull(swellG, chopG) {
+  const G = GLITTER;
+  const drawn = swellG * swellG * G.swellVar + chopG * chopG * G.windVar;
+  return Math.sqrt(Math.max(coxMunkVar(chopG), drawn, 1e-9));
+}
+
 // the working breeze's fully unresolved sd: the energy datum
 export const SIGMA_REF = sigmaFor(1e9, GLITTER.refSwell, GLITTER.refChop);
 
@@ -393,7 +440,13 @@ export function footprint(dist, graze, pixA) {
 // (The tail's energy carried a min() against energyCap until it was measured:
 // the argument is e/tailW^2 <= 3.0/36 = 0.083, so the cap could never bind and
 // the min was dead code in both twins. Removed from both together.)
-export function lobe(hAlong, hAcross, hUp, sigA, sigB) {
+// `glint` is the contrast factor from the RESOLVED surface (see glintOf below).
+// The mean-field value — the corridor as the statistics draw it, with nothing
+// placed geometrically — is glint = 1, and that is what pathValue evaluates.
+// The glints ride the CORE only: the tail is the non-Gaussian wings, which are
+// multiply-scattered light off facets far out in slope space, and those are
+// genuinely a smooth sheen rather than a set of separate hits.
+export function lobe(hAlong, hAcross, hUp, sigA, sigB, glint = 1) {
   const G = GLITTER;
   const up = Math.max(hUp, 1e-3);
   const sx = hAlong / up, sy = hAcross / up;
@@ -402,57 +455,89 @@ export function lobe(hAlong, hAcross, hUp, sigA, sigB) {
   const j = 1 / (up2 * up2);
   const e = Math.min(G.energyCap, (SIGMA_REF * SIGMA_REF) / (sigA * sigB));
   const w = G.tailW * G.tailW;
-  const core = Math.exp(-0.5 * q) * e;
+  const core = Math.exp(-0.5 * q) * e * glint;
   const tail = Math.exp(-0.5 * q / w) * G.tailK * (e / w);
   return (core + tail) * j;
 }
 
-// ---- THE SHATTER ------------------------------------------------------------
-// The corridor's envelope is `lobe` above and does not change. What changes is
-// what the envelope is filled WITH: a smooth function, or a field of separate
-// glints. These twins are the second, and verify-glitter runs their arithmetic
-// against the emitted GLSL exactly as it runs the lobe's.
+// ---- THE GLINT --------------------------------------------------------------
+// The corridor's envelope is `lobe` above, at sigmaFull, over the MEAN surface.
+// What follows is what the envelope is filled WITH: a mirror taken against the
+// exact drawn normal, normalised so its expectation over the sea's own slope
+// statistics is 1. verify-glitter runs this arithmetic against the emitted GLSL
+// exactly as it runs the lobe's.
 
-// which of the two glint lattices this pixel is on: 0 near (the 0.5 m cells),
-// 1 far (the 4 m ones). Driven by how many pixels one NEAR cell covers.
-export function sparkNearness(footA) {
+// The two numbers a pixel needs about the drawn surface, from one pair of
+// belowFrac evaluations because they are complements of each other:
+//
+//   [0] sigG   the GLINT lobe's width — the drawn spectrum this pixel CANNOT
+//              resolve, plus the mirror's own hardness, floored by half the
+//              pixel's angular size. This is the anti-aliasing bound and the
+//              only thing that softens the glint with range.
+//   [1] resVar the per-axis slope VARIANCE the shading normal actually carries:
+//              the drawn spectrum this pixel CAN resolve, plus detVar, which is
+//              whatever the shading detail bands add at this pixel (ocean.js
+//              accumulates it from their own live amplitudes — it fades with
+//              range and stands down on the plain tier, both automatically).
+//
+// Returned as a pair rather than computed twice: the caller needs both, per axis,
+// and the two logarithms are the expensive part.
+export function glintSplit(lamC, swellG, chopG, floorSd, detVar) {
   const G = GLITTER;
-  const px = 1 / G.sparkNear / Math.max(footA, 1e-5);
-  const x = clamp01((G.sparkPx1 - px) / (G.sparkPx1 - G.sparkPx0));
-  return x * x * (3 - 2 * x);
+  const sw = swellG * swellG * G.swellVar, wd = chopG * chopG * G.windVar;
+  const below = sw * belowFrac(lamC, G.swellA, G.swellB)
+    + wd * belowFrac(lamC, G.windA, G.windB);
+  const sg = Math.sqrt(Math.max(below + G.glintSigma * G.glintSigma,
+    floorSd * floorSd, 1e-9));
+  return [sg, Math.max(0, sw + wd - below) + detVar];
 }
 
-// the field itself, in [0, 1]: two decorrelated value-noise lattices summed and
-// thresholded high. Sparse and separated by construction — that is the whole
-// point, and `sparkDuty` is its mean.
-export function sparkField(px, pz) {
+// THE GLINT ITSELF, and the whole of the appearance claim is in three lines.
+// `h` is the half-vector in the DRAWN normal's own frame, so h.xy/h.z is the
+// RESIDUAL slope: what the unresolved facets are being asked for after the drawn
+// water has supplied what it can. `m` is the same half-vector in the MEAN
+// surface's frame, so m.xy/m.z is the slope the corridor demands of the water
+// here at all. A hard Gaussian on the residual is 1 where the drawn water happens
+// to face the source and 0 a few centimetres away, and the set where a
+// TWO-component condition holds is a set of ISOLATED POINTS: hard, separate,
+// high-contrast hits, which is what glitter is.
+//
+// AND THE DRAWN SURFACE IS STRETCHED TO STAND FOR THE WHOLE FACET POPULATION.
+// This is the approximation named in the header, and here is its arithmetic.
+// The drawn spectrum's slope sd is `a = sqrt(resVar) / sigmaFull` of the real
+// sea's — about a third — so a residual taken at face value can only ever light
+// the corridor's SPINE: past two or three times 0.07 rad the drawn water simply
+// never faces the right way, and the road collapses to a thin line of glints
+// with a dark corridor around it (measured: the drawn road came out 0.37 of the
+// envelope's own width). So the surface is asked to supply only its own SHARE of
+// the demanded slope — the residual becomes u + (a - 1) m, which is
+// `a * m - s_drawn` written in the terms the shader has — and the glints then
+// reach across the corridor instead of hugging its axis (0.74 of the envelope's
+// width, and the remaining narrowing is the phenomenon: a road really is densest
+// under the source and thins outward).
+//
+// Note what does NOT change: at the corridor's heart m is zero and the term
+// vanishes, and when the footprint has swallowed the spectrum resVar goes to zero
+// so a goes to zero, the residual goes to the resolved slope alone, and it goes to
+// zero with it. The glint softens to the smooth lobe at range on its own.
+//
+// The divisor is the Gaussian's own expectation over the resolved slope's
+// distribution, per axis
+//     E[exp(-s^2 / 2 sigG^2)],  s ~ N(0, resVar)  =  sigG / sqrt(sigG^2 + resVar)
+// so floor + (1 - floor) * E[glint] = 1 EXACTLY, at every range and every sea
+// state, with no measured duty constant and nothing tuned.
+export function glintOf(hAlong, hAcross, hUp, mAlong, mAcross, mUp,
+  sigA, resA, sigB, resB, sigE) {
   const G = GLITTER;
-  const n = G.sparkMixA * VN.vnoise(px, pz)
-    + G.sparkMixB * VN.vnoise(px * G.sparkOct + G.sparkOff, pz * G.sparkOct + G.sparkOff);
-  const x = clamp01((n - G.sparkLo) / (G.sparkHi - G.sparkLo));
-  return x * x * (3 - 2 * x);
-}
-
-// floor + gain * E[field] = 1, so the road's MEAN brightness is still the
-// lobe's and the shatter is contrast only — the same promise the retired smooth
-// twinkle made, kept by construction instead of by symmetry.
-export const SPARK_GAIN = (1 - GLITTER.sparkFloor) / GLITTER.sparkDuty;
-export function twinkle(px, pz) {
-  return GLITTER.sparkFloor + SPARK_GAIN * sparkField(px, pz);
-}
-// the field the shader actually draws: the two fixed levels, cross-faded. Each
-// term has mean sparkDuty, so the blend does too and the twinkle's mean is
-// exactly 1 at every range.
-export function sparkAt(wx, wz, t, w) {
-  const G = GLITTER;
-  const a = sparkField(wx * G.sparkNear + t * G.sparkDrift,
-    wz * G.sparkNear + t * G.sparkDrift * 0.61);
-  const b = sparkField(wx * G.sparkFar - t * (G.sparkDrift * 0.5) + 53.1,
-    wz * G.sparkFar - t * (G.sparkDrift * 0.37) + 53.1);
-  return a + (b - a) * w;
-}
-export function twinkleAt(wx, wz, t, w) {
-  return GLITTER.sparkFloor + SPARK_GAIN * sparkAt(wx, wz, t, w);
+  const up = Math.max(hUp, 1e-3), mup = Math.max(mUp, 1e-3);
+  const kA = Math.sqrt(resA) / Math.max(sigE, 1e-6) - 1;
+  const kB = Math.sqrt(resB) / Math.max(sigE, 1e-6) - 1;
+  const sx = hAlong / up + kA * (mAlong / mup);
+  const sy = hAcross / up + kB * (mAcross / mup);
+  const q = (sx * sx) / (sigA * sigA) + (sy * sy) / (sigB * sigB);
+  const d = Math.sqrt((sigA * sigA) / (sigA * sigA + resA)
+    * ((sigB * sigB) / (sigB * sigB + resB)));
+  return G.glintFloor + (1 - G.glintFloor) * Math.exp(-0.5 * q) / Math.max(d, 1e-4);
 }
 
 // ---- THE RAFT ---------------------------------------------------------------
@@ -501,16 +586,23 @@ export function fresnelWater(c) {
 // eyeH: eye height over the mean surface; dist: horizontal range to the water
 // sample; elev: source elevation (rad); bearing: horizontal angle between the
 // sample's down-range direction and the source's azimuth (0 = looking straight
-// at it). This is the closed form of what the shader computes per pixel, over a
-// flat mean surface, and the gate drives it to prove the corridor is a corridor.
+// at it). This is the closed form of what the shader computes per pixel over a
+// flat mean surface — which, since E[glint] = 1 by construction, is exactly the
+// EXPECTATION of what the shader draws over a real one. The gate drives it to
+// prove the corridor is a corridor; the glint field's own appearance is proved
+// separately (verify-glitter section 8), because a mean cannot see it.
+//
+// sigA/sigB are returned as the GLINT's widths, since the envelope's is a single
+// isotropic number (sigmaFull) that no longer depends on the camera at all.
 export function pathValue(eyeH, dist, elev, bearing, swellG, chopG, pixA) {
   const d = Math.max(dist, 0.5);
   const dep = Math.atan2(eyeH, d);            // the view ray's depression
   const graze = Math.sin(dep);
   const f = footprint(d, graze, pixA);
   const flr = pixA * 0.5;                     // the shader's own pixel floor
-  const sigA = sigmaFor(2 * f.along, swellG, chopG, flr);
-  const sigB = sigmaFor(2 * f.across, swellG, chopG, flr);
+  const sigE = sigmaFull(swellG, chopG);
+  const [sigA, resA] = glintSplit(2 * f.along, swellG, chopG, flr, 0);
+  const [sigB, resB] = glintSplit(2 * f.across, swellG, chopG, flr, 0);
   // V: surface -> eye. Down-range is -x, so the eye lies at +x.
   const V = [Math.cos(dep), graze, 0];
   // L: surface -> source, `bearing` off the down-range direction
@@ -520,9 +612,15 @@ export function pathValue(eyeH, dist, elev, bearing, swellG, chopG, pixA) {
   const hn = Math.hypot(...H) || 1;
   H = H.map((v) => v / hn);
   // the frame: up = (0,1,0), along-range = -x, across-range = -z
-  const val = lobe(-H[0], -H[2], H[1], sigA, sigB);
+  const val = lobe(-H[0], -H[2], H[1], sigE, sigE);
   const c = H[0] * L[0] + H[1] * L[1] + H[2] * L[2];
-  return { val, lit: val * fresnelWater(c), sigA, sigB, graze, foot: f, beta: (elev - dep) / 2 };
+  // the peak of one glint, as a multiple of the mean-field value it sits in:
+  // what the eye reads as the contrast between a spark and the water beside it
+  const peak = glintOf(0, 0, 1, 0, 0, 1, sigA, resA, sigB, resB, sigE);
+  return {
+    val, lit: val * fresnelWater(c), sigE, sigA, sigB, resA, resB, peak,
+    graze, foot: f, beta: (elev - dep) / 2,
+  };
 }
 
 // ---- the GLSL the ocean shader inlines -------------------------------------
@@ -563,7 +661,18 @@ float oGlSigma(float lamC, float swellG, float chopG, float floorSd) {
     + wd * oGlBelow(lamC, ${n(G.windA)}, ${n(1 / Math.log(G.windB / G.windA))});
   return sqrt(max(max(v, floorSd * floorSd), 1e-9));
 }
-float oGlLobe(vec3 h, float sigA, float sigB) {
+// the CORRIDOR'S own width: Cox & Munk's full per-axis sd. No footprint enters
+// it — the envelope is the average over the whole facet population and is a
+// property of the sea, not of the camera.
+float oGlSigmaFull(float swellG, float chopG) {
+  float drawn = swellG * swellG * ${n(G.swellVar)} + chopG * chopG * ${n(G.windVar)};
+  return sqrt(max(max(max(0.0, ${n(G.coxA)} + ${n(G.coxB)} * chopG), drawn), 1e-9));
+}
+// the envelope. glint is the resolved surface's own contrast factor (oGlGlint
+// below) and rides the CORE only: the tail is the non-Gaussian wings, which are
+// a genuinely smooth sheen and not a set of separate hits. Pass 1.0 for the
+// mean field.
+float oGlLobe(vec3 h, float sigA, float sigB, float glint) {
   float up = max(h.z, 1e-3);
   float sx = h.x / up, sy = h.y / up;
   float q = (sx * sx) / (sigA * sigA) + (sy * sy) / (sigB * sigB);
@@ -571,7 +680,7 @@ float oGlLobe(vec3 h, float sigA, float sigB) {
   float j = 1.0 / (up2 * up2);
   float e = min(${n(G.energyCap)}, ${n(SIGMA_REF * SIGMA_REF)} / (sigA * sigB));
   float w = ${n(G.tailW)} * ${n(G.tailW)};
-  float core = exp(-0.5 * q) * e;
+  float core = exp(-0.5 * q) * e * glint;
   float tail = exp(-0.5 * q / w) * ${n(G.tailK)} * (e / w);
   return (core + tail) * j;
 }
@@ -585,39 +694,43 @@ vec2 oGlFoot(float dist, float graze, float pixA) {
   float across = max(dist, 0.1) * pixA;
   return vec2(across, min(${n(G.maxFoot)}, across / max(graze, ${n(G.minGraze)})));
 }
-// ---- THE SHATTER ----------------------------------------------------------
-// which of the two FIXED glint lattices this pixel is on: 0 near, 1 far. Both
-// are world-locked on purpose — dividing a world coordinate by a per-pixel cell
-// aliases catastrophically away from the origin (see GLITTER.sparkNear) — so
-// only this blend moves with range.
-float oGlSparkNear(float footA) {
-  return smoothstep(${n(G.sparkPx1)}, ${n(G.sparkPx0)},
-    ${n(1 / G.sparkNear)} / max(footA, 1e-5));
+// ---- THE GLINT ------------------------------------------------------------
+// what the pixel knows about the drawn surface, in one pair of logarithms:
+//   [0] the GLINT lobe's width  — the drawn spectrum BELOW this footprint, plus
+//       the mirror's own hardness, floored by half the pixel's angular size
+//   [1] the resolved slope VARIANCE — the drawn spectrum ABOVE it, plus detVar,
+//       which is whatever the shading detail bands add at this pixel
+// NOT A NOISE READ ANYWHERE IN IT. The discreteness comes from the surface.
+vec2 oGlSplit(float lamC, float swellG, float chopG, float floorSd, float detVar) {
+  float sw = swellG * swellG * ${n(G.swellVar)};
+  float wd = chopG * chopG * ${n(G.windVar)};
+  float below = sw * oGlBelow(lamC, ${n(G.swellA)}, ${n(1 / Math.log(G.swellB / G.swellA))})
+    + wd * oGlBelow(lamC, ${n(G.windA)}, ${n(1 / Math.log(G.windB / G.windA))});
+  float sg = sqrt(max(max(below + ${n(G.glintSigma)} * ${n(G.glintSigma)},
+    floorSd * floorSd), 1e-9));
+  return vec2(sg, max(0.0, sw + wd - below) + detVar);
 }
-// the glint field: two decorrelated lattices summed and thresholded high, so it
-// fires on about a fifth of the water and leaves the rest dark. oVnoise comes
-// from src/oceannoise.js, whose GLSL ocean.js prepends before this block.
-float oGlSpark(float px, float pz) {
-  float nsum = ${n(G.sparkMixA)} * oVnoise(vec2(px, pz))
-    + ${n(G.sparkMixB)} * oVnoise(vec2(px * ${n(G.sparkOct)} + ${n(G.sparkOff)},
-      pz * ${n(G.sparkOct)} + ${n(G.sparkOff)}));
-  return smoothstep(${n(G.sparkLo)}, ${n(G.sparkHi)}, nsum);
-}
-// the two levels, cross-faded. Both terms have mean sparkDuty, so the blend does
-// too and the corridor's MEAN is still the lobe's at every range: the shatter is
-// contrast, never brightness (floor + gain * sparkDuty = 1 by construction).
-float oGlSparkAt(float wx, float wz, float t, float w) {
-  float a = oGlSpark(wx * ${n(G.sparkNear)} + t * ${n(G.sparkDrift)},
-    wz * ${n(G.sparkNear)} + t * ${n(G.sparkDrift * 0.61)});
-  float b = oGlSpark(wx * ${n(G.sparkFar)} - t * ${n(G.sparkDrift * 0.5)} + 53.1,
-    wz * ${n(G.sparkFar)} - t * ${n(G.sparkDrift * 0.37)} + 53.1);
-  return a + (b - a) * w;
-}
-float oGlTwinkle(float px, float pz) {
-  return ${n(G.sparkFloor)} + ${n(SPARK_GAIN)} * oGlSpark(px, pz);
-}
-float oGlTwinkleAt(float wx, float wz, float t, float w) {
-  return ${n(G.sparkFloor)} + ${n(SPARK_GAIN)} * oGlSparkAt(wx, wz, t, w);
+// THE GLINT. h is the half-vector in the DRAWN normal's frame, so h.xy/h.z is the
+// RESIDUAL slope — what the unresolved facets are asked for after the drawn water
+// has supplied what it can. m is the same half-vector in the MEAN surface's
+// frame, so m.xy/m.z is what the corridor demands of this water at all, and the
+// (a - 1) m term asks the drawn surface for only its own SHARE of that — without
+// it the glints hug the corridor's axis and the road is a thin line (see
+// glintOf). A hard Gaussian on the result is 1 where the surface faces the source
+// and 0 a few centimetres off, and the set where a two-component condition holds
+// is a set of ISOLATED POINTS. The divisor is the Gaussian's own expectation over
+// the resolved slope's distribution, so floor + (1 - floor) * E[glint] = 1
+// exactly, at every range and every sea state.
+float oGlGlint(vec3 h, vec3 m, float sigA, float resA, float sigB, float resB, float sigE) {
+  float up = max(h.z, 1e-3), mup = max(m.z, 1e-3);
+  float kA = sqrt(resA) / max(sigE, 1e-6) - 1.0;
+  float kB = sqrt(resB) / max(sigE, 1e-6) - 1.0;
+  float sx = h.x / up + kA * (m.x / mup);
+  float sy = h.y / up + kB * (m.y / mup);
+  float q = (sx * sx) / (sigA * sigA) + (sy * sy) / (sigB * sigB);
+  float d = sqrt((sigA * sigA) / (sigA * sigA + resA)
+    * ((sigB * sigB) / (sigB * sigB + resB)));
+  return ${n(G.glintFloor)} + ${n(1 - G.glintFloor)} * exp(-0.5 * q) / max(d, 1e-4);
 }
 // ---- THE RAFT -------------------------------------------------------------
 // how far the far lace has been magnified past its useful scale: 0 at ordinary

@@ -82,13 +82,43 @@ assets, browser-first, deterministic, verify-gated**. Public client:
  at 60.41° and stood 29.6° off the real sun at noon); and **a shader emitted from a
  module is only guarded if the gate runs the ARITHMETIC, not the constants** —
  verify-glitter transliterates the emitted GLSL into JS and holds it against the
- twins bit-for-bit, with four mutations of the lobe as counter-examples, because a
+ twins bit-for-bit, with nine mutations of the emitted arithmetic as
+ counter-examples, because a
  string search cannot see a swapped sigma or a dropped Jacobian. Brightness is
  bounded in BOTH directions (a contrast ratio rises as a corridor saturates, so it
  cannot tell a bright road from a flooded one). `scripts/live-glitter.mjs` measures
  the corridor in pixels from the DEFAULT camera at four sun/moon elevations, with a
  uSparkle=0 ablation so the excess is attributed and not merely observed, and the
  wake's answer to the sun by sailing her both ways past it.
+- **AND A MEAN IS NOT A PICTURE. THE ROAD IS MADE OF GLINTS, AND THE GLINTS ARE
+ GEOMETRY.** The lobe above is the right MEAN and it draws a soft continuous
+ smear — a searchlight beam — because real glitter is thousands of independent
+ binary events. A thresholded noise lattice multiplied onto it (the retired
+ "shatter") was texture painted on a smooth function, with a duty constant that
+ knew nothing about the light or the water, and it still read as blobs. The path
+ is now TWO terms over the two facet populations a pixel covers: the ENVELOPE is
+ the Cox & Munk lobe at FULL width over the MEAN surface (it decides where a road
+ can be at all — the part a mirror provably cannot draw), and the GLINT is the
+ retired `pow(...,260)` mirror restored against the EXACT per-pixel drawn normal,
+ NORMALISED so `floor + (1 - floor) * E[glint] = 1` by construction. No duty
+ constant is measured anywhere; the mean is preserved by algebra. It softens with
+ the pixel footprint AND NOTHING ELSE, so it is as hard as the mirror close
+ aboard and returns to the smooth lobe down the road. **The appearance gate is now
+ measured ON THE WATER** (verify-glitter section 8 builds a real stretch of road
+ over waves.js's own surface and counts separated maxima): 6.65 glints/m2 at 10.3x
+ the water between them, against a smooth lobe with no maximum anywhere that
+ stands twice its own median. The lesson that made this necessary: the previous
+ appearance gate measured the NOISE FIELD in isolation, went green at 3.72
+ maxima/m2, and the rendered road was still a smear. A glint field's peaks clip
+ where a smooth road's do not, so `glintFloor` carries half the corridor smooth
+ and `gain` went 1.50 -> 1.90 to put live-glitter's MEAN figures back within 1-4%
+ of where they stood. Cost at 3200x1800: fine 8.53 -> 8.61 ms, plain 3.00 -> 3.03.
+- **Hs HAS TWO MEANINGS AND ONLY ONE OF THEM IS THE SEA.** `significantHeight()`
+ reads the component table and nothing else — a constant of the spectrum at band
+ gain 1 — so `setSeaState(1.9)` and `setSeaBands(1.54, 1.05)` both leave it at
+ 1.93 m, and those are a 3.67 m sea and a 2.88 m one. `seaSignificantHeight()` is
+ the live figure (both bands at their gains, in quadrature); verify-waves holds
+ the two apart. Anything quoting "the sea's Hs" wants the second.
 - **Shader arithmetic gets a gate too.** GPU floats are 32-bit and play happens
  15–80 km from the world origin, so anything that feeds a raw world coordinate into
  a `fract` hash loses its mantissa and the "noise" degenerates into world-axis

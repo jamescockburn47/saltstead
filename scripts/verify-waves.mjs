@@ -28,8 +28,8 @@
 import {
   COMPONENTS, NWAVE, NSWELL, NMID, SWELL_LEN, GRAD_BANDS, SPECTRUM,
   waveHeight, waveGradient, waveBandHeight, waveBandGrad, MAX_WAVE_HEIGHT,
-  MAX_SWELL_HEIGHT, MAX_CHOP_HEIGHT, significantHeight, meanWavelength,
-  setSeaBands, getSeaBands, SEA_SWELL_MAX, SEA_STATE_MAX, RIVER_STATE,
+  MAX_SWELL_HEIGHT, MAX_CHOP_HEIGHT, significantHeight, seaSignificantHeight, meanWavelength,
+  setSeaBands, setSeaState, getSeaBands, SEA_SWELL_MAX, SEA_STATE_MAX, RIVER_STATE,
   SEA_STATE_MIN, setWaveAxes, getWaveAxes, setWaveOrigin, getWaveOrigin,
   easeWaveAxes, waveAxisFor, AXIS_EASE, packWaveUniforms,
   glslWaves, glslWaveBounds, GLSL_PHASE, GLSL_WAVE_SIN, GLSL_WAVE_TERM,
@@ -585,6 +585,36 @@ ok(Math.abs(MAX_SHORE_HEIGHT - SHORE_WAVES.reduce((s, w) => s + w.amp, 0)) < 1e-
   'MAX_SHORE is the shore amp sum');
 ok(SHORE_RANGE > 100 && SHORE_CALM > 0 && SHORE_CALM < 1, 'shore constants sane');
 
+// ---- THE TWO SIGNIFICANT HEIGHTS ARE TWO DIFFERENT NUMBERS -----------------
+// significantHeight() reads the component table and NOTHING ELSE, so it is a
+// constant of the spectrum and cannot answer "how big is the sea". It caught the
+// owner out exactly as designed to: setSeaState(1.9) and setSeaBands(1.54, 1.05)
+// both leave it at 1.93 m, and those are a 3.67 m sea and a 2.88 m one. The
+// function is not broken — its name is a trap — so the guarantee is that the
+// LIVE figure exists, tracks the bands, and is never confused with the reference.
+{
+  const ref = significantHeight();
+  setSeaState(1.9);
+  const bigLive = seaSignificantHeight(), bigRef = significantHeight();
+  setSeaBands(1.54, 1.05);
+  const workLive = seaSignificantHeight(), workRef = significantHeight();
+  ok(bigRef === ref && workRef === ref,
+    `significantHeight() is a CONSTANT of the spectrum (${ref.toFixed(3)} m at band gain 1)`
+    + ' and does not move with the sea state — which is why nothing may quote it as'
+    + " the sea's own height");
+  ok(Math.abs(bigLive - 3.666) < 0.01 && Math.abs(workLive - 2.882) < 0.01,
+    `seaSignificantHeight() DOES: ${bigLive.toFixed(3)} m at bands 1.9/1.9 against`
+    + ` ${workLive.toFixed(3)} m at 1.54/1.05 — two very different band settings can no`
+    + ' longer give one identical answer');
+  ok(bigLive > ref && workLive > ref, 'and both stand above the band-gain-1 reference');
+  // quadrature, not a sum: the two bands are independent populations
+  ok(Math.abs(seaSignificantHeight(1, 1) - ref) < 1e-12,
+    'at band gain 1 the live figure IS the reference, so the two agree where they must');
+  ok(Math.abs(seaSignificantHeight(1, 0) - significantHeight(0)) < 1e-12
+    && Math.abs(seaSignificantHeight(0, 1) - significantHeight(1)) < 1e-12,
+    'and killing one band leaves exactly the other');
+}
+
 // leave the field as the later gate scripts expect to find it
 setWaveOrigin(0, 0);
 setWaveAxes(0, 0);
@@ -594,6 +624,7 @@ setShoreSampler(null);
 if (failed) { console.error(`verify-waves: ${failed} FAILED`); process.exit(1); }
 console.log('verify-waves: OK — CPU/GPU parity holds at 120 km and under a turned sea;',
   `${NWAVE} components (${NSWELL} swell + ${NWAVE - NSWELL} wind-sea) + ${SHORE_WAVES.length} shore;`,
-  `Hs ${significantHeight().toFixed(2)} m over ${meanWavelength(0).toFixed(0)} m rollers`,
-  `(${(significantHeight(0) * 1.54).toFixed(2)} m in a working breeze);`,
+  `Hs ${significantHeight().toFixed(2)} m AT BAND GAIN 1 over`,
+  `${meanWavelength(0).toFixed(0)} m rollers`,
+  `(the sea a working breeze actually builds is ${seaSignificantHeight(1.54, 1.05).toFixed(2)} m);`,
   'an origin snap is a non-event and no stripe orientation owns the sea');

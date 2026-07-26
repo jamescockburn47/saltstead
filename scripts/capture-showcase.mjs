@@ -219,6 +219,29 @@ const SHOTS = [
     settle: 7,
   },
 
+  {
+    key: '20-glitter-landing-page-conditions',
+    title: "The landing page's own water, shot from inside the game",
+    where: 'the roaring forties, 45S 0E', lat: -45, lon: 0,
+    // THE ACCEPTANCE TEST FOR THE GLINT PASS, and the only shot in this set whose
+    // sea is FORCED rather than pre-loaded — deliberately, because the whole
+    // point of it is to be the landing page's conditions and nothing else.
+    // src/titlescene.js pins TITLE_FRAC 0.695 (a 20 degree sun), SEA_STATE 1.9 on
+    // BOTH bands and GLOOM 0.22 behind a composed lens 14 m up at 58 degrees;
+    // every one of those numbers is copied here. The owner's standing complaint
+    // has been that the landing page's water looks better than the game's while
+    // running the SAME shader, so this is the frame that lets the two be held
+    // beside each other with nothing but the subject different.
+    demo: "titlescene.js's exact conditions — sea state 1.9 on both bands, a 20 "
+      + 'degree sun at day fraction 0.695, gloom 0.22, a 58 degree lens 14 m up. '
+      + 'The game and the landing page, like for like.',
+    sky: { frac: 0.695 }, weather: { state: 'clear', gloom: 0.22 }, sea: [1.9, 1.9],
+    ship: { speed: 4.6, trim: 0.75, reach: 2.1 },
+    cam: { aim: 'sun', off: 0.30, dist: 82, height: 14, side: 18, lookAhead: 34,
+      lookY: 4, fov: 58 },
+    settle: 8,
+  },
+
   // ---- THE GRATING IS GONE -------------------------------------------------
   {
     key: '12-clean-water-no-grating',
@@ -377,25 +400,36 @@ const FINDINGS = [
     + 'no parallel filaments anywhere in the set. Re-measured after the appearance '
     + 'pass: world-axis anisotropy 1.13 / 0.76 / 0.64 against a 2.2 ceiling.'
   ],
-  ['FIXED — the sun and moon roads SHATTER instead of being smooth streaks.',
+  ['FIXED — the sun and moon roads are made of GLINTS, and the glints are GEOMETRY.',
     'The owner judged the first cut of this set: the glitter was "crap and basic". '
-    + 'It was. The twinkle sampled a world-locked 0.435 m lattice at a fixed '
-    + 'contrast, and that lattice is BELOW A PIXEL past about forty metres — so the '
-    + 'corridor averaged to its own mean exactly where the road is and painted a '
-    + 'searchlight beam. The glint lattice is now a CROSS-FADE between two fixed '
-    + 'world scales (4 and 0.8 per metre) chosen so whichever dominates is a handful '
-    + 'of pixels, and the field is a thresholded sum of two lattices so it fires on '
-    + 'about a fifth of the water and leaves the rest dark. Measured in pixels down '
-    + 'the road from a 2.8 m lens under a 6 degree sun: local contrast 0.054 -> 0.065 '
-    + 'on the corridor against 0.046 on water well off it. A first cut sized the cell '
-    + 'per PIXEL and scored 0.080 — but a cold review proved that was ALIASING and '
-    + 'not shattering: dividing a world coordinate by a per-pixel cell runs 172 '
-    + 'lattice cells per pixel seventeen kilometres from the origin and 914 at the '
-    + 'far corner, so the road fizzed rather than glinted everywhere but 0N 0E. '
-    + 'The shatter rides in on the lobe\u2019s own strength and stands down over foam, '
-    + 'because a first cut that applied it everywhere turned a gale into television '
-    + 'static — measured on the identical frame, and the reason those two constants '
-    + 'exist.'
+    + 'It was, and the first repair was wrong twice over. A thresholded noise lattice '
+    + 'was multiplied onto the smooth Cox & Munk lobe — texture painted on a smooth '
+    + 'function, with a duty constant that knew nothing about where the light was or '
+    + 'which way the water faced — and it still read as soft blobs. Real glitter is '
+    + 'thousands of independent binary events: a facet either throws the whole disc '
+    + 'of the source at you or it throws none of it. So the noise is gone from the '
+    + 'light path entirely and the corridor is TWO terms over the two facet '
+    + 'populations a pixel covers. The ENVELOPE is the Cox & Munk lobe at full width '
+    + 'over the MEAN surface — it decides where a road can be at all and how it opens '
+    + 'with sea state and range, which is the part 68e8eae got right and which a '
+    + 'mirror provably cannot draw. The GLINT is the retired pow(...,260) mirror, '
+    + 'restored, taken against the EXACT per-pixel drawn normal and normalised so its '
+    + 'expectation is 1 — so the corridor’s mean brightness is still the '
+    + 'envelope’s and what changed is that the light arrives in separate hits. '
+    + 'Measured on waves.js’s own water rather than on a noise field '
+    + '(verify-glitter section 8): a real stretch of road carries 6.65 separated '
+    + 'glints per square metre standing 10.3x over the water between them, where the '
+    + 'smooth lobe it replaces has no maximum anywhere that stands twice its own '
+    + 'median; one glint is 19 cm of water and 6.9 px at 33 m, 3.0 m and 12.8 px at '
+    + '280. Frame cost at 3200x1800: fine 8.53 -> 8.61 ms, plain 3.00 -> 3.03 — the '
+    + 'two lattice reads it no longer does pay for the exponential it now does. And '
+    + 'the light lost to the clamp is paid back where it belongs: a glint field’s '
+    + 'peaks clip where a smooth road’s do not, so glintFloor carries half the '
+    + 'corridor smooth and the gain went 1.50 -> 1.90, which puts live-glitter’s '
+    + 'MEAN sunward figures back within 1-4% of where they were (low sun 1.295 -> '
+    + '1.276, golden hour 1.848 -> 1.784, moon 3.427 -> 3.374) while its own glint '
+    + 'contrast p99/p50 rises (2.73 -> 3.04 at a low sun). Shot 20 is the acceptance '
+    + 'test: the landing page’s own conditions, shot from inside the game.'
   ],
   ['FIXED — whitecaps have a shape, and the hardest-breaking water is the whitest.',
     'They read as torn-paper decals: no relief, no bright tumbling head, no '
