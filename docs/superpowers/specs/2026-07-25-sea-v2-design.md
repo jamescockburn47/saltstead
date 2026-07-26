@@ -1,8 +1,46 @@
 # Sea v2 — the rebuild
 
-Status: **spec, not built.** Supersedes the wave model in `src/waves.js`, keeps
-its architecture. Written 2026-07-25 after the east-west grating investigation
-and the reverted wind-turn attempt (`48b05ae` reverts `1d38aca`).
+Status: **Phases A and B BUILT, 2026-07-26.** C, D and E remain spec.
+Supersedes the wave model in `src/waves.js`, keeps its architecture. Written
+2026-07-25 after the east-west grating investigation and the reverted wind-turn
+attempt (`48b05ae` reverts `1d38aca`).
+
+## What Phase A + B actually measured
+
+Built as specified: local-frame phase with per-component accumulators, a seeded
+28-component Pierson-Moskowitz spectrum with directional spreading, wind-
+following band axes, and a much bigger, longer sea. Like-for-like against
+`4d990ab` with the same probe, same water, same weather:
+
+| | v1 | v2 | gate |
+|---|---|---|---|
+| EW-stripe peak, wake ablated | 18600 | 370 | `live-spectrum.mjs` (floor 30) |
+| EW-band total | 41740 | 2914 | floor 1931 |
+| worst bin's share of the band | 0.447 | 0.127 | — |
+| significant height, bands (1,1) | 1.12 m | 1.93 m | `verify-waves` |
+| mean roller wavelength | ~45 m | 124 m | `verify-waves` (100-250 m) |
+| rollers, ordinary 10 m/s offshore | 1.5 m | 2.80 m | `verify-seamotion` §9 |
+| worst heave acceleration | 26.7 m/s² | 21.2 m/s² | `verify-seamotion` (60) |
+| CPU/GPU parity, worst | 2e-3 contract | 1.8e-6 headless, 2.6e-6 live | `verify-waves` |
+| origin snap changes the felt sea by | n/a (no local frame) | 1.4e-12 m | `verify-seamotion` §7 |
+| a 180° sea turn vs the worst steady sea | 11x (reverted build) | 1.12x | `verify-seamotion` §8 |
+| fragment cost, 3200x1800, ocean filling frame | 26.3 ms | 25.5 ms | measured, not gated |
+
+**Not one motion threshold was widened.** The sea grew hard and the motion went
+DOWN in acceleration, because heave rate goes as H·ω_e and acceleration as
+H·ω_e², and ω_e falls with wavelength: a longer sea is a gentler sea. The
+thinnest margin is now heave RATE at 1.4x (6.21 m/s against a 9.0 limit), left
+where it is deliberately as a tripwire on further growth.
+
+**Deliberately not built.** The freeboard damping under "Waves over the
+bulwarks" below was skipped: a well in the wave sum around the hull is also a
+well under the four points `shipAttitude` samples, so it trades the ship's
+motion for the water-inside-the-bulwarks artifact, and it wants a ship-position
+uniform inside the parity contract. Instead the WIND-SEA band was deliberately
+held near v1's level (Hs 0.53 -> 0.64 m) while the swell grew sevenfold, because
+water over the bulwarks is driven by the SHORT waves and the hull's own length,
+not by the rollers. The artifact should therefore be no worse than it was; if it
+is still objectionable, the stencil mask (option 2) is the honest fix.
 
 ## The benchmark, and why the game misses it
 
@@ -106,19 +144,19 @@ far more slowly, so a shift leaves a genuine crossed sea.
 
 ## v2 features, in build order
 
-### Phase A — the foundation (no visible feature, everything depends on it)
+### Phase A — the foundation (no visible feature, everything depends on it) — **BUILT**
 Local-frame phase with per-train accumulators; spectrum generator replacing
 the table; parity and motion gates written FIRST. Ship behind a flag
 (`saltstead.seaV2 = true`) so v1 and v2 can be A/B'd in one session.
 
-### Phase B — the wind's sea
+### Phase B — the wind's sea — **BUILT**
 Wind-following directional spreading, swell/wind-sea crossed seas, the
 sea-state model fixed per the benchmark section above (swell floor in open
 water, fetch reaching full strength sooner, sheltering left to the shore
 field). Deliverable: the player reads wind direction and strength off the
 water.
 
-### Phase C — cresting
+### Phase C — cresting — next
 Stokes second-harmonic crest sharpening (sharp crests, flat troughs, still a
 height field — Gerstner is rejected: horizontal displacement breaks the
 height-field property the per-pixel normals and all twelve CPU consumers
