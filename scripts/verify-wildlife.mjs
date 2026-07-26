@@ -3,8 +3,7 @@
 // the motion maths stays inside its envelopes.
 import {
   ambientSpecies, porpoiseY, porpoisePitch, circlePos, flapAngle, birdBeat,
-  flockGate, podStation,
-  frenzyPos, FRENZY_FINS, FRENZY_S, whaleState, WHALE_PERIOD,
+  flockGate, podStation, frenzyPos, FRENZY_FINS, FRENZY_S,
 } from '../src/wildlife.js';
 
 let failed = 0;
@@ -65,24 +64,14 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
     'the pack is decorrelated, not a conga line');
 }
 
-// the whale: mostly a rumour in the deep, a minute of back and blow at the
-// surface, the fluke pitch on the sounding dive — and the cycle closes
+// the whale gate: blue water only, and not the polar ice. Everything else
+// about her — pods, courses, the sounding cycle — is verify-whales' business.
 {
   ok(ambientSpecies(5000, 30).whale && !ambientSpecies(2000, 30).whale,
-    'the whale belongs to the abyss');
-  let surfaced = 0, blew = false, dove = false;
-  for (let u = 0; u < 1; u += 0.005) {
-    const w = whaleState(u);
-    ok(Number.isFinite(w.y) && Number.isFinite(w.pitch), `whale finite at ${u.toFixed(2)}`);
-    if (w.y > -1.5) surfaced++;
-    if (w.blow > 0.5) blew = true;
-    if (w.pitch < -0.3) dove = true;
-  }
-  ok(surfaced > 20 && surfaced < 120, `a minute at the surface, no more (${surfaced} samples)`);
-  ok(blew, 'the blow stands when she surfaces');
-  ok(dove, 'the fluke pitches on the dive');
-  ok(Math.abs(whaleState(0).y - whaleState(0.999).y) < 1.5, 'the cycle closes in the deep');
-  ok(WHALE_PERIOD > 45, 'an encounter, not a metronome');
+    'the whale belongs to blue water');
+  ok(!ambientSpecies(5000, 78).whale, 'and not under the ice');
+  ok(ambientSpecies(3200, 30).whale && !ambientSpecies(3200, 30).gulls,
+    'she is a blue-water instrument: whales without gulls');
 }
 
 // circling: on the circle, heading tangent

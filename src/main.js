@@ -2531,8 +2531,15 @@ class Game {
       contactDist = Math.min(contactDist, Math.hypot(dxWrap(this.ship.x, c.x), c.z - this.ship.z));
     }
     // river-sailing is inshore sailing wherever the sea coast is: over land
-    // the fair current dies and she moves at human scale
-    let gait = encounterGait(gaitFactor(this.overLand ? 0 : this.coastDist), contactDist);
+    // the fair current dies and she moves at human scale.
+    // A POD OF WHALES IS AN ENCOUNTER TOO (wildlifelayer whaleDist): the fair
+    // current slackens for them exactly as it does for a sail, so you sail
+    // AMONG them at human speed instead of flashing past a 19 m animal in
+    // three seconds. They are not `contacts` — a whale is not a sail, so she
+    // never sets shipSighted or wakes the lookout.
+    const whaleDist = this.wildlife.whaleDist(this.ship.x, this.ship.z);
+    let gait = encounterGait(gaitFactor(this.overLand ? 0 : this.coastDist),
+      Math.min(contactDist, whaleDist));
     // a cyclone's outer band is the fastest water afloat (storms.js): the
     // captain's gamble multiplies the current itself
     gait *= stormBandAt(this.ship.x, this.ship.z, skyT);

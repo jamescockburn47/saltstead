@@ -5,10 +5,15 @@
 
 import * as THREE from 'three';
 import { waveHeight } from './waves.js';
+import { dxWrap } from './earth.js';
 import {
   ambientSpecies, porpoiseY, porpoisePitch, circlePos, birdBeat, podStation,
-  frenzyPos, FRENZY_FINS, FRENZY_S, whaleState, WHALE_PERIOD,
+  frenzyPos, FRENZY_FINS, FRENZY_S,
 } from './wildlife.js';
+import {
+  podsNear, podPose, whalePose, memberStation, memberLen, memberCycle,
+  churnGlow, stalkAnchor, whitePod, POD_MAX, WHALE_STREAM_R, WHALE_SEEN, BODY_R,
+} from './whales.js';
 
 const GREY = new THREE.MeshPhongMaterial({ color: 0x8fa3ad, flatShading: true });
 const DARK = new THREE.MeshPhongMaterial({ color: 0x4a5860, flatShading: true });
@@ -90,30 +95,171 @@ function buildFin() {
   return fin;
 }
 
-// the whale: a dark rolling back, a fluke for the dive, a spout column.
-// Most of the animal stays a shadow under the surface — like the shark,
-// what breaks the water IS the whale.
-function buildWhale() {
+// ============================== THE WHALES ==============================
+// A SPERM WHALE, because this is the whaling age and she is the animal the age
+// knew: the great blunt case forward (a third of her), the narrow underslung
+// jaw, the knuckled dorsal ridge, small flippers, and the broad notched flukes
+// that stand out of the sea when she sounds. Every part is a primitive.
+//
+// The body is built ONCE at UNIT LENGTH — bow at local z = +0.5, fluke tips at
+// -0.5, the house's +z-forward convention — and every animal in every pod
+// reuses that one geometry set, scaled by her own length in metres. Five
+// bodies in the pool, one set of geometry, nothing allocated when a pod
+// streams in (CLAUDE.md resource hygiene). Only the spout and the churn carry
+// per-animal materials, because their opacity is the thing that animates.
+//
+// Her hide is wet slate; in the White Whale's water the same meshes take the
+// pale set instead (setPale — a material swap, not a clone). A first pass at
+// 0x2c343a rendered her as a black cut-out with no form at all: a wet back is a
+// MID grey that gleams, so the hide carries specular.
+const HIDE = new THREE.MeshPhongMaterial({
+  color: 0x55636b, specular: 0x3a4247, shininess: 26, flatShading: true,
+});
+const HIDE_PALE = new THREE.MeshPhongMaterial({
+  color: 0xd6dad7, specular: 0x556066, shininess: 34, flatShading: true,
+});
+const BELLY = new THREE.MeshPhongMaterial({ color: 0x7d868b, flatShading: true });
+const BELLY_PALE = new THREE.MeshPhongMaterial({ color: 0xeceeea, flatShading: true });
+const FLUKE = new THREE.MeshPhongMaterial({
+  color: 0x3d474d, specular: 0x2a3134, shininess: 22,
+  flatShading: true, side: THREE.DoubleSide,
+});
+const FLUKE_PALE = new THREE.MeshPhongMaterial({
+  color: 0xc7cbc8, flatShading: true, side: THREE.DoubleSide,
+});
+const SPRAY = { color: 0xe8f3f8, transparent: true, opacity: 0, depthWrite: false };
+
+let _whaleGeo = null;
+function whaleGeometry() {
+  if (_whaleGeo) return _whaleGeo;
+  const R = BODY_R;   // the trunk's radius at the shoulder — whales.js computes
+                      // her floating trim from this same number
+  const sph = (sx, sy, sz, x, y, z) => {
+    const g = new THREE.SphereGeometry(0.5, 7, 5);
+    g.scale(sx * 2, sy * 2, sz * 2);
+    g.translate(x, y, z);
+    return g;
+  };
+  // the case: a flat-fronted cylinder, a third of her length, BROADER than the
+  // trunk and no taller. (Built taller it stood off her back like a conning
+  // tower and she read as a submarine — the screenshots caught that too: a
+  // sperm whale's forehead is massive sideways and below, not above.)
+  const head = new THREE.CylinderGeometry(0.052, R + 0.004, 0.34, 9);
+  head.rotateX(Math.PI / 2);                // +y -> +z: the blunt snout forward
+  head.scale(1.22, 0.95, 1);
+  head.translate(0, 0.004, 0.315);
+  // the trunk, tapering the length of her to the tail stock
+  const trunk = new THREE.CylinderGeometry(R, 0.02, 0.53, 9);
+  trunk.rotateX(Math.PI / 2);
+  trunk.scale(1, 0.95, 1);
+  trunk.translate(0, 0, -0.12);
+  const stock = new THREE.CylinderGeometry(0.022, 0.013, 0.10, 6);
+  stock.rotateX(Math.PI / 2);
+  stock.translate(0, 0, -0.435);
+  // the narrow underslung jaw — the silhouette that says sperm whale
+  const jaw = new THREE.CylinderGeometry(0.016, 0.008, 0.30, 5);
+  jaw.rotateX(Math.PI / 2 - 0.05);
+  jaw.translate(0, -0.052, 0.315);
+  // THE FLUKES: two swept triangles about a median notch. The geometry is
+  // centred so the MESH can carry the position — live-whales.mjs reads its
+  // world height to prove the sounding really lifts them out of the sea.
+  const flukes = new THREE.BufferGeometry();
+  flukes.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+    0, 0, 0.058, -0.150, 0.014, -0.058, 0, 0, -0.016,
+    0, 0, 0.058, 0, 0, -0.016, 0.150, 0.014, -0.058,
+  ]), 3));
+  flukes.computeVertexNormals();
+  // one flipper, extending along +x from its root so the mesh can hinge it
+  const flipper = new THREE.BoxGeometry(0.085, 0.012, 0.045);
+  flipper.translate(0.0425, 0, 0);
+  _whaleGeo = {
+    head, trunk, stock, jaw, flukes, flipper,
+    snout: sph(0.048, 0.058, 0.022, 0, 0.012, 0.487),
+    hump: sph(0.024, 0.034, 0.072, 0, 0.052, -0.10),
+    knuckles: [-0.19, -0.25, -0.31].map((z, i) => sph(0.013, 0.010 - i * 0.002, 0.030, 0, 0.036 - i * 0.007, z)),
+    spoutOuter: (() => {
+      const g = new THREE.ConeGeometry(0.030, 0.24, 7);
+      g.translate(0, 0.12, 0);
+      return g;
+    })(),
+    spoutCore: (() => {
+      const g = new THREE.ConeGeometry(0.013, 0.20, 6);
+      g.translate(0, 0.10, 0);
+      return g;
+    })(),
+    // the wash around her: a NARROW oval hugging her length, not a ring. (A
+    // ring — the kraken's idiom, where a column pierces the sea — read as a
+    // grey plate under a twenty-metre body: the first screenshots caught it.)
+    churn: (() => {
+      const g = new THREE.RingGeometry(0.34, 0.62, 18);
+      g.rotateX(-Math.PI / 2);
+      g.scale(0.26, 1, 0.92);
+      return g;
+    })(),
+  };
+  return _whaleGeo;
+}
+
+// one animal off the shared geometry. Returns her handles: the body group, the
+// fluke mesh (the sounding's proof), the spout group and its two materials, and
+// the wash that lives in the scene BESIDE her — it must lie flat on the water
+// while she pitches nose-down, so it cannot be her child.
+function buildWhaleBody(scene) {
+  const G = whaleGeometry();
   const g = new THREE.Group();
-  // her own hide (not the shared DARK): the White Whale zone tints it pale
-  const hide = DARK.clone();
-  const back = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), hide);
-  back.scale.set(2.2, 1.3, 6.5);
-  g.add(back);
-  const fluke = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.3), hide.clone());
-  fluke.material.side = THREE.DoubleSide;
-  fluke.rotation.x = -Math.PI / 2;
-  fluke.position.set(0, 0.4, -7.2);
-  g.add(fluke);
-  const spout = new THREE.Mesh(
-    new THREE.ConeGeometry(0.5, 3.4, 6),
-    new THREE.MeshBasicMaterial({ color: 0xdfeef6, transparent: true, opacity: 0 }));
-  spout.position.set(0, 3.2, 4.2);
+  const skin = [];
+  const add = (geo, dark, pale) => {
+    const m = new THREE.Mesh(geo, dark);
+    skin.push({ m, dark, pale });
+    g.add(m);
+    return m;
+  };
+  add(G.head, HIDE, HIDE_PALE);
+  add(G.snout, HIDE, HIDE_PALE);
+  add(G.trunk, HIDE, HIDE_PALE);
+  add(G.stock, HIDE, HIDE_PALE);
+  add(G.hump, HIDE, HIDE_PALE);
+  for (const k of G.knuckles) add(k, HIDE, HIDE_PALE);
+  add(G.jaw, BELLY, BELLY_PALE);
+  for (const side of [1, -1]) {
+    const f = add(G.flipper, BELLY, BELLY_PALE);
+    f.position.set(side * 0.055, -0.025, 0.10);
+    f.rotation.y = side > 0 ? 0.45 : Math.PI - 0.45;   // swept aft, both sides
+    f.rotation.z = -side * 0.2;
+  }
+  const fluke = add(G.flukes, FLUKE, FLUKE_PALE);
+  fluke.position.z = -0.445;
+  // THE BLOW: a sperm whale's spout leaves the front-LEFT of her case and
+  // goes forward and to port — the one detail that names the animal at a mile
+  const spout = new THREE.Group();
+  const spoutMats = [
+    new THREE.MeshBasicMaterial({ ...SPRAY }),
+    new THREE.MeshBasicMaterial({ ...SPRAY }),
+  ];
+  spout.add(new THREE.Mesh(G.spoutOuter, spoutMats[0]));
+  spout.add(new THREE.Mesh(G.spoutCore, spoutMats[1]));
+  spout.position.set(-0.026, 0.072, 0.435);
+  spout.rotation.set(0.5, 0, 0.26);
+  spout.visible = false;
   g.add(spout);
-  return { group: g, spout, hide, flukeMat: fluke.material };
+  const churnMat = new THREE.MeshBasicMaterial({ ...SPRAY, side: THREE.DoubleSide });
+  const churn = new THREE.Mesh(G.churn, churnMat);
+  churn.visible = false;
+  g.visible = false;
+  scene.add(g, churn);
+  return {
+    group: g, fluke, spout, spoutMats, churn, churnMat, skin,
+    pale: false, len: 0, phase: '', blow: 0, surf: 0,
+    setPale(on) {
+      if (on === this.pale) return;
+      this.pale = on;
+      for (const s of this.skin) s.m.material = on ? s.pale : s.dark;
+    },
+  };
 }
 
 const POD = 4, GULLS = 4;
+const V = new THREE.Vector3();   // scratch — the report reads world positions
 
 export class WildlifeLayer {
   constructor(scene) {
@@ -145,9 +291,16 @@ export class WildlifeLayer {
       scene.add(f);
       this.frenzy.push(f);
     }
-    this.whale = buildWhale();
-    this.whale.group.visible = false;
-    scene.add(this.whale.group);
+    // the whale pool: POD_MAX bodies off one shared geometry set, so a pod
+    // streaming in costs a transform each and nothing else
+    this.whales = [];
+    for (let i = 0; i < POD_MAX; i++) this.whales.push(buildWhaleBody(scene));
+    this.whalePod = null;   // the bodied pod's spec (whales.js), or null
+    this.whaleAt = null;    // her world pose this frame: { x, z, heading, speed }
+    this.whiteAnchor = null;
+    this._whiteSpec = null;
+    this._podT = 0;
+    this._podAt = null;
   }
 
   // sx/sz: ship; mastTop: world y of the masthead; speed: hull m/s;
@@ -239,28 +392,8 @@ export class WildlifeLayer {
       d.rotation.set(porpoisePitch(phase), yaw, 0, 'YXZ');
     }
 
-    // THE WHALE: the abyss's resident — a long deep cruise, then a minute
-    // at the surface off the beam: the blow, the rolling back, the fluke.
-    // Deterministic in t, parked ~170 m abeam so it reads as ENCOUNTERED,
-    // never as following.
-    this.whale.group.visible = !!spec.whale || whiteWhale;
-    if (this.whale.group.visible) {
-      // in HER water she is the White Whale: pale, half again the size,
-      // and she works in CLOSE — the ram reads before it lands
-      this.whale.hide.color.setHex(whiteWhale ? 0xdfe3e2 : 0x4a5860);
-      this.whale.flukeMat.color.copy(this.whale.hide.color);
-      this.whale.group.scale.setScalar(whiteWhale ? 2.3 : 1);
-      const range = whiteWhale ? 110 : 170;
-      const u = (t % WHALE_PERIOD) / WHALE_PERIOD;
-      const ws = whaleState(u);
-      const wAng = Math.floor(t / WHALE_PERIOD) * 2.4; // a new bearing each cycle
-      const wx = sx + Math.sin(yaw + 1.9 + wAng) * range;
-      const wz = sz + Math.cos(yaw + 1.9 + wAng) * range;
-      this.whale.group.position.set(wx, waveHeight(wx, wz, t) + ws.y * (whiteWhale ? 2.3 : 1), wz);
-      this.whale.group.rotation.set(ws.pitch, wAng, 0);
-      this.whale.spout.material.opacity = ws.blow * 0.75;
-      this.whale.spout.scale.y = 0.4 + ws.blow;
-    }
+    // THE WHALES — the deep's own residents, on courses of their own
+    this._stepWhales(t, dt, sx, sz, !!spec.whale, whiteWhale);
 
     // the fin circles a slow drift near an idling hull in warm shallows
     const finOn = spec.shark && speed < 2;
@@ -273,5 +406,125 @@ export class WildlifeLayer {
       this.fin.position.set(fx, waveHeight(fx, fz, t) + 0.2, fz);
       this.fin.rotation.y = c.heading;
     }
+  }
+
+  // ---- THE WHALES ----
+  // World-anchored pods (whales.js): the pod cruises a great slow circuit of
+  // its own in WORLD coordinates, and each animal runs her own sounding cycle
+  // on the WORLD CLOCK. Nothing below this line reads the ship's position or
+  // heading — that was the bug (a ship-relative offset, so the animal rode
+  // along with the hull and swung round it on the helm). The ship sails past
+  // them, or overtakes them; they never travel with her.
+  _stepWhales(t, dt, sx, sz, on, whiteWhale) {
+    if (whiteWhale) {
+      // in HER water there is one whale and she is hunting: the White Whale
+      // closes on the ship, but only by STALKING a lagged anchor (whales.js
+      // stalkAnchor) — put the helm hard over and she holds her own course
+      if (!this.whiteAnchor) this.whiteAnchor = { x: sx, z: sz };
+      this.whiteAnchor = stalkAnchor(this.whiteAnchor, sx, sz, dt);
+      this._whiteSpec = whitePod(this.whiteAnchor, this._whiteSpec);
+      this.whalePod = this._whiteSpec;
+    } else if (!on) {
+      this.whalePod = null;
+      this.whiteAnchor = null;  // out of her water: she does not keep a berth
+    } else {
+      this.whiteAnchor = null;
+      // stream on a slow poll: the cell walk and its coast samples are far too
+      // dear per frame, and a pod at three knots is in no hurry
+      this._podT -= dt;
+      const moved = !this._podAt
+        || Math.hypot(sx - this._podAt.x, sz - this._podAt.z) > WHALE_STREAM_R * 0.3;
+      if (this._podT <= 0 || moved) {
+        this._podT = 3;
+        this._podAt = { x: sx, z: sz };
+        const near = podsNear(t, sx, sz);
+        this.whalePod = near.length ? near[0].pod : null;
+      }
+    }
+    const pod = this.whalePod;
+    this.whaleAt = pod ? podPose(pod, t) : null;
+    const p = this.whaleAt;
+    let up = false;   // is anything of the pod above water this frame?
+    for (let i = 0; i < this.whales.length; i++) {
+      const w = this.whales[i];
+      if (!pod || i >= pod.n) {
+        w.group.visible = false;
+        w.churn.visible = false;
+        continue;
+      }
+      const len = memberLen(pod, i);
+      w.len = len;
+      w.setPale(pod.kind === 'white');
+      w.group.scale.setScalar(len);
+      // her station in the POD's own frame (+z ahead, ±x abreast — the
+      // shipframe convention), drift and all: memberStation is the whole truth
+      // and the clearance law is gated on it
+      const st = memberStation(pod, i, t);
+      const ch = Math.cos(p.heading), sh = Math.sin(p.heading);
+      const x = p.x + st.side * ch + st.lag * sh;
+      const z = p.z - st.side * sh + st.lag * ch;
+      // the sounding cycle, and the swell she rides while she runs it
+      const pose = whalePose(memberCycle(pod, i, t), len);
+      const surf = waveHeight(x, z, t);
+      w.phase = pose.phase;
+      w.blow = pose.blow;
+      w.surf = surf;
+      w.group.visible = pose.y > WHALE_SEEN; // deeper, and she is simply gone
+      if (w.group.visible) up = true;
+      w.group.position.set(x, surf + pose.y, z);
+      w.group.rotation.set(pose.pitch, p.heading, pose.roll, 'YXZ');
+      // THE BLOW: the column stands with the jet and the spent plume widens
+      w.spout.visible = pose.blow > 0.02;
+      if (w.spout.visible) {
+        w.spoutMats[0].opacity = 0.55 * pose.blow;
+        w.spoutMats[1].opacity = 0.8 * pose.blow;
+        const wide = 1 + 1.5 * pose.blowAge;
+        w.spout.scale.set(wide, 0.35 + 0.9 * pose.blow, wide);
+      }
+      // and the wash where she breaks the sea — flat on the water, so it lies
+      // beside her rather than pitching with her body, and turned onto her
+      // course so the oval runs the way she swims
+      const glow = churnGlow(pose, len);
+      w.churn.visible = glow > 0.05;
+      if (w.churn.visible) {
+        w.churnMat.opacity = 0.4 * glow;
+        w.churn.position.set(x, surf + 0.1, z);
+        w.churn.rotation.y = p.heading;
+        w.churn.scale.setScalar(len);
+      }
+    }
+    this.whaleUp = up;
+  }
+
+  // how far off the bodied pod is (Infinity if the sea is empty). main.js
+  // slackens the fair current for whales the way it does for a sail — a pod
+  // alongside is an ENCOUNTER, and at blue-water gait it would otherwise flash
+  // past in three seconds. Only while something of her SHOWS, though: a third
+  // of the sounding cycle is spent at forty-six metres, and crawling past empty
+  // water for forty seconds is an encounter with nothing.
+  whaleDist(px, pz) {
+    if (!this.whaleAt || !this.whaleUp) return Infinity;
+    return Math.hypot(dxWrap(px, this.whaleAt.x), this.whaleAt.z - pz);
+  }
+
+  // what the whales are doing, for live-whales.mjs: world positions read off
+  // the scene graph itself, so the proof is the drawn animal and not the maths
+  whaleReport() {
+    const pod = this.whalePod;
+    if (!pod || !this.whaleAt) return null;
+    const out = {
+      id: pod.id, kind: pod.kind, n: pod.n,
+      pod: { ...this.whaleAt }, members: [],
+    };
+    for (let i = 0; i < pod.n; i++) {
+      const w = this.whales[i];
+      w.fluke.getWorldPosition(V);
+      out.members.push({
+        x: w.group.position.x, y: w.group.position.y, z: w.group.position.z,
+        len: w.len, phase: w.phase, blow: w.blow, surf: w.surf,
+        visible: w.group.visible, flukeY: V.y, pitch: w.group.rotation.x,
+      });
+    }
+    return out;
   }
 }

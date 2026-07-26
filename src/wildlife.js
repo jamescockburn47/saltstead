@@ -14,7 +14,12 @@ export function ambientSpecies(coastDist, latAbs) {
     dolphins: coastDist > 500,
     albatross: coastDist > 3000 && latAbs > 20,
     shark: coastDist < 900 && latAbs < 42,
-    whale: coastDist > 4000 && latAbs < 65, // the abyss has a resident
+    // THE DEEP HAS RESIDENTS (whales.js gives the pods their courses and
+    // bodies). 2600 game m is ~600 km of real ocean at the game's scale, and
+    // the old 4000 sat within a whisker of COAST_CAP (4440) — whales existed
+    // only in water so deep almost nobody sailed it. Sperm whales work blue
+    // water, not the last hundred miles of it.
+    whale: coastDist > 2600 && latAbs < 65,
   };
 }
 
@@ -30,26 +35,11 @@ export function frenzyPos(elapsed, i) {
   return { x: Math.sin(a) * r, z: Math.cos(a) * r, heading: a + Math.PI / 2, r };
 }
 
-// THE WHALE — the abyss's own navigation instrument: a long submerged
-// cruise, then a minute at the surface (blow, a rolling back, the fluke on
-// the dive). u: cycle phase [0..1); one cycle is WHALE_PERIOD seconds.
-//   y      — back height relative to the surface (negative = under)
-//   pitch  — body pitch (the fluke-up dive at the end)
-//   blow   — 0..1: the spout column stands in the first breaths
-export const WHALE_PERIOD = 90;
-export function whaleState(u) {
-  if (u < 0.62) return { y: -9, pitch: 0, blow: 0 };            // the deep cruise
-  if (u < 0.9) {
-    const s = (u - 0.62) / 0.28;                                 // surfaced: back awash
-    return {
-      y: -0.6 + Math.sin(s * Math.PI) * 0.9,
-      pitch: 0,
-      blow: s < 0.3 ? 1 - s / 0.3 : 0,                           // the blow on arrival
-    };
-  }
-  const d = (u - 0.9) / 0.1;                                     // the sounding dive
-  return { y: -0.6 - d * 7, pitch: -0.5 * d, blow: 0 };
-}
+// THE WHALE lives in her own module now — src/whales.js, verify-whales.mjs.
+// What was here was a one-animal surface/dive envelope with no world position
+// at all, which is exactly how the layer came to park her off the ship's beam.
+// Pods, courses, formations and the sounding cycle all belong to whales.js;
+// the species gate above is all the whale wildlife.js still owns.
 
 // the pod's bow-wave stations, SHIP-LOCAL metres (bow +z, starboard +x,
 // same convention as shipframe.js). scale is the hull's frame scale (the

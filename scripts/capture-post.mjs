@@ -183,27 +183,41 @@ try {
   await page.screenshot({ path: join(OUT, '6-two-flags-broadside.png') });
   ok(true, 'the duel framed');
 
-  // ---- 6. THE WHALE — surfaced, blowing, off the beam in blue water ----
-  await page.evaluate(async () => {
+  // ---- 6. THE WHALE — a pod on her own course, blowing, in blue water ----
+  // The whales hold WORLD positions now (whales.js): find the pod the water
+  // actually carries, lay the ship on her beam, and jump the clock to the blow.
+  const posed = await page.evaluate(async () => {
     const { DAY_LENGTH } = await import('/src/skymath.js');
-    const { WHALE_PERIOD } = await import('/src/wildlife.js');
+    const W = await import('/src/whales.js');
     const g = window.saltstead;
+    const near = W.podsNear(g.t, g.ship.x, g.ship.z, 60000);
+    if (!near.length) return false;
+    const pod = near.find((e) => e.pod.n >= 2)?.pod || near[0].pod;
+    // the blow's second breath tops out here; the settling frames land on it
+    let tt = W.WHALE_PERIOD * (0.145 - pod.phase0);
+    while (tt < g.t) tt += W.WHALE_PERIOD;
+    g.t = tt;
     g.dayStart = 0.45 * DAY_LENGTH - g.t;
-    // jump the sim clock to the blow's full height: u ~ 0.635 of the cycle
-    g.t = Math.ceil(g.t / WHALE_PERIOD) * WHALE_PERIOD + WHALE_PERIOD * 0.635;
+    const p = W.podPose(pod, g.t);
+    g.ship.x = p.x + Math.cos(p.heading) * 48;
+    g.ship.z = p.z - Math.sin(p.heading) * 48;
+    g.ship.yaw = p.heading;
     g.ship.speed = 0;
-    const wAng = Math.floor(g.t / WHALE_PERIOD) * 2.4;
-    const wx = g.ship.x + Math.sin(g.ship.yaw + 1.9 + wAng) * 170;
-    const wz = g.ship.z + Math.cos(g.ship.yaw + 1.9 + wAng) * 170;
+    g.geoClock = 0;
     g.photoCam = {
-      x: wx - 22, y: 3.2, z: wz - 16,
-      lookAt: { x: wx, y: 1, z: wz },
+      x: p.x - Math.sin(p.heading) * 30 - Math.cos(p.heading) * 26, y: 4.2,
+      z: p.z - Math.cos(p.heading) * 30 + Math.sin(p.heading) * 26,
+      lookAt: { x: p.x, y: 1, z: p.z },
     };
+    return true;
   });
-  await sleep(600);
+  ok(posed, 'a pod found for the photograph');
+  await sleep(1500);
+  const whaleUp = await page.evaluate(() => {
+    const r = window.saltstead.wildlife.whaleReport();
+    return !!r && r.members.some((m) => m.visible && m.y > -3);
+  });
   await page.screenshot({ path: join(OUT, '7-the-whale.png') });
-  const whaleUp = await page.evaluate(() => window.saltstead.wildlife.whale.group.visible
-    && window.saltstead.wildlife.whale.group.position.y > -3);
   ok(whaleUp, 'the whale surfaced for the photograph');
 
   ok(pageErrors.length === 0,

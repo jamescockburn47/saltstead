@@ -13,8 +13,8 @@ assets, browser-first, deterministic, verify-gated**. Public client:
  sailing,
  shipphysics, shipframe, foam, earth, terraingen, shoredecor, flora, skymath,
  lightrig, woodgrain, legends, legendfx, combat, monsters, merchants, plunder,
- treasure, fleet, port, ports, shipyard, noise, searoute, shanties; showreel's
- pose maths)
+ treasure, fleet, port, ports, shipyard, noise, searoute, shanties, whales;
+ showreel's pose maths)
  have **no THREE/DOM imports** and each is guarded by a `scripts/verify-*.mjs`
  check (flora is guarded inside verify-shoredecor).
 - `src/earthdata.js` is **generated** by `scripts/build-earthdata.mjs` from Natural
@@ -38,7 +38,7 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 
 ## Build & verify
 
-- `npm run verify` — the headless gate (62 checks). **Must be green before deploy.**
+- `npm run verify` — the headless gate (63 checks). **Must be green before deploy.**
  Add a verify script with every feature; prefer testing pure modules headlessly over
  eyeballing.
 - **Shader arithmetic gets a gate too.** GPU floats are 32-bit and play happens
@@ -55,7 +55,10 @@ assets, browser-first, deterministic, verify-gated**. Public client:
  `scripts/live-searoute.mjs` sails a course laid around Florida, the breakers-ahead
  handback, and the pole-off in a real browser; `scripts/live-shore.mjs` checks the
  shore-aware sea, the decorated coasts (Caribbean + Norway) and that the retired
- ashore mode stays retired.
+ ashore mode stays retired; `scripts/live-whales.mjs` finds a real pod on the
+ mid-Atlantic grounds and proves the animals hold a WORLD course while the ship
+ manoeuvres, run the whole blow/cruise/sounding/absence cycle, and ride the
+ swell (screenshots to `media/whale-*.png`).
 - Dev: `npm run dev` (port 5173). `window.saltstead` is the live Game handle
   (`.ship`, `.cam`, `.aground`, `.coastDist`, `.dayStart`, `.ocean.uniforms`).
   Wardens teleport by SHIFT-CLICKING the world chart (M) — the far writ drops
