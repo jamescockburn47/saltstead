@@ -10,7 +10,8 @@ import { windAt } from '../src/wind.js';
 import { latLonToWorld } from '../src/earth.js';
 import {
   SEA_STATE_MIN, SEA_STATE_MAX, SEA_SWELL_MAX, RIVER_STATE, MAX_WAVE_HEIGHT,
-  setSeaState, getSeaState, waveHeight, significantHeight,
+  setSeaState, getSeaState, waveHeight, significantHeight, waveBandHeight,
+  MAX_HARM_SWELL, MAX_HARM_CHOP,
   shoreOpenAtten, shoreEnv, SHORE_WAVES,
 } from '../src/waves.js';
 import { speedTarget } from '../src/sailing.js';
@@ -363,10 +364,28 @@ ok(seaStateFor(0) === SEA_STATE_MIN, 'calm pins the floor');
     + 'of blue water at 54S, 110 m off');
 }
 {
-  const y0 = waveHeight(123.4, -56.7, 42);
+  // THE SEA STATE STOPPED BEING A CLEAN LINEAR FACTOR WITH PHASE C, and that is
+  // the point of Phase C. This clause used to read
+  //     ok(Math.abs(y2 - 2 * y0) < 1e-12, 'sea state is a clean linear factor')
+  // which was true of a pure sum of sines and is false of a Stokes surface: the
+  // second-order term carries a^2, so it carries the state SQUARED. The law is
+  // now exact rather than linear —
+  //     y(g) = g * (linear sum) - g^2 * (harmonic sum)
+  // — and it is what makes a calm sea sinusoidal and a gale peak with no extra
+  // knob. Held here to float64 rounding against the band sums themselves.
+  const X = 123.4, Z = -56.7, T = 42;
+  const [l0, h0] = waveBandHeight(0, X, Z, T), [l1, h1] = waveBandHeight(1, X, Z, T);
+  const y0 = waveHeight(X, Z, T);
   setSeaState(2);
-  const y2 = waveHeight(123.4, -56.7, 42);
-  ok(Math.abs(y2 - 2 * y0) < 1e-12, 'sea state is a clean linear factor on the wave sum');
+  const y2 = waveHeight(X, Z, T);
+  ok(Math.abs(y0 - ((l0 + l1) - (h0 + h1))) < 1e-12,
+    'at state 1 the surface is linear sum minus harmonic sum');
+  ok(Math.abs(y2 - (2 * (l0 + l1) - 4 * (h0 + h1))) < 1e-12,
+    'and at state 2 the LINEAR half doubles while the Stokes harmonic QUADRUPLES '
+    + '— the sea state is linear on the sines and quadratic on the cresting');
+  ok(Math.abs(y2 - 2 * y0) > 1e-9,
+    `so doubling the state is NOT a clean scaling any more: ${(y2 - 2 * y0).toExponential(2)} m `
+    + 'of extra crest at state 2 (it was exactly 0 before Phase C)');
   ok(getSeaState() === 2, 'getter reads back');
   setSeaState(99);
   ok(getSeaState() === SEA_STATE_MAX, 'setter clamps');
@@ -375,7 +394,13 @@ ok(seaStateFor(0) === SEA_STATE_MIN, 'calm pins the floor');
   ok(RIVER_STATE < SEA_STATE_MIN, 'river calm undercuts the wind floor');
   setSeaState(RIVER_STATE);
   ok(getSeaState() === RIVER_STATE, 'inland water may lie near-flat');
-  ok(Math.abs(waveHeight(123.4, -56.7, 42)) < MAX_WAVE_HEIGHT * RIVER_STATE + 1e-12,
+  // the envelope carries the Stokes harmonic too (Phase C): at a fully-aligned
+  // crest the second-order term ADDS, so the linear amplitude sum alone is no
+  // longer an upper bound. On a river it is worth 3.8e-5 m — a bound correction,
+  // not a loosened threshold.
+  ok(Math.abs(waveHeight(123.4, -56.7, 42))
+    < MAX_WAVE_HEIGHT * RIVER_STATE
+      + (MAX_HARM_SWELL + MAX_HARM_CHOP) * RIVER_STATE * RIVER_STATE + 1e-12,
     'river waves are ripples');
   setSeaState(1); // leave the world as we found it for later scripts
 }

@@ -149,9 +149,10 @@ export const OCEAN_NOISE_SCALES = [
   { scale: 1.9, what: 'churn rag' },
   { scale: 1.35, what: 'detail ripple, fine band' },
   { scale: 0.42, what: 'detail chop, fine band' },
-  { scale: 0.05, what: 'whitecap patch' },
+  { scale: 0.28, what: 'gale windrow, across the wind' },
   { scale: 0.045, what: 'far-field band' },
   { scale: 0.021, what: 'chop patch' },
+  { scale: 0.02, what: 'gale windrow, along the wind' },
   { scale: 0.013, what: 'whitecap broad mask' },
   { scale: 0.012, what: 'far-field broad band' },
 ];

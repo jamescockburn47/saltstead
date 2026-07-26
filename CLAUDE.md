@@ -38,9 +38,39 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 
 ## Build & verify
 
-- `npm run verify` — the headless gate (64 checks). **Must be green before deploy.**
+- `npm run verify` — the headless gate (65 checks). **Must be green before deploy.**
  Add a verify script with every feature; prefer testing pure modules headlessly over
  eyeballing.
+- **THE SEA'S SHAPE AND ITS FOAM ARE ONE FUNCTION EACH, AND BOTH ARE GATED.**
+ Cresting is the Stokes second harmonic in `src/waves.js` — `sin(phi) - q cos(2 phi)`,
+ which keeps the surface a HEIGHT FIELD (Gerstner is rejected: horizontal
+ displacement would break the fragment shader's exact per-pixel normals and a
+ dozen CPU consumers). It costs no transcendental, because
+ `cos(2 phi) = 1 - 2 sin(phi)^2`. There is a MATHEMATICAL SAFETY LINE at q = 1/4,
+ where the trough dimples and the wave grows a second crest; `verify-crest.mjs`
+ holds the worst component at the band caps against it (0.139, 56% of the line)
+ and COUNTS the extrema through the emitted arithmetic, with q = 0.30 as a
+ counter-example. Whitecaps are `breaking(x, z, t)` — ONE closed-form field driving
+ both the shader's foam and the hull's breaker shove, replacing a height threshold
+ that could not tell a wave's face from its back. Its coverage is a CALCULATION
+ (Rayleigh envelope x a fixed phase duty) and lands on Monahan's photographed
+ ladder: field mean 0.07% in the doldrums, 0.97% in a working breeze, 3.0% in the
+ fifties, against a photographed 0.09 / 1.0 / 3.9. **The FIELD's mean and the
+ DRAWN white area are two different numbers** and the gate holds each on its own
+ ladder — the shading gain is 3, so the painted area (0.09 / 1.9 / 5.8%) is
+ several times the mean by construction.
+ **AND THE TIER LEVER MAY NOT REACH INSIDE THE SUMS.** `uWaveLOD` once lived in an
+ `if` inside `oWaveGradShort` and in an `oWaveWindLod` twin of the height, which
+ took the sub-20 m components away from the BREAK FIELD as well: measured, the
+ plain tier's foam was a 4x weaker field than the hull's with pointwise
+ divergences of 0.89, and the one assertion guarding it read `+ 1e9` for `+ 1e-9`.
+ Every emitted wave function is now LOD-independent (asserted numerically AND
+ structurally) and ocean.js applies the lever to the SHADING gradient at the call
+ site. Cost of the fix: plain 2.47 -> 2.76 ms at 3200x1800.
+ `scripts/live-crest.mjs` is the pixel half: crest-line orientation against the
+ wind heading at three strengths and two bearings (measured 0.1-5.9 deg out,
+ veering 61-66 deg when the wind veers 60), the break field's downwind bias in
+ situ, both tiers, and the burn.
 - **LIGHT ON THE WATER IS PHYSICS, AND PHYSICS HAS A DATUM.** The sun/moon glitter
  path lives in `src/glitter.js` (pure, emits its own GLSL, `verify-glitter.mjs`).
  Its roughness sits on Cox & Munk's 1954 sea-surface slope fit, re-parameterised
@@ -79,7 +109,10 @@ assets, browser-first, deterministic, verify-gated**. Public client:
  swell (screenshots to `media/whale-*.png`); `scripts/live-wind.mjs` measures the
  wind AND the sea at seven real places — doldrums, trades, horse latitudes, the
  Channel, the forties, the fifties — and proves they differ (shots plus
- `media/wind-by-latitude.json`).
+ `media/wind-by-latitude.json`); `scripts/live-crest.mjs` measures whether the WIND
+ IS READABLE off the water from main.js's own camera rig at six wind states, and
+ carries the frame-cost burn and both tiers' screenshots
+ (`media/crest-*.png`, `media/crest-readability-after.json`).
 - Dev: `npm run dev` (port 5173). `window.saltstead` is the live Game handle
   (`.ship`, `.cam`, `.aground`, `.coastDist`, `.dayStart`, `.ocean.uniforms`).
   Wardens teleport by SHIFT-CLICKING the world chart (M) — the far writ drops

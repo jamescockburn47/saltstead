@@ -11,7 +11,9 @@ import { buildCaptain } from './captain.js';
 import { isWarden, loadAuth, displayName } from './identity.js';
 import { FoamLayer } from './foamlayer.js';
 import { SkyFx } from './skyfx.js';
-import { newShipState, stepShip, shipAttitude, beaches, oarSpeed, poleOff } from './shipphysics.js';
+import {
+  newShipState, stepShip, shipAttitude, beaches, oarSpeed, poleOff, breakerEffect,
+} from './shipphysics.js';
 import { oarMode, oarPosts, oarLength, oarStroke, towOffset } from './oars.js';
 import { frameFor, clampToDeck, localToWorld, gunPosts, holdFor, crewPosts } from './shipframe.js';
 import { CABLE_DEPTH, canLetGo, snubSpeed, swingToWind } from './anchor.js';
@@ -74,7 +76,7 @@ import {
 import { windProfile, seaBandsFor, skyDressing, WIND_FLOOR } from './weather.js';
 import {
   setSeaBands, RIVER_STATE, setShoreSampler, easeWaveAxes, setWaveAxes,
-  waveAxisFor,
+  waveAxisFor, breaking, waveBandDir,
 } from './waves.js';
 import { CoastMapLayer } from './coastmaplayer.js';
 import { WAKE_MAX } from './wake.js';
@@ -252,6 +254,7 @@ class Game {
     this.shoalWater = false;
     this.geoClock = 0;
     this.aground = false;
+    this.brkHail = 0;   // cooldown on the helm watch hailing a breaker (Phase D)
     // other ships at sea ({x, z} world coords) — multiplayer peers and NPC
     // merchants land here; the encounter gait reads it every frame
     this.contacts = [];
@@ -3023,6 +3026,24 @@ class Game {
     this.shoreDecor.setWind(t, this.wind.from, this.wind.speed);
     this.refreshHands(); // the muster stands its stations (cheap when unchanged)
     this.refreshOarFx(); // sweeps ship and stow with the O key
+    // A BREAKER UNDER HER (Phase C/D): the break field the ocean shader whitens
+    // is the field that shoves her — waves.js breaking(), one function, both
+    // consumers. Not while she is held: aground, on a river, or riding to her
+    // anchor, the sea has no purchase to slew her with.
+    let brkRoll = 0;
+    if (!this.aground && !this.overLand && !this.anchorDown) {
+      const brk = breaking(this.ship.x, this.ship.z, t);
+      const wd = waveBandDir(1);
+      const ev = breakerEffect(this.ship, brk, wd[0], wd[1], this.spec, dt, gait);
+      brkRoll = ev.roll;
+      this.ship.x = wrapX(this.ship.x);
+      // the helm watch hails a bad one, sparingly — a breaker every few seconds
+      // is weather, and weather does not need announcing
+      if (brk > 0.62 && ev.beam > 0.7 && t > this.brkHail) {
+        this.brkHail = t + 28;
+        this.say('BREAKER ON THE BEAM — she broaches! Bring her head round to it!', 5);
+      }
+    }
     // inshore the hull rides the sea floor where it shoals past the keel
     const att = shipAttitude(this.ship, t, this.spec,
       (this.coastDist < 400 || this.overLand) ? groundAt : null);
@@ -3031,7 +3052,10 @@ class Game {
     // wind heel: lean away from the wind in proportion to drive — visual only
     const heel = -tackSign(this.ship.yaw, this.wind.from) * power * 0.14;
     this.shipGroup.position.set(this.ship.x, att.y, this.ship.z);
-    this.shipGroup.rotation.set(att.pitch, this.ship.yaw, att.roll + heel);
+    // the breaker's stagger rides beside the wind heel, for the reason
+    // shipphysics.breakerEffect gives: shipAttitude's samples ARE the sea and
+    // the motion gate measures them, so the dressing stays out of them
+    this.shipGroup.rotation.set(att.pitch, this.ship.yaw, att.roll + heel + brkRoll);
     this.setSail(this.ship.yaw, this.ship.trim, this.wind.from, power);
     this.setHelm(this.ship.rudder); // the wheel spins / the tiller sweeps
 

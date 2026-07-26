@@ -1,6 +1,103 @@
 # Sea v2 — the rebuild
 
-Status: **Phases A and B BUILT, 2026-07-26.** C, D and E remain spec.
+Status: **Phases A, B, C and D BUILT, 2026-07-26.** E (the wake) remains spec.
+
+## What Phase C + D measured
+
+The owner's ask: *"what about cresting and wind direction showing on the wave tops
+etc?"* — and, earlier, *"ideally they will react to the wind direction, to give a
+visual clue to the player of wind direction and speed."*
+
+The framing that shaped the work: **the wind was already in the height field and
+the player could not see it.** Phase B turned the wind-sea's spreading axis to
+follow the wind and the wind became a real latitude field, so Phase C is a shading
+and foam job that reveals data already present, not new simulation.
+
+| | before | after | gate |
+|---|---|---|---|
+| elevation skewness: river / 10 m/s / storm | 0 / 0 / 0 | 0.009 / 0.049 / 0.067 | `verify-crest` |
+| ...against second-order theory from the spectrum | — | 0.000 / 0.040 / 0.060 | `verify-crest` |
+| crest/trough curvature ratio, same three | 1.000 | 1.002 / 1.039 / 1.067 | `verify-crest` |
+| top-1% over bottom-1% elevation | 1.000 | 1.003 / 1.038 / 1.053 | `verify-crest` |
+| worst per-component q at the band caps | n/a | 0.139 (56% of the 1/4 dimple line) | `verify-crest` |
+| break FIELD mean: doldrums / 10 m/s / fifties / storm | height threshold, chop-gated | 0.067 / 0.973 / 3.02 / 9.64 % | `verify-crest` |
+| DRAWN white area, same four | — | 0.09 / 1.89 / 5.82 / 16.7 % | `verify-crest` |
+| Monahan & O'Muircheartaigh's photographed area | — | 0.09 / 1.0 / 3.9 % | the reference |
+| break field: downwind face over upwind | n/a | 1.44-2.24x | `verify-crest` + `live-crest` |
+| break-field correlation across the wind / along it, 8 m | n/a | 0.49 / 0.00 | `verify-crest` |
+| crest-line bearing vs the wind's demand, in PIXELS | n/a | 0.1-5.9 deg out | `live-crest` |
+| ...and when the wind veers 59.7 deg the crests veer | n/a | 61.0 and 65.6 deg | `live-crest` |
+| fragment cost, 3200x1800, fine (default camera) | 8.58 ms | 8.38 ms | measured |
+| fragment cost, 3200x1800, plain (default camera) | 2.47 ms | 2.76 ms | measured |
+| motion gate worst heave rate / accel | 6.21 m/s / 21.2 | 6.37 / 21.9 | `verify-seamotion` |
+
+**Not one motion threshold was widened**, and the judder proof still convicts
+(611 failures and exit 1 under the in-memory world-origin pivot). Grating isotropy
+unchanged: ANISO 0.81/0.74/0.74 against a 2.2 ceiling (before 0.84/0.69/0.60).
+
+### What the cold review changed, and it changed real things
+
+Two findings would have shipped as defects.
+
+**The plain tier was drawing a different sea from the one the hull felt.**
+`uWaveLOD` used to sit INSIDE the emitted sums — an `if` in `oWaveGradShort` and a
+whole `oWaveWindLod` twin of the height. The break field is built from the wind
+band's height AND its along-wind slope, so on `plain` BOTH of its inputs lost every
+component under 20 m: the very ones carrying the steepness the criterion is made
+of. Measured, working breeze: field mean 1.064% on fine against 0.262% on plain,
+with pointwise divergences to 0.89 — the same square metre fully breaking on one
+tier and dead flat on the other. And the one assertion that should have caught it
+read `+ 1e9` instead of `+ 1e-9`, so it was true of every finite pair of metres of
+water. The lever is now what its own uniform comment always said it was: a SHADING
+multiplier applied by `ocean.js` at the call site. Every emitted function is
+LOD-independent, asserted numerically AND structurally, and the shader's whole break
+path is reassembled from the emitted functions and held against `breaking()` at both
+settings of the lever (worst 0 — identical). It costs the plain tier 2.47 -> 2.76 ms
+at 3200x1800, +12%, which is the honest price of the claim.
+
+**The surf had become sheets of white instead of lines.** The shore set is two
+COHERENT trains at deliberately high steepness (rms local steepness 0.062 against
+the wind band's 0.041), so its first threshold pair (0.70/1.70 x rms) broke nearly
+every crest of both at once: 30% of the water white sixty metres off the sand, and
+visibly broad white bands across the whole inshore approach at the Palisadoes. The
+retired code had said exactly why that is wrong — "sheets of white read as artifact,
+a line of white reads as surf". 1.40/2.60 halves it and keeps a ladder: nothing on a
+calm belt's beach, 9% white in a working breeze, 27% in a storm.
+
+**And Phase D could not tell a head sea from a following one.** Both the way loss
+and the slew went as |sin(relative angle)|, which is symmetric fore and aft, so the
+classic broach — a breaking sea on the quarter — cost nothing, and the gate's own
+"head to it" case was a following sea mislabelled. It is now one term:
+`d(yaw)/dt = +yawRate sin(rel)`, which has an UNSTABLE fixed point running with the
+sea and a STABLE one head to it.
+
+### Known, and stated rather than smoothed over
+
+The gale's windrows are built and gated structurally (wind-frame sampling,
+anisotropic scales, a chop gate re-anchored from 1.25-1.75 to 1.10-1.50 because chop
+only reaches 1.75 at 22.7 m/s and a real 16 m/s gale engaged the old one 20%) — but
+the PIXEL signal is small: the white water's along/across correlation ratio rises
+from 0.509 in a breeze to 0.568 in a gale, and only one of the two bearings
+separates cleanly. Third and weakest of the three cues.
+
+The FOAM'S RENDERED BRIGHTNESS has no trustworthy instrument yet and is reported
+rather than gated. Two measurements disagree: binned by break strength at
+nearest-pixel sampling, luminance runs 122 counts unbroken, 130-132 through the
+middle of the field's range and 117 in the STRONGEST bin; the bilinear statistic
+pooled over six frames reads no lift at all. What the disagreement does establish is
+a real defect for a follow-up — the hardest-breaking water rendering DARKER than
+unbroken water is geometry, not noise: the steepest forward face is the facet tilted
+furthest from the sky and foam keeps only 45% of the sky reflection
+(`GLITTER.foamSkyKeep`). The whitest water in a gale ought to be the breaking crest.
+
+`live-glitter.mjs` is red, and it was red before this change (4 failing clauses at
+HEAD: the high sun twice and the moon twice — the deficiency
+`2026-07-26-glitter-followup.md` was written to address). This change moves it:
+the low sun's sunward contrast 1.509 -> 1.431, its reach 272 -> 204 m and its road
+coverage 0.444 -> 0.393 (a new failing clause), the high sun 1.656 -> 1.741 and the
+moon's corridor from failing to passing. The mechanism is not subtle and not a bug:
+whitecaps whiten the water the corridor is measured AGAINST, so a contrast-ratio
+metric necessarily falls. `verify-glitter` is green.
 
 > **CORRECTION, 2026-07-26 — the grating was never in the waves.** Fault 2 below
 > blames the east-west banding on the wave table's pairwise beats, on the strength
@@ -191,7 +288,7 @@ water, fetch reaching full strength sooner, sheltering left to the shore
 field). Deliverable: the player reads wind direction and strength off the
 water.
 
-### Phase C — cresting — next
+### Phase C — cresting — **BUILT**
 Stokes second-harmonic crest sharpening (sharp crests, flat troughs, still a
 height field — Gerstner is rejected: horizontal displacement breaks the
 height-field property the per-pixel normals and all twelve CPU consumers
@@ -201,10 +298,28 @@ the shader's foam and the ship's motion. Foam leads the crest down the
 forward face, with an analytic trailing-decay window so it lingers without
 state.
 
-### Phase D — the ship in a breaking sea
+### Phase D — the ship in a breaking sea — **BUILT**
 Crest events: a shove along the wave direction and a roll kick when a breaker
 lands on the beam; no capsize, no death — a broach costs way and heading. The
 helm watch can hail it.
+
+Built as `shipphysics.breakerEffect`. Measured, two seconds of a FULL breaker on a
+sloop that started at 6.80 m/s: beam-on she is down to **2.40 m/s** with **32.5
+degrees of heading gone** — a real broach — and staggering 10.7 degrees; head to it
+she keeps **6.80 m/s** and **exactly zero** degrees of heading, and does not
+stagger at all. So heading into a breaking sea is safe and dramatic and taking it
+on the beam in a gale makes the player want to bear away, which was the ask. The
+worst stagger any hull can take is 12.6 degrees by construction; a galleon takes
+0.45 of what a sloop does, through the same steadiness term `shipAttitude` uses.
+The way loss is an exact exponential, so a second of the same breaker costs the
+same at 20 Hz as at 144 (0.05% apart, which is the coupling between the slew and
+the loss and nothing else).
+
+The roll is applied beside the wind heel in main.js and deliberately NOT inside
+`shipAttitude`, because `shipAttitude`'s four samples ARE the sea and
+`verify-seamotion`'s thresholds measure exactly that surface — dressing put in
+there would be measured as if the water had done it, and verify-crest asserts it
+is not there.
 
 ### Phase E — the wake
 Not sea v2 proper, but the measured dominant visual artifact at speed: the

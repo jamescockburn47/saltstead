@@ -29,8 +29,13 @@
 //    water mirrors the sky.
 //  - crests pass light: a subsurface-scatter tint lifts high water toward
 //    green-glass when you look through a crest toward the light.
-//  - froth: whitecaps ride the crests when the sea state is up (fbm-patchy,
-//    never a uniform dusting), and the wake's churn mask lays a road astern
+//  - froth: whitecaps ride the water that is actually BREAKING — waves.js's
+//    breaking() field (Phase C), the same function the hull is shoved by, so the
+//    foam leads each crest down its downwind face and lingers behind it, and in
+//    a gale draws out into windrows along the wind. It replaced a height
+//    threshold that dusted the backs of waves as readily as their faces, which
+//    is why the sea used to tell the player nothing about the wind. Over that
+//    the wake's churn mask lays a road astern
 //    that widens and fades. Foam is ROUGH WATER, not paint: it keeps part of
 //    its specular and part of the sky, takes a broad sun-tracking sheen from
 //    the glitter lobe, and carries a forward-scatter term so the Kelvin V
@@ -40,8 +45,9 @@
 
 import * as THREE from 'three';
 import {
-  glslWaves, glslShore, NWAVE, packWaveUniforms, setWaveOrigin,
-  MAX_SWELL_HEIGHT, MAX_CHOP_HEIGHT, MAX_SHORE_HEIGHT, SHORE_SHADE,
+  glslWaves, glslShore, glslBreak, NWAVE, packWaveUniforms, setWaveOrigin,
+  MAX_SWELL_HEIGHT, MAX_CHOP_HEIGHT, SHORE_SHADE,
+  MAX_HARM_SWELL, MAX_HARM_CHOP, waveBandDir,
   SEA_STATE_MAX, SEA_SWELL_MAX,
 } from './waves.js';
 import { WAKEMAP_METRES } from './wakemaplayer.js';
@@ -92,6 +98,15 @@ export class Ocean {
       // is what keeps a float32 exact where v1's world-absolute k·p reached
       // 1e5 radians. Repacked every frame in update().
       uWave: { value: packWaveUniforms(0) },
+      // the per-component STOKES HARMONIC coefficient (Phase C). A constant of
+      // the spectrum, written by the same packWaveUniforms call as uWave so a
+      // stale or forked harmonic table cannot happen; verify-crest recomputes it
+      // from uWave itself and holds the two together.
+      uWaveQ: { value: new Float32Array(NWAVE) },
+      // the wind-sea band's unit TRAVEL direction (waves.js waveBandDir). The
+      // break field resolves its slope along this and the gale's foam streaks
+      // lie down it — which is how the player reads the wind off the water.
+      uWindDir: { value: new THREE.Vector2(1, 0) },
       // the per-tier component lever: 1 keeps the whole spectrum in the
       // FRAGMENT (shading), 0 drops the sub-20 m components there. The vertex
       // displacement — the surface the hull is promised — always runs the full
@@ -168,7 +183,7 @@ vec2 oCoastGradW(vec2 p) {
   return vec2(
     texture2D(uCoastMap, uv + vec2(t, 0.0)).r - texture2D(uCoastMap, uv - vec2(t, 0.0)).r,
     texture2D(uCoastMap, uv + vec2(0.0, t)).r - texture2D(uCoastMap, uv - vec2(0.0, t)).r) / 200.0;
-}` + glslShore() + glslWaves();
+}` + glslShore() + glslWaves() + glslBreak();
       sh.vertexShader = 'uniform float uTime;\nuniform vec2 uOrigin;\n'
         + 'uniform float uSwellL;\nuniform float uSwellS;\n'
         + 'uniform sampler2D uWakeMap;\nuniform vec2 uWakeC;\n'
@@ -191,8 +206,11 @@ vec2 oCoastGradW(vec2 p) {
             + '  float wSd = oCoastSd(vec2(wx, wz));\n'
             + '  float wGate = oShoreGate(length(oCoastGradW(vec2(wx, wz))));\n'
             // the two populations scaled apart, exactly as waves.js scales
-            // them (the shore set is chop's kin — it rides uSwellS)
-            + '  transformed.y += oShoreAtten(wSd) * (uSwellL * oWaveSwell(wLP) + uSwellS * oWaveWind(wLP))\n'
+            // them (the shore set is chop's kin — it rides uSwellS). oWaveMix
+            // is the band composer: g * linear - g^2 * harmonic, the Stokes
+            // second harmonic's own a^2 carrying the state's square (Phase C).
+            + '  transformed.y += oShoreAtten(wSd) * (oWaveMix(oWaveSwell(wLP), uSwellL)\n'
+            + '      + oWaveMix(oWaveWind(wLP), uSwellS))\n'
             + '    + uSwellS * oShoreSum(wSd) * wGate + wWakeH;\n'
             + '  vWPos = vec3(wx, transformed.y, wz);')
           .replace('#include <project_vertex>',
@@ -205,10 +223,14 @@ vec2 oCoastGradW(vec2 p) {
         + 'uniform float uFresnel;\nuniform vec3 uHor;\nuniform vec3 uZen;\nuniform float uDetailAmp;\n'
         + 'uniform sampler2D uWakeMap;\nuniform vec2 uWakeC;\n'
         + 'uniform sampler2D uCoastMap;\nuniform vec2 uCoastC;\n'
+        + 'uniform vec2 uWindDir;\n'
         + 'varying vec3 vWPos;\nvarying float vVDist;\n'
         + `const float O_MAXHL = ${MAX_SWELL_HEIGHT.toFixed(4)};\n`
         + `const float O_MAXHS = ${MAX_CHOP_HEIGHT.toFixed(4)};\n`
-        + `const float O_MAXSH = ${MAX_SHORE_HEIGHT.toFixed(4)};\n`
+        // the harmonic's own amplitude sums, so the crest measure below stays a
+        // measure of THIS surface and not of the linear one it replaced
+        + `const float O_MAXQL = ${MAX_HARM_SWELL.toFixed(4)};\n`
+        + `const float O_MAXQS = ${MAX_HARM_CHOP.toFixed(4)};\n`
         + O_FBM + glslGlitter() + wakeSample + '\n' + coastSample + '\n'
         + sh.fragmentShader
           .replace('#include <color_fragment>', `#include <color_fragment>
@@ -231,15 +253,20 @@ vec2 oCoastGradW(vec2 p) {
   // shore field folded in exactly as the CPU folds it (waves.js waveHeight)
   float oSd = oCoastSd(vWPos.xz);
   float oSAtt = oShoreAtten(oSd);
-  float oSEnv = oShoreEnv(oSd);
   vec2 oCG = oCoastGrad(vWPos.xz);
   float oCLen = length(oCG);
   // the strait gate: no shore set where the wide-baseline gradient sags —
   // the middle of a channel is SHELTERED water, not a surf zone
   float oCGate = oShoreGate(length(oCoastGradW(vWPos.xz)));
   vec2 oCDir = oCLen > 1e-4 ? oCG / oCLen : vec2(0.0);
-  float oH = oSAtt * (uSwellL * oWaveSwell(oLP) + uSwellS * oWaveWindLod(oLP))
-    + uSwellS * oShoreSum(oSd) * oCGate;
+  // the two open bands, each as (linear sum, Stokes harmonic sum), composed by
+  // oWaveMix — the SAME arithmetic waves.js waveHeight uses, so the drawn crest
+  // is the felt one. The wind band is kept separately because the break field
+  // below is the LOCAL SEA breaking and nothing else.
+  float oHsw = oSAtt * oWaveMix(oWaveSwell(oLP), uSwellL);
+  float oHwd = oSAtt * oWaveMix(oWaveWind(oLP), uSwellS);
+  float oShoreH = uSwellS * oShoreSum(oSd) * oCGate;
+  float oH = oHsw + oHwd + oShoreH;
   // the gradient by WAVELENGTH BAND (waves.js GRAD_BANDS): long swell shades
   // to the horizon; mid sea fades out where its wavelength is pixels; short
   // chop fades sooner AND comes in cat's-paw patches — a 5 m ripple drawn as
@@ -249,58 +276,104 @@ vec2 oCoastGradW(vec2 p) {
   // Each band also carries its OWN sea state: the swell rollers ride uSwellL,
   // the wind-sea rides uSwellS (GRAD_BANDS.long === SWELL_LEN, so the LOD
   // long band IS the swell population).
-  vec2 oWGl = oWaveGradLong(oLP);
-  vec2 oWGm = oWaveGradMid(oLP);
-  vec2 oWGs = oWaveGradShort(oLP);
+  vec2 oWGl = oWaveGradMix(oWaveGradLong(oLP), uSwellL);
+  vec2 oWGm = oWaveGradMix(oWaveGradMid(oLP), uSwellS);
+  vec2 oWGs = oWaveGradMix(oWaveGradShort(oLP), uSwellS);
   float oChop = uDetailAmp > 0.001
     ? 0.35 + 0.65 * oFbm(vWPos.xz * 0.021 + uTime * vec2(0.013, 0.009))
     : 0.7;
   float oFadeS = 1.0 - smoothstep(60.0, 240.0, vVDist);
   float oFadeM = 1.0 - smoothstep(240.0, 700.0, vVDist);
-  vec2 oWGopen = uSwellL * oWGl
-    + uSwellS * (oWGm * mix(0.55, 1.0, oChop) * oFadeM + oWGs * oChop * oFadeS);
+  // THE TIER LEVER LIVES HERE NOW, and only here. uWaveLOD used to sit inside the
+  // emitted sums, which took the sub-20 m components away from the BREAK FIELD too
+  // and made the plain tier's foam a different field from the one the hull is
+  // shoved by (see waves.js LOD_IS_SHADING_ONLY). As a multiplier on the SHADING
+  // gradient it does exactly the job its comment claims — dropping a ripple that
+  // is sub-pixel past 60 m out of the normals — and nothing else.
+  float oLodS = uWaveLOD > 0.5 ? 1.0 : 0.0;
+  vec2 oWGopen = oWGl + oWGm * mix(0.55, 1.0, oChop) * oFadeM
+    + oWGs * oChop * oFadeS * oLodS;
   vec2 oWG = oSAtt * oWGopen
     + uSwellS * oShoreGradMag(oSd) * ${SHORE_SHADE.toFixed(2)} * oCGate * oCDir + oWkG;
   // crest measure: -1 trough -> +1 highest possible crest at this sea state
-  float oCrest = clamp(0.5 + 0.5 * oH / max(0.2, uSwellL * O_MAXHL + uSwellS * O_MAXHS), 0.0, 1.0);
-  // froth. Whitecaps only when the wind has the sea up (weather.js drives
-  // uSwellS): fbm patches pick WHICH crests break — never a uniform dusting.
-  // froth on EVERY tier: the wake's churn is a texture read, so even Plain
-  // keeps her white road (flat-toned there). Fine adds the whitecaps and
-  // the streaky fbm lace.
+  float oCrest = clamp(0.5 + 0.5 * oH / max(0.2,
+    uSwellL * O_MAXHL + uSwellS * O_MAXHS
+    + uSwellL * uSwellL * O_MAXQL + uSwellS * uSwellS * O_MAXQS), 0.0, 1.0);
+  // ---- THE BREAK FIELD (waves.js breaking) --------------------------------
+  // ONE function, both consumers: this mask and the hull's breaker shove. The wind
+  // band's gradient goes in UNFADED and UNGATED BY THE TIER — the shading fades and
+  // the LOD lever exist to stop a 6 m ripple aliasing in the normals at 300 m, and
+  // the CPU twin has neither, so feeding either into the criterion would put the
+  // drawn foam on a different sea from the one the ship is shoved by. It did, on
+  // plain, until a cold review measured it (waves.js LOD_IS_SHADING_ONLY).
+  float oGsW = dot(oWGm + oWGs, uWindDir);
+  float oBrkOpen = oBreakOpen(oHwd, oGsW * oSAtt);
+  float oBrkShore = oBreakShore(oShoreH,
+    uSwellS * oShoreGradMag(oSd) * oCGate, oSd);
+  float oBrk = max(oBrkOpen, oBrkShore);
+  // froth on EVERY tier: the wake's churn is a texture read and the break field
+  // is arithmetic, so even Plain keeps her white road AND her whitecaps. Fine
+  // adds the patchiness, the windrows and the streaky fbm lace.
   float oFoam = 0.0;
   {
-    float oWc = 0.0;
+    // WHERE THE WATER IS ACTUALLY BREAKING, not where it happens to stand high.
+    // What was here until Phase C: smoothstep(0.72, 0.95, oCrest) — a HEIGHT
+    // threshold on the normalised surface, gated on chop > 1.05 and diced by two
+    // fbm lotteries. It could not tell a crest's face from its back, so it
+    // dusted both equally and the sea gave the player no clue which way the wind
+    // blew. oBrk asks the two questions a sailor's eye asks instead (is this
+    // water steep enough, and where on the wave am I) and answers them from the
+    // wind sea's own local envelope. The chop gate is gone with it: the
+    // steepness criterion IS the wind gate, and it is a smooth one — verify-crest
+    // measures coverage 0.059% in the doldrums, 1.018% in a working breeze and
+    // 3.222% in the fifties, against Monahan's photographed 0.09 / 1.0 / 3.9%.
+    // the criterion turned into an opacity (waves.js BREAK.foamGain): a field
+    // that fires at a quarter draws a seventh of a whitecap, which the live probe
+    // measured as no whitecap at all. SHADING ONLY — the ship reads the ungained
+    // field, so her motion and the gated coverage are untouched by this.
+    float oWc = oBreakFoam(oBrk);
     float oRag = 0.72;
     if (uDetailAmp > 0.001) {
-      // whitecaps are the WIND-SEA breaking — the chop state is the wind
-      // proxy, and far-travelled swell under light air must not foam
-      float wcGate = smoothstep(1.05, 1.75, uSwellS);
-      // WHICH crests break: two independent fbm masks at well-separated
-      // scales. One mask at one scale still let every crest of a wave row
-      // break inside a patch — rows of identical blobs marching in step
-      // (the storm rings, 2026-07-24). The broad mask breaks the rows: a
-      // crest must win both lotteries, and the winners scatter.
-      float wcPatch = smoothstep(0.50, 0.80, oFbm(vWPos.xz * 0.05 + uTime * 0.02))
-        * smoothstep(0.33, 0.58, oFbm(vWPos.xz * 0.013 - uTime * 0.008 + 7.3));
-      oWc = smoothstep(0.72, 0.95, oCrest) * wcGate * wcPatch;
+      // the wind is not even, so neither is the breaking. ONE broad mask now,
+      // and it MODULATES rather than gates: the two-lottery rig existed because
+      // a height threshold breaks every crest of a wave row in step (the storm
+      // rings, 2026-07-24), and the break field already scatters the winners by
+      // the spectrum's own envelope. It is also DELIBERATELY GENTLE — 0.65-1.0
+      // where the first cut used 0.45-1.0 — because the masks multiply, and three
+      // of them at a median of 0.75 each turn the field's decision into half a
+      // whitecap. Measured before softening: water in the STRONGEST break bin
+      // rendered DARKER than unbroken water (116 against 122 luminance counts),
+      // because a steep forward face also tilts away from the sky. A criterion
+      // that has decided the water is breaking should not then be talked out of it.
+      oWc *= 0.65 + 0.35 * smoothstep(0.30, 0.62,
+        oFbm(vWPos.xz * 0.013 - uTime * 0.008 + 7.3));
+      // WINDROWS — the third and last of the sailor's cues. In a gale the foam
+      // stops being patches and draws out into streaks ALONG the wind: the noise
+      // is sampled in the WIND's own frame, 50 m of period down the wind against
+      // 3.6 m across it. Anchored to the wind and not to a world axis, so it can
+      // never become a grating (live-grating measures world-axis anisotropy).
+      // THE GATE IS ANCHORED TO WINDS THE GAME ACTUALLY BLOWS. It was
+      // smoothstep(1.25, 1.75, chop), and chop is 0.5 + 0.055 U — so full strength
+      // wanted 22.7 m/s and a real gale of 16 engaged it 20%, which is why the
+      // live probe could not find the streaks. 1.10 -> 1.50 puts the fifties'
+      // 15 m/s at 59% and a 16 m/s gale at 78%, and leaves a working breeze
+      // (chop 1.05) at exactly nothing.
+      float oGale = smoothstep(1.10, 1.50, uSwellS);
+      if (oGale > 0.001) {
+        vec2 oWr = vec2(dot(vWPos.xz, uWindDir),
+          dot(vWPos.xz, vec2(-uWindDir.y, uWindDir.x)));
+        float oStk = oFbm(vec2(oWr.x * 0.02, oWr.y * 0.28) + uTime * vec2(0.006, 0.0));
+        oWc *= mix(1.0, 0.30 + 1.40 * oStk, oGale);
+      }
       // churned texture inside any foam: streaky lace, alive — high-contrast
       // fine fbm so heavy churn still reads as WATER torn white, not paint
       oRag = 0.40 + 0.60 * oFbm(vWPos.xz * 1.9 + uTime * vec2(0.11, 0.07));
     }
-    // breakers: the shore set's own crests whiten as they close the beach —
-    // foam lines that lie parallel to the shore because the crests do.
-    // Confined to the SURF ZONE (the last ~140 m): the crest measure is
-    // normalized, and unconfined it painted faint stripes 400 m out.
-    // thin LINES on the highest crests only — sheets of white read as
-    // artifact, a line of white reads as surf
-    float oBrk = 0.0;
-    if (oSEnv > 0.02) {
-      float oSC = clamp(0.5 + 0.5 * oShoreSum(oSd) / max(0.05, oSEnv * O_MAXSH), 0.0, 1.0);
-      float oSurf = 1.0 - smoothstep(90.0, 200.0, -oSd);
-      oBrk = smoothstep(0.84, 0.97, oSC) * smoothstep(0.06, 0.5, oSEnv) * oSurf * oCGate;
-    }
-    oFoam = clamp((oWkHF.y * 0.85 + oWc + oBrk * 0.5) * oRag, 0.0, 1.0);
+    // the CHURN takes the rag whole — that texture is what makes the Kelvin V read
+    // as water torn white rather than paint. A WHITECAP takes it lightly: it is
+    // already a thin band on a crest, and multiplying it by a mask that reaches
+    // 0.40 is how a breaker ends up dimmer than the sea beside it.
+    oFoam = clamp(oWkHF.y * 0.85 * oRag + oWc * (0.72 + 0.28 * oRag), 0.0, 1.0);
   }
   // crests pass light: looking through high water toward the sun finds
   // green glass (cheap subsurface scatter — reads huge, costs nothing)
@@ -422,7 +495,7 @@ vec2 oCoastGradW(vec2 p) {
       + ${(1 - GLITTER.foamElevFloor).toFixed(3)} * max(uSunDirW.y, 0.0));
 #include <opaque_fragment>`);
     };
-    mat.customProgramCacheKey = () => `saltstead-ocean-spectrum-${NWAVE}-glitter2`;
+    mat.customProgramCacheKey = () => `saltstead-ocean-spectrum-${NWAVE}-glitter2-crest1`;
     this.step = SIZE / SEG;
     this.glitterScale = 1; // the tier lever: parked at 0 under Plain (invariant 5)
     this._gc = new THREE.Color();  // scratch for the corridor's hue lean
@@ -474,7 +547,14 @@ vec2 oCoastGradW(vec2 p) {
     // must come AFTER the origin, or the GPU would draw last frame's phases
     // against this frame's frame.
     setWaveOrigin(sx, sz);
-    packWaveUniforms(t, this.uniforms.uWave.value);
+    packWaveUniforms(t, this.uniforms.uWave.value, this.uniforms.uWaveQ.value);
+    // the wind sea's own travel direction — the axis the break field resolves
+    // its slope along and the gale's foam streaks lie down. Read from waves.js
+    // every frame so a wind shift moves the drawn foam and the felt breaker
+    // together (the axes ease over ~55 s; main.js has already eased them by the
+    // time this runs).
+    const wd = waveBandDir(1);
+    this.uniforms.uWindDir.value.set(wd[0], wd[1]);
     // the tier lever: Plain drops the sub-20 m components from the FRAGMENT's
     // shading loops (they are sub-pixel past 60 m and already fbm-patched and
     // distance-faded there). The vertex displacement keeps the full spectrum.

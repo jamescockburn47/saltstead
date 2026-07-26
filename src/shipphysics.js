@@ -147,6 +147,87 @@ export function stepShip(s, wind, dt, spec = SLOOP, gait = 1, furl = false, oarD
   return s;
 }
 
+// ================= A BREAKER UNDER HER (Phase D, 2026-07-26) =================
+// The field the shader whitens is the field that shoves her: waves.js
+// breaking(). One function decides where the sea is breaking, so what the eye
+// sees and what the hull feels can never be two different seas — the parity
+// doctrine, carried past the waterline.
+//
+// NOBODY DIES IN SALTSTEAD. There is no capsize here, no knockdown, no hull
+// damage: a breaker costs WAY and HEADING and nothing else. That is not a
+// softening, it is the drama — head into a breaking sea and she takes the shove
+// on the bow and holds her course, which is exactly what the seamanship says to
+// do; take the same sea on the beam in a gale and she is slewed toward the
+// breaker's own course, stops half dead and staggers. The player learns to point
+// her the right way because the sea rewards it, not because a message says so.
+//
+// THE ROLL IS HANDED BACK, NOT FOLDED IN. shipAttitude's four samples ARE the
+// sea, and verify-seamotion's roll-rate and step-shape thresholds measure exactly
+// that surface; a kick added inside it would be measured as if the water had
+// done it. So breakerEffect returns the roll and main.js applies it beside the
+// wind heel — which is where the other visual-only lean already lives.
+// HEAD, BEAM AND FOLLOWING ARE THREE DIFFERENT SEAS, and the first cut of this did
+// not know it: the way loss and the slew both went as |sin(relative angle)|, which
+// is symmetric fore and aft, so a FOLLOWING breaking sea — the classic broach, the
+// one that puts a stern-quarter wave under her and takes the rudder's bite away —
+// cost exactly nothing. The gate's own "head to it" case was a following sea
+// mislabelled, and the claim that heading into a breaking sea was rewarded rode on
+// it. A cold review caught both.
+//
+// The fix is one term and it IS the seamanship. Let rel be her heading relative to
+// the breaker's own course: 0 running with it, +-pi head to it. Then
+//     d(yaw)/dt = +yawRate * sin(rel)
+// has an UNSTABLE fixed point at rel = 0 and a STABLE one at rel = pi. A following
+// sea therefore diverges — she starts to slew, the slew grows, she broaches and ends
+// up head to the sea — while head to it she is dead stable and holds her course
+// exactly. Nobody had to write a rule; the sign of one sine does it.
+export const BREAKER = {
+  brkFloor: 0.12, // below this the crest is spilling, not breaking: nothing doing
+  surge: 1.30,    // m/s of set along the breaker's own course at full strength
+  wayLoss: 0.55,  // e-folding rate of her way under a full BEAM breaker, per second
+  // a breaker on the BOW checks her too — it is a wall of water either way — but it
+  // does not steal her heading. That is the whole of "safe and dramatic": she stops
+  // and pitches, and stays pointing where the helm put her.
+  headCheck: 0.55,
+  yawRate: 0.30,  // rad/s of slew at the beam, and the broach's growth rate
+  roll: 0.22,     // rad of stagger a full beam breaker throws in (12.6 deg)
+};
+
+// brk: waves.js breaking() under the hull, in [0, 1]. dirx/dirz: the wind sea's
+// unit travel direction (waves.js waveBandDir). gait scales the SET, exactly as
+// stepShip scales the current's, so a breaker feels the same inshore and out.
+// Mutates s (way and heading) and returns { surge, beam, roll, way }.
+export function breakerEffect(s, brk, dirx, dirz, spec = SLOOP, dt = 1 / 30, gait = 1) {
+  const f = BREAKER.brkFloor;
+  const b = Math.max(0, Math.min(1, (Math.min(1, brk) - f) / (1 - f)));
+  if (b <= 0) return { surge: 0, beam: 0, roll: 0, way: 1 };
+  // a light hull is thrown about and a galleon shrugs — the SAME steadiness
+  // shipAttitude uses, so one hull answers one way to both
+  const stiff = Math.min(1, (9 / spec.length) ** 0.7);
+  // WHERE THE SEA IS RELATIVE TO HER: rel = 0 running with it, +-pi head to it,
+  // +-pi/2 on the beam. sin(rel) is the beam-ness and its sign is which way she is
+  // thrown; cos(rel) tells a following sea from a head one.
+  const rel = wrapAngle(s.yaw - Math.atan2(dirx, dirz));
+  const sr = Math.sin(rel), cr = Math.cos(rel);
+  const beam = Math.abs(sr);
+  const v = BREAKER.surge * b * stiff;
+  s.x += dirx * v * dt * gait;
+  s.z += dirz * v * dt * gait;
+  // HER WAY: a beam breaker is a wall, a bow breaker is an impact, and a following
+  // one does not check her at all — she surfs on it. The EXACT exponential, not
+  // (1 - k dt): stepShip uses the exponential form for the same reason, because a
+  // linear decay per frame makes the outcome depend on the frame rate and this game
+  // runs anywhere from 20 to 144 Hz.
+  const check = beam + BREAKER.headCheck * Math.max(0, -cr);
+  const way = Math.exp(-BREAKER.wayLoss * b * check * stiff * dt);
+  s.speed *= way;
+  // HER HEADING: see the BREAKER comment. +sin(rel) is unstable at rel = 0 (the
+  // following sea broaches her) and stable at rel = pi (head to it she holds).
+  // Bounded by yawRate * dt at the beam, and smooth — no clamp, so no snap.
+  s.yaw += BREAKER.yawRate * b * stiff * sr * dt;
+  return { surge: v, beam, roll: -sr * BREAKER.roll * b * stiff, way, rel };
+}
+
 // Buoyancy attitude from four hull sample points on the live wave field.
 // Returns { y, pitch, roll } — pitch/roll in radians, y is hull-centre height.
 // ground (optional): (x, z) => terrain height. Wherever the sea floor rises

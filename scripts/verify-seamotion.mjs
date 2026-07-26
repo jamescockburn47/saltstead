@@ -76,11 +76,16 @@ const pct = (a, p) => {
 // brackets. THE THINNEST MARGIN IS NOW vY AT 1.4x — a deliberate choice: 9.0 m/s
 // of heave is absurd for a ship whatever the sea, so the bound stays where it
 // is and serves as a tripwire on any further growth.
+// PHASE C (cresting, 2026-07-26) DID NOT MOVE THEM EITHER, and the numbers below
+// are re-measured against it rather than left to rot: the Stokes second harmonic
+// steepens every flank it sharpens, so this was the gate most likely to convict it.
+// Each line now carries the CURRENT worst and the headroom it leaves; the sea v2
+// figures it replaced are in brackets. The thinnest margin is still heave RATE.
 const LIM = {
-  vY: 9.0,     // heave rate, m/s     — worst measured 6.21 (v1: 4.08):        1.4x
-  vP: 1.6,     // pitch rate, rad/s   — worst measured 0.94 (v1: 0.67):        1.7x
-  vR: 2.2,     // roll rate, rad/s    — worst measured 0.99 (v1: 0.97):        2.2x
-  aY: 60,      // heave accel, m/s^2  — worst measured 21.2 (v1: 26.7):        2.8x
+  vY: 9.0,     // heave rate, m/s     — worst measured 6.37 (v2: 6.21):        1.4x
+  vP: 1.6,     // pitch rate, rad/s   — worst measured 1.04 (v2: 0.94):        1.5x
+  vR: 2.2,     // roll rate, rad/s    — worst measured 1.05 (v2: 0.99):        2.1x
+  aY: 60,      // heave accel, m/s^2  — worst measured 21.9 (v2: 21.2):        2.7x
   // STEP FRACTION: one frame's change as a share of the whole run's range.
   // Dimensionless, so it is blind to sea state and catches the judder that a
   // small-amplitude sea would hide from the absolute bounds. A signal resolved
@@ -88,13 +93,13 @@ const LIM = {
   // NEVER WIDEN THESE TWO, OR THE RATIOS BELOW: they are the shape metrics, and
   // they are what convicts judder at any amplitude. A bigger sea is not a
   // licence to loosen them — sea v2 did not need to.
-  stepY: 0.20, // worst measured 0.122 (v1: 0.074):                            1.6x
-  stepA: 0.25, // pitch/roll — worst measured 0.163 (v1: 0.101):               1.5x
+  stepY: 0.20, // worst measured 0.130 (v2: 0.122, v1: 0.074):                 1.5x
+  stepA: 0.25, // pitch/roll — worst of the three is the 0.130 above:          1.9x
   // SPIKINESS: a discontinuity in the field is a single frame unlike its
   // neighbours. Two views of it, because they fail differently: max/median
   // convicts a lone glitch loudly; max/p95 is the tighter, better-behaved one.
-  ratio: 18,   // max|d| / median|d| — worst measured 12.3 (v1: 8.39):         1.5x
-  spike: 5.0,  // max|d| / p95|d|    — worst measured 2.98 (v1: 2.29):         1.7x
+  ratio: 18,   // max|d| / median|d| — worst measured 13.2 (v2: 12.3):         1.4x
+  spike: 5.0,  // max|d| / p95|d|    — worst measured 3.00 (v2: 2.98):         1.7x
 };
 
 // one hull, one sea, one transit — the metrics that say whether she rode it

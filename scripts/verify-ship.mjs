@@ -6,11 +6,14 @@ import {
   BRIG,
 } from '../src/shipphysics.js';
 import { sailPower, speedTarget, optimalTrim, wrapAngle } from '../src/sailing.js';
-import { MAX_WAVE_HEIGHT } from '../src/waves.js';
+import { MAX_WAVE_HEIGHT, MAX_HARM_SWELL, MAX_HARM_CHOP } from '../src/waves.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
 const DT = 1 / 30;
+// the surface's true envelope at bands (1, 1): the linear amplitude sum PLUS the
+// Stokes harmonic's own (see the buoyancy clause below)
+const WAVE_ENVELOPE = MAX_WAVE_HEIGHT + MAX_HARM_SWELL + MAX_HARM_CHOP;
 
 // beam reach, perfect trim: speed converges to the model's target
 {
@@ -109,7 +112,13 @@ const DT = 1 / 30;
     s.x = t * 13; s.z = -t * 7; s.yaw = t * 0.1;
     const a = shipAttitude(s, t);
     maxP = Math.max(maxP, Math.abs(a.pitch)); maxR = Math.max(maxR, Math.abs(a.roll));
-    ok(a.y >= -SLOOP.draft - MAX_WAVE_HEIGHT - 1e-9 && a.y <= -SLOOP.draft + MAX_WAVE_HEIGHT + 1e-9,
+    // THE ENVELOPE GREW A HARMONIC (Phase C, 2026-07-26). The wave sum is no
+    // longer a pure sum of sines: the Stokes second harmonic subtracts
+    // g^2 * SUM c cos(2 phi), and at a fully-aligned crest that ADDS to the
+    // height — so the linear amplitude sum stopped being an upper bound on the
+    // day cresting landed. This clause is a BOUND, not a threshold, and it is
+    // widened by the harmonic's own amplitude sum because the maths says so.
+    ok(a.y >= -SLOOP.draft - WAVE_ENVELOPE - 1e-9 && a.y <= -SLOOP.draft + WAVE_ENVELOPE + 1e-9,
       `hull height inside wave envelope at t=${t.toFixed(1)}`);
     if (prevY !== null && Math.abs(a.y - prevY) > 1e-4) sawMotion = true;
     prevY = a.y;

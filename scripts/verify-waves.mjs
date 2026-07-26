@@ -27,12 +27,14 @@
 // a grid; a dense incoherent one reads as sea).
 import {
   COMPONENTS, NWAVE, NSWELL, NMID, SWELL_LEN, GRAD_BANDS, SPECTRUM,
-  waveHeight, waveGradient, waveBandHeight, MAX_WAVE_HEIGHT,
+  waveHeight, waveGradient, waveBandHeight, waveBandGrad, MAX_WAVE_HEIGHT,
   MAX_SWELL_HEIGHT, MAX_CHOP_HEIGHT, significantHeight, meanWavelength,
   setSeaBands, getSeaBands, SEA_SWELL_MAX, SEA_STATE_MAX, RIVER_STATE,
   SEA_STATE_MIN, setWaveAxes, getWaveAxes, setWaveOrigin, getWaveOrigin,
   easeWaveAxes, waveAxisFor, AXIS_EASE, packWaveUniforms,
-  glslWaves, glslWaveBounds, GLSL_WAVE_TERM, GLSL_WAVE_COS,
+  glslWaves, glslWaveBounds, GLSL_PHASE, GLSL_WAVE_SIN, GLSL_WAVE_TERM,
+  GLSL_WAVE_COS, GLSL_CREST_TERM, GLSL_CREST_GRAD,
+  MAX_HARM_SWELL, MAX_HARM_CHOP, waveMix, waveGradMix,
   SHORE_WAVES, SHORE_RANGE, SHORE_CALM, MAX_SHORE_HEIGHT, SHORE_SHADE,
   shoreOpenAtten, shoreEnv, shoreHeight, shoreGradMag, setShoreSampler,
   glslShoreAttenExpr, glslShoreEnvExpr, glslShoreSumExpr, glslShoreGradExpr, glslShore,
@@ -48,34 +50,59 @@ const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
 const TAU = Math.PI * 2;
 
 // ============================ LOCK 1 + 2: PARITY ============================
-// Compile the SHADER'S OWN term strings as JS. `w` is one component's vec4,
-// `lp` the local position (lp.y is the z coordinate, as in GLSL).
-const termJS = new Function('w', 'lp', `const sin = Math.sin; return ${GLSL_WAVE_TERM};`);
-const cosJS = new Function('w', 'lp', `const cos = Math.cos; return ${GLSL_WAVE_COS};`);
+// Compile the SHADER'S OWN sub-expression strings as JS. `w` is one component's
+// vec4, `q` its Stokes harmonic coefficient out of uWaveQ, `lp` the local
+// position (lp.y is the z coordinate, as in GLSL), `s`/`c` the sin and cos of
+// the phase. Phase C split the term into these five pieces because the second
+// harmonic reuses the ONE sin the linear term needs (cos 2phi = 1 - 2 sin^2 phi),
+// so no single string can be the whole term any more. verify-crest.mjs
+// transliterates the whole emitted block; this is the cheaper structural lock.
+const phaseJS = new Function('w', 'lp', `return ${GLSL_PHASE};`);
+const sinJS = new Function('w', 'lp', `const sin = Math.sin; return ${GLSL_WAVE_SIN};`);
+const linJS = new Function('w', 's', `return ${GLSL_WAVE_TERM};`);
+const harJS = new Function('q', 's', `return ${GLSL_CREST_TERM};`);
+const gLinJS = new Function('w', 'c', `return ${GLSL_WAVE_COS};`);
+const gHarJS = new Function('q', 's', 'c', `return ${GLSL_CREST_GRAD};`);
 const wOf = (u, i) => ({ x: u[i * 4], y: u[i * 4 + 1], z: u[i * 4 + 2], w: u[i * 4 + 3] });
-const gpuSum = (u, lo, hi, lp) => {
-  let s = 0;
-  for (let i = lo; i < hi; i++) s += termJS(wOf(u, i), lp);
-  return s;
-};
-const gpuGrad = (u, lo, hi, lp) => {
-  let gx = 0, gz = 0;
+// the emitted height loop: [linear sum, harmonic sum] for a component range
+const gpuSum = (u, uq, lo, hi, lp) => {
+  let l = 0, h = 0;
   for (let i = lo; i < hi; i++) {
-    const w = wOf(u, i), c = cosJS(w, lp);
-    gx += w.x * c; gz += w.y * c;
+    const w = wOf(u, i), s = sinJS(w, lp);
+    l += linJS(w, s); h += harJS(uq[i], s);
   }
-  return [gx, gz];
+  return [l, h];
+};
+// and the emitted gradient loop: [linear gx, gz, harmonic gx, gz]
+const gpuGrad = (u, uq, lo, hi, lp) => {
+  let ax = 0, az = 0, bx = 0, bz = 0;
+  for (let i = lo; i < hi; i++) {
+    const w = wOf(u, i), p = phaseJS(w, lp);
+    const s = Math.sin(p), c = Math.cos(p);
+    const a = gLinJS(w, c), b = gHarJS(uq[i], s, c);
+    ax += w.x * a; az += w.y * a; bx += w.x * b; bz += w.y * b;
+  }
+  return [ax, az, bx, bz];
 };
 
 const block = glslWaves();
 ok(block.includes(`uniform vec4 uWave[${NWAVE}];`), 'the spectrum is declared as a uniform array');
-ok(block.includes(GLSL_WAVE_TERM), 'the emitted block carries the shared height term verbatim');
-ok(block.includes(GLSL_WAVE_COS), 'the emitted block carries the shared gradient term verbatim');
+ok(block.includes(`uniform float uWaveQ[${NWAVE}];`),
+  'and the Stokes harmonic coefficients as a second one');
+for (const [name, str] of [
+  ['phase', GLSL_PHASE], ['sin', GLSL_WAVE_SIN], ['linear height', GLSL_WAVE_TERM],
+  ['harmonic height', GLSL_CREST_TERM], ['linear gradient', GLSL_WAVE_COS],
+  ['harmonic gradient', GLSL_CREST_GRAD],
+]) ok(block.includes(str), `the emitted block carries the shared ${name} term verbatim`);
 ok(!block.includes('NaN') && !block.includes('undefined'), 'the emitted block is well-formed');
-for (const fn of ['oWaveSwell', 'oWaveWind', 'oWaveWindLod',
-  'oWaveGradLong', 'oWaveGradMid', 'oWaveGradShort']) {
-  ok(block.includes(`${fn}(vec2 lp)`), `${fn} is emitted`);
+for (const fn of ['oWaveSwell', 'oWaveWind']) {
+  ok(block.includes(`vec2 ${fn}(vec2 lp)`), `${fn} is emitted, returning (linear, harmonic)`);
 }
+for (const fn of ['oWaveGradLong', 'oWaveGradMid', 'oWaveGradShort']) {
+  ok(block.includes(`vec4 ${fn}(vec2 lp)`), `${fn} is emitted, returning both gradients`);
+}
+ok(block.includes('float oWaveMix(vec2 h, float g) { return g * h.x - g * g * h.y; }'),
+  'the band composer is emitted, and the harmonic carries the state SQUARED');
 // LOCK 3: the loop bounds ARE the component partition, and they are literally
 // in the emitted text (so a hand-edit of the block cannot pass)
 {
@@ -110,32 +137,48 @@ for (const [ox, oz] of FAR) {
     setWaveAxes(ax, aw);
     for (let i = 0; i < 60; i++) {
       const t = rnd() * 7200;
-      const u = packWaveUniforms(t);
+      const uq = new Float32Array(NWAVE);
+      const u = packWaveUniforms(t, undefined, uq);
       // the shader only ever sees LOCAL coordinates — the mesh is 720 m across
       const lx = (rnd() - 0.5) * 720, lz = (rnd() - 0.5) * 720;
       const lp = { x: lx, y: lz };
       const x = ox + lx, z = oz + lz;
       setSeaBands(1, 1);
       const cpu = waveHeight(x, z, t);
-      const gpu = gpuSum(u, 0, NSWELL, lp) + gpuSum(u, NSWELL, NWAVE, lp);
+      const [sl, sh] = gpuSum(u, uq, 0, NSWELL, lp);
+      const [wl, wh] = gpuSum(u, uq, NSWELL, NWAVE, lp);
+      const gpu = waveMix(sl, sh, 1) + waveMix(wl, wh, 1);
       worst = Math.max(worst, Math.abs(cpu - gpu));
-      ok(Math.abs(cpu) <= MAX_WAVE_HEIGHT + 1e-9, `height within MAX at sample ${i}`);
-      // the LOD twin must equal the full wind sum when the lever is up
-      worstLod = Math.max(worstLod, Math.abs(
-        gpuSum(u, NSWELL, NMID, lp) + gpuSum(u, NMID, NWAVE, lp) - gpuSum(u, NSWELL, NWAVE, lp)));
+      // the height bound now carries the harmonic's own amplitude sum: the
+      // second-order term can only ADD to a fully-aligned crest, so the linear
+      // amplitude sum stopped being an upper bound the day cresting landed
+      ok(Math.abs(cpu) <= MAX_WAVE_HEIGHT + MAX_HARM_SWELL + MAX_HARM_CHOP + 1e-9,
+        `height within MAX (linear + harmonic) at sample ${i}`);
+      // the LOD twin must equal the full wind sum when the lever is up, in BOTH
+      // halves — a harmonic dropped from one band and not the other would draw a
+      // sea the hull is not on
+      {
+        const [al, ah] = gpuSum(u, uq, NSWELL, NMID, lp);
+        const [bl, bh] = gpuSum(u, uq, NMID, NWAVE, lp);
+        worstLod = Math.max(worstLod, Math.abs(al + bl - wl), Math.abs(ah + bh - wh));
+      }
       // per-band parity under SPLIT states — what the shader actually does
       setSeaBands(1.7, 0.6);
       const bandCpu = waveHeight(x, z, t);
-      const bandGpu = 1.7 * gpuSum(u, 0, NSWELL, lp) + 0.6 * gpuSum(u, NSWELL, NWAVE, lp);
+      const bandGpu = waveMix(sl, sh, 1.7) + waveMix(wl, wh, 0.6);
       worstBand = Math.max(worstBand, Math.abs(bandCpu - bandGpu));
       // the gradient: analytic CPU vs the emitted term vs a finite difference
       const [gx, gz] = waveGradient(x, z, t);
-      const [lx1, lz1] = gpuGrad(u, 0, NSWELL, lp);
-      const [mx, mz] = gpuGrad(u, NSWELL, NMID, lp);
-      const [sx2, sz2] = gpuGrad(u, NMID, NWAVE, lp);
+      const [lax, laz, lbx, lbz] = gpuGrad(u, uq, 0, NSWELL, lp);
+      const [max2, maz, mbx, mbz] = gpuGrad(u, uq, NSWELL, NMID, lp);
+      const [sax, saz, sbx, sbz] = gpuGrad(u, uq, NMID, NWAVE, lp);
       worstG = Math.max(worstG,
-        Math.abs(gx - (1.7 * lx1 + 0.6 * (mx + sx2))),
-        Math.abs(gz - (1.7 * lz1 + 0.6 * (mz + sz2))));
+        Math.abs(gx - (waveGradMix(lax, lbx, 1.7) + waveGradMix(max2 + sax, mbx + sbx, 0.6))),
+        Math.abs(gz - (waveGradMix(laz, lbz, 1.7) + waveGradMix(maz + saz, mbz + sbz, 0.6))));
+      // THE SIGN CLAUSE. The harmonic enters the height with a minus and the
+      // gradient with a plus (d/dx of -c cos 2phi is +2 c kx sin 2phi), which is
+      // exactly the kind of thing a hand edit gets backwards — and a finite
+      // difference of the height cannot be fooled about it.
       const e = 0.01;
       const fx = (waveHeight(x + e, z, t) - waveHeight(x - e, z, t)) / (2 * e);
       const fz = (waveHeight(x, z + e, t) - waveHeight(x, z - e, t)) / (2 * e);
@@ -146,7 +189,7 @@ for (const [ox, oz] of FAR) {
 }
 ok(worst < 2e-3, `CPU/GPU height parity, 40+ km and turned (worst drift ${worst.toExponential(2)})`);
 ok(worstBand < 2e-3, `two-band CPU/GPU parity (worst ${worstBand.toExponential(2)})`);
-ok(worstLod < 1e-12, `the fragment's LOD twin equals the full wind sum (worst ${worstLod.toExponential(2)})`);
+ok(worstLod < 1e-12, `the mid and short LOD bands partition the wind sum exactly (worst ${worstLod.toExponential(2)})`);
 ok(worstG < 2e-3, `gradient CPU/GPU parity (worst ${worstG.toExponential(2)})`);
 ok(worstFD < 2e-3, `gradient matches finite-differenced height (worst ${worstFD.toExponential(2)})`);
 // the band halves the shader scales separately must sum to the whole
@@ -154,13 +197,21 @@ ok(worstFD < 2e-3, `gradient matches finite-differenced height (worst ${worstFD.
   setWaveOrigin(40000, -22000);
   setWaveAxes(0.4, 1.1);
   setSeaBands(1, 1);
-  let wSplit = 0;
+  let wSplit = 0, gSplit = 0;
   for (let i = 0; i < 200; i++) {
     const x = 40000 + (rnd() - 0.5) * 700, z = -22000 + (rnd() - 0.5) * 700, t = rnd() * 3600;
+    const [al, ah] = waveBandHeight(0, x, z, t), [bl, bh] = waveBandHeight(1, x, z, t);
     wSplit = Math.max(wSplit, Math.abs(
-      waveBandHeight(0, x, z, t) + waveBandHeight(1, x, z, t) - waveHeight(x, z, t)));
+      waveMix(al, ah, 1) + waveMix(bl, bh, 1) - waveHeight(x, z, t)));
+    const [ax, az, aqx, aqz] = waveBandGrad(0, x, z, t);
+    const [bx, bz, bqx, bqz] = waveBandGrad(1, x, z, t);
+    const [tx, tz] = waveGradient(x, z, t);
+    gSplit = Math.max(gSplit,
+      Math.abs(waveGradMix(ax, aqx, 1) + waveGradMix(bx, bqx, 1) - tx),
+      Math.abs(waveGradMix(az, aqz, 1) + waveGradMix(bz, bqz, 1) - tz));
   }
   ok(wSplit < 1e-12, `the two band sums partition the sea exactly (${wSplit.toExponential(2)})`);
+  ok(gSplit < 1e-12, `and so do the two band gradients (${gSplit.toExponential(2)})`);
 }
 
 // ==================== FAULT 1: THE LOCAL FRAME ====================

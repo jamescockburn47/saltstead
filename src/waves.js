@@ -50,6 +50,57 @@
 // significant height around 1.5 m; an ordinary 10 m/s day offshore (swell band
 // 1.54) puts 2+ m rollers on 145 m under the keel, and a storm is genuinely
 // frightening. SPECTRUM_LEVEL is the one knob.
+//
+// ======================= PHASE C — CRESTING (2026-07-26) =======================
+// Two additions, and they are the same idea twice: the sea already knew the
+// wind, and the player could not SEE it. Both live here so the parity doctrine
+// guards them.
+//
+// 1. THE STOKES SECOND HARMONIC. A linear sum of sines is symmetric — crests
+//    and troughs the same shape — and a real sea is not: sharp crests, long
+//    flat troughs. To second order in deep water the free surface is
+//        eta = a cos(theta) + (k a^2 / 2) cos(2 theta)
+//    (Stokes). In this module's sin convention (theta = phi - pi/2) that reads
+//        eta = a [ sin(phi) - q cos(2 phi) ],    q = CREST_Q k a g / 2
+//    so the harmonic term is SUBTRACTED and the band's sea state g enters
+//    SQUARED, because the coefficient carries a^2. A calm sea is therefore
+//    sinusoidal and a gale peaks, with no extra knob.
+//    IT IS STILL A HEIGHT FIELD, which is the whole reason Gerstner is
+//    rejected: Gerstner's horizontal displacement makes y multi-valued in
+//    (x, z), and the fragment shader's exact per-pixel normals plus a dozen CPU
+//    consumers (hull, camera clamp, foam, kraken, flotsam, wildlife, merchants,
+//    whales) all sample y = f(x, z, t). The harmonic keeps that property and
+//    costs no transcendental: cos(2 phi) = 1 - 2 sin(phi)^2, so the one sin the
+//    linear term already needs pays for both.
+//    THERE IS A MATHEMATICAL SAFETY LINE. d/dphi of sin(phi) - q cos(2 phi) is
+//    cos(phi) (1 + 4 q sin(phi)), which has extra zeros as soon as q >= 1/4 —
+//    a dimple in the trough and TWO crests per period. CREST_DIMPLE is that
+//    line and verify-crest holds the worst component at the storm cap against
+//    it, counts the extrema of the emitted arithmetic, and carries q = 0.30 as
+//    a counter-example that must fail.
+//
+// 2. THE BREAK FIELD. breaking(x, z, t) in [0, 1] — ONE closed-form function
+//    driving BOTH the shader's whitecaps and the hull (shipphysics
+//    breakerEffect). What it replaced was a HEIGHT THRESHOLD: foam appeared
+//    wherever the surface stood high, gated on chop > 1.05, so it had no idea
+//    which way the wind blew and dusted the backs of waves as readily as their
+//    faces. The break field asks the two questions a sailor's eye asks — is
+//    this water steep enough to break, and where on the wave am I — and it
+//    answers them from the band's own local envelope:
+//        a band clustered about kRef behaves locally like A sin(psi), so
+//        A kRef = hypot(h kRef, gs)   and   psi = atan2(h kRef, gs)
+//    where gs is the slope ALONG the band's travel direction. The first is a
+//    dimensionless local STEEPNESS and gates the breaking; the second is the
+//    local CREST PHASE and places the foam. The phase window is deliberately
+//    ASYMMETRIC — it peaks just forward of the crest and decays a long way
+//    behind it — which is the analytic trailing decay the spec asks for: foam
+//    leads the crest down the forward (downwind) face and lingers in the water
+//    the crest has already left, with no state and no feedback buffer, so two
+//    clients on the same water foam identically.
+//    Near land the same function is called a second time on the SHORE set,
+//    whose travel direction is the coast-distance field's own landward
+//    gradient — so surf breaks parallel to any shoreline by construction,
+//    confined to the surf band and stood down by the strait gate.
 
 const TAU = Math.PI * 2;
 const G = 9.81;                       // deep-water dispersion: omega^2 = g k
@@ -187,6 +238,72 @@ export function meanWavelength(band = 0) {
   }
   return den > 0 ? num / den : 0;
 }
+// the energy-weighted mean WAVENUMBER of a band, and its rms surface elevation
+// at band gain 1. The break field's local-envelope reconstruction needs the
+// first (a band clustered about kRef reads locally as A sin(psi)) and its
+// thresholds are multiples of kRef * rms, so they follow the spectrum if it is
+// ever rebuilt instead of being numbers somebody once liked.
+export function meanWavenumber(band = 0) {
+  let num = 0, den = 0;
+  for (const c of COMPONENTS) {
+    if (band !== null && c.band !== band) continue;
+    const e = c.amp * c.amp;
+    num += e * c.k; den += e;
+  }
+  return den > 0 ? num / den : 0;
+}
+export function rmsHeight(band = null) {
+  let v = 0;
+  for (const c of COMPONENTS) if (band === null || c.band === band) v += c.amp * c.amp / 2;
+  return Math.sqrt(v);
+}
+
+// ================= CRESTING: THE STOKES SECOND HARMONIC =================
+// CREST_Q is a GAIN on linear theory's own second-order coefficient, and it is
+// derived rather than dialled. Two measured deficits, both of them deliberate
+// choices made elsewhere in this file:
+//
+//  (a) THE DRAWN SEA IS TOO LONG FOR ITS HEIGHT, ON PURPOSE. lamPeak is 145 m
+//      because "a longer sea is a gentler sea" — that is what kept the motion
+//      gate's thresholds untouched when v2 tripled the swell. A real
+//      Pierson-Moskowitz sea of the same significant height peaks where
+//      omega_p = 0.877 g / U, i.e. 83 m at the 10 m/s reference. Since q goes
+//      as k at fixed amplitude, restoring nature's wavenumber is a factor
+//      145 / 83 = 1.75.
+//  (b) THE SPECTRUM STOPS AT 5.75 m. glitter.js already quantifies what that
+//      costs: the drawn set carries under a third of a real sea's per-axis
+//      slope sd (0.049 against Cox & Munk's 0.164 at 10 m/s), and the missing
+//      short gravity and capillary waves are PRECISELY what makes a real crest
+//      look sharp. Putting their share of the steepening onto the components we
+//      do draw is a modelling choice, stated as one; it is worth 1/0.30 = 3.3.
+//
+// 1.75 x 3.3 = 5.8, rounded to 6. The check that this is not licence: the worst
+// component's q at the storm cap is then 0.139, which is 56% of the 1/4 line
+// where the trough dimples and the wave grows a second crest. verify-crest
+// holds both — the number AND the extremum count of the emitted arithmetic.
+export const CREST_Q = 6.0;
+export const CREST_DIMPLE = 0.25;   // q at which dh/dphi grows extra zeros
+export const CREST_MAX_FRAC = 0.7;  // of it, allowed at the band caps
+
+// the per-component harmonic coefficient c_i = CREST_Q k a^2 / 2, so that
+//     band height = g * SUM a sin(phi) - g^2 * SUM c cos(2 phi)
+// c is a CONSTANT of the spectrum — independent of time, of the band axes (it
+// reads |k|, not its direction) and of the sea state — which is why it travels
+// as its own uniform array rather than costing a sqrt per component per pixel.
+export const CREST_COEF = COMPONENTS.map((c) => CREST_Q * 0.5 * c.k * c.amp * c.amp);
+// the dimensionless steepness parameter of ONE component at a band gain: this
+// is the q of sin(phi) - q cos(2 phi), and it is the number the dimple line
+// bounds.
+export function crestQ(i, g) {
+  return CREST_Q * 0.5 * COMPONENTS[i].k * COMPONENTS[i].amp * g;
+}
+// the harmonic's own amplitude sum per band — the honest upper bound the
+// harmonic adds to |surface|, which ocean.js needs for its crest normalisation
+// and verify-waves needs for its height bound
+export const MAX_HARM_SWELL = CREST_COEF
+  .reduce((s, c, i) => s + (COMPONENTS[i].band === 0 ? c : 0), 0);
+export const MAX_HARM_CHOP = CREST_COEF
+  .reduce((s, c, i) => s + (COMPONENTS[i].band === 1 ? c : 0), 0);
 
 // ---- TWO SEAS IN ONE WATER ----
 // One scalar on the whole sum made a gale just a magnified calm; two band
@@ -284,6 +401,14 @@ export function setWaveAxes(swellAxis, windAxis) {
   axSwell = swellAxis; axWind = windAxis; refreshK();
 }
 export function getWaveAxes() { return { swell: axSwell, wind: axWind }; }
+// each band's unit TRAVEL direction in world (x, z) — the axis the break field
+// resolves its slope along, and the axis the shader's foam streaks lie down.
+// The shader gets these as uniforms so the drawn foam and the felt breaker read
+// the same wind.
+export function waveBandDir(band = 1) {
+  const a = band === 0 ? axSwell : axWind;
+  return [Math.cos(a), Math.sin(a)];
+}
 
 // hand the field the ocean mesh's snapped origin. The accumulators absorb the
 // move, so this changes NOTHING about the surface — it only keeps the local
@@ -305,13 +430,24 @@ export function getWaveOrigin() { return { x: originX, z: originZ }; }
 // old "k·p reaches 1e5 radians" precision hole is closed by construction.
 // The CPU evaluator below computes acc - omega·t unwrapped; sin is periodic,
 // so the two agree exactly (verify-waves compares against THIS array).
-export function packWaveUniforms(t, out = new Float32Array(NWAVE * 4)) {
+// `outQ`, when handed over, receives the per-component Stokes harmonic
+// coefficients (uWaveQ). They are constants of the spectrum, so writing them
+// every frame is redundant arithmetic bought deliberately: ONE function fills
+// both arrays, so a stale or forked harmonic table is not a thing that can
+// happen. verify-crest recomputes them from uWave itself and holds the two
+// against each other, so the second array cannot drift from the first either.
+export function packWaveUniforms(t, out = new Float32Array(NWAVE * 4), outQ = null) {
   for (let i = 0; i < NWAVE; i++) {
     const c = COMPONENTS[i], o = i * 4;
     out[o] = kx[i]; out[o + 1] = kz[i]; out[o + 2] = c.amp;
     out[o + 3] = wrapPhase(acc[i] - c.omega * t);
+    if (outQ) outQ[i] = CREST_COEF[i];
   }
   return out;
+}
+export function packWaveHarmonics(outQ = new Float32Array(NWAVE)) {
+  for (let i = 0; i < NWAVE; i++) outQ[i] = CREST_COEF[i];
+  return outQ;
 }
 
 // ---- THE SHORE FIELD (2026-07-24) ----
@@ -376,6 +512,16 @@ export const SHORE_SHADE = 0.6;
 
 // shore-parallel surface height at signed coast distance d, time t. UNscaled
 // by sea state — waveHeight applies it to the whole shore-aware sum.
+//
+// THE SHORE SET STAYS LINEAR, and that is a decision rather than an omission.
+// It is two COHERENT trains at deliberately high amplitude for their length
+// (0.40 m on 36 m, 0.16 m on 16 m), so Stokes' own coefficient would put
+// q = CREST_Q k a / 2 at 0.21 and 0.19 before the chop band multiplies it —
+// straight through the 1/4 dimple line, where the trough grows a second crest.
+// Surf gets its sharpness from the BREAK field instead (breakShore below), which
+// is where a real breaker's shape comes from anyway: it is not a Stokes wave, it
+// is a Stokes wave that has run out of water. verify-crest asserts the shore set
+// carries no harmonic.
 export function shoreHeight(d, t) {
   let y = 0;
   for (const w of SHORE_WAVES) {
@@ -398,6 +544,117 @@ export function shoreGradMag(d, t) {
   return g * shoreEnv(d);
 }
 
+// ======================= THE BREAK FIELD (Phase C) =======================
+// ONE function, both consumers: ocean.js's whitecaps and shipphysics.js's
+// breaker shove. See the header for the derivation; the thresholds below are
+// MULTIPLES of the band's own rms local steepness, so they track the spectrum
+// rather than standing beside it.
+//
+// WHY THE COVERAGE NUMBERS ARE ANSWERABLE. A narrow-band sea's envelope is
+// Rayleigh, so the share of water steeper than n times the rms is exp(-n^2/2),
+// and the phase window covers a fixed fraction of a period — which makes the
+// whitecap coverage a CALCULATION rather than a taste. Monahan & O'Muircheartaigh
+// (1980) fitted whitecap coverage W = 3.84e-6 U^3.41 to photographs: 0.09% at
+// 5 m/s, 1.0% at 10, 3.9% at 15, 22% at 25. The thresholds here were chosen to
+// land inside that ladder through weather.js's own wind-to-chop map, and
+// verify-crest re-measures the realised coverage on the live field.
+const K_WIND = meanWavenumber(1);
+const RMS_WIND = rmsHeight(1);
+const K_SHORE = (() => {
+  let num = 0, den = 0;
+  for (const w of SHORE_WAVES) { const e = w.amp * w.amp; num += e * (TAU / w.len); den += e; }
+  return num / den;
+})();
+const RMS_SHORE = Math.sqrt(SHORE_WAVES.reduce((s, w) => s + w.amp * w.amp / 2, 0));
+
+export const BREAK = {
+  // the datum: the band's rms local steepness at band gain 1
+  windRms: K_WIND * RMS_WIND,
+  shoreRms: K_SHORE * RMS_SHORE,
+  // the steepness gate, in multiples of that datum. 1.85 -> 3.85 puts the
+  // half-way point at 2.85 rms, i.e. exp(-2.85^2/2) = 1.7% of the open sea
+  // steep enough to break at chop 1, which the phase window then thins to about
+  // the 1% Monahan measures at 10 m/s.
+  s0: 1.85, s1: 3.85,
+  // the SHORE set breaks because the water shoals, not because the wind blows, so
+  // its gate is looser than the open sea's — but only somewhat, and the first cut
+  // had it at 0.70/1.70, which was too loose by half. The shore set is TWO COHERENT
+  // trains at deliberately high steepness (its rms local steepness is 0.062 against
+  // the wind band's 0.041), so a low threshold breaks nearly every crest of both at
+  // once and the surf paints SHEETS of white instead of lines — measured 30% of the
+  // water sixty metres off the sand, against the retired code's explicit "thin LINES
+  // on the highest crests only; sheets of white read as artifact". 1.40/2.60 halves
+  // it and keeps the ladder: nothing on a calm belt's beach, 9% of the water white
+  // in a working breeze, 27% in a storm.
+  shoreS0: 1.40, shoreS1: 2.60,
+  // THE PHASE WINDOW, radians of local phase either side of its peak. lead > 0
+  // puts the peak FORWARD of the crest — the downwind face, which is the face a
+  // real breaker spills down — and trail >> front is the analytic decay that
+  // leaves foam in the water the crest has already passed over. The asymmetry
+  // is therefore the persistence AND the wind cue, in one window.
+  lead: 0.50, front: 1.05, trail: 2.10,
+  // the surf band the shore break is confined to, m offshore. Without it the
+  // shore set's crest criterion painted faint stripes 400 m out.
+  surfIn: 90, surfOut: 200,
+  // SHADING ONLY, and the distinction matters. breaking() is a CRITERION: it
+  // answers "is this water breaking, and how hard" and its typical firing value
+  // is a quarter, not one. Feed that straight into an albedo mix and a whitecap
+  // draws at 7% of white — measured in the live probe (live-crest.mjs), water
+  // where the field fired rendered 0.995x as bright as unbroken water, i.e. the
+  // foam was invisible. foamGain turns the criterion into froth. It scales what
+  // the SHADER draws and never the field the hull is shoved by, so the gated
+  // coverage numbers and the ship's motion are untouched by it.
+  foamGain: 3.0,
+};
+
+// the window itself: 1 at its peak, 0 outside, asymmetric about the crest
+export function breakWindow(d) {
+  const e = d - BREAK.lead;
+  return 1 - sstep(0, e >= 0 ? BREAK.front : BREAK.trail, Math.abs(e));
+}
+// the whole criterion for one band. h and gs are that band's surface height and
+// its slope ALONG its travel direction, both already scaled by the band's sea
+// state; kRef is the band's representative wavenumber.
+export function breakOf(h, gs, kRef, s0, s1) {
+  const hk = h * kRef;
+  const env = Math.sqrt(hk * hk + gs * gs);
+  let d = Math.atan2(hk, gs) - Math.PI / 2;
+  d -= TAU * Math.floor((d + Math.PI) / TAU);
+  return sstep(s0, s1, env) * breakWindow(d);
+}
+export const breakOpen = (h, gs) => breakOf(h, gs, K_WIND,
+  BREAK.s0 * BREAK.windRms, BREAK.s1 * BREAK.windRms);
+export const breakShore = (h, gs, d) => breakOf(h, gs, K_SHORE,
+  BREAK.shoreS0 * BREAK.shoreRms, BREAK.shoreS1 * BREAK.shoreRms)
+  * (1 - sstep(BREAK.surfIn, BREAK.surfOut, -d));
+// the criterion turned into an opacity — SHADING ONLY (see BREAK.foamGain)
+export const breakFoam = (b) => Math.min(1, b * BREAK.foamGain);
+
+// breaking(x, z, t) in [0, 1] — the field the shader whitens and the hull feels.
+// The wind-sea band alone drives the open-water term: far-travelled swell under
+// light air does not break, and whitecaps ARE the local sea breaking.
+export function breaking(x, z, t) {
+  const [lin, har] = waveBandHeight(1, x, z, t);
+  const [gax, gaz, gbx, gbz] = waveBandGrad(1, x, z, t);
+  let h = waveMix(lin, har, seaChop);
+  let gx = waveGradMix(gax, gbx, seaChop);
+  let gz = waveGradMix(gaz, gbz, seaChop);
+  const [dx, dz] = waveBandDir(1);
+  const s = shoreSampler && shoreSampler(x, z);
+  if (!s) return breakOpen(h, gx * dx + gz * dz);
+  // inshore the open set is calmed exactly as waveHeight calms it, and the
+  // shore-parallel set rides in — so the same two calls describe both waters
+  const att = shoreOpenAtten(s.d);
+  h *= att; gx *= att; gz *= att;
+  const open = breakOpen(h, gx * dx + gz * dz);
+  const gate = s.gLen === undefined ? 1 : shoreGate(s.gLen);
+  // the shore set travels LANDWARD (its phase rides +d), so its along-travel
+  // slope is d(shoreHeight)/dd — which is shoreGradMag, already enveloped
+  const hs = shoreHeight(s.d, t) * gate * seaChop;
+  const gs = shoreGradMag(s.d, t) * gate * seaChop;
+  return Math.max(open, breakShore(hs, gs, s.d));
+}
+
 // ============================ THE EVALUATOR ============================
 // Water surface height at world (x, z) at time t (seconds) — a closed-form
 // HEIGHT FIELD, deliberately the exact expression the shader loops over
@@ -408,18 +665,29 @@ export function shoreGradMag(d, t) {
 // With a shore sampler installed the open set attenuates toward the coast and
 // the shore-parallel set rides in — the same composition the ocean shader
 // performs from the coast map texture.
+// THE BAND COMPOSER, and the one place the second harmonic's g^2 lives. h is
+// (linear sum, harmonic sum) for one band; g is that band's sea state.
+//   height = g * linear - g^2 * harmonic
+// The minus sign is Stokes in this module's sin convention (see the header) and
+// the square is the a^2 in the second-order coefficient. Emitted as GLSL
+// (oWaveMix) so the shader composes the bands with the same arithmetic.
+export function waveMix(lin, har, g) { return g * lin - g * g * har; }
+export function waveGradMix(glin, ghar, g) { return g * glin + g * g * ghar; }
+
 export function waveHeight(x, z, t) {
   const lx = x - originX, lz = z - originZ;
-  let ySw = 0, yWd = 0;
+  let ySw = 0, qSw = 0, yWd = 0, qWd = 0;
   for (let i = 0; i < NSWELL; i++) {
-    ySw += COMPONENTS[i].amp * Math.sin(kx[i] * lx + kz[i] * lz
-      + acc[i] - COMPONENTS[i].omega * t);
+    const s2 = Math.sin(kx[i] * lx + kz[i] * lz + acc[i] - COMPONENTS[i].omega * t);
+    ySw += COMPONENTS[i].amp * s2;
+    qSw += CREST_COEF[i] * (1 - 2 * s2 * s2);
   }
   for (let i = NSWELL; i < NWAVE; i++) {
-    yWd += COMPONENTS[i].amp * Math.sin(kx[i] * lx + kz[i] * lz
-      + acc[i] - COMPONENTS[i].omega * t);
+    const s2 = Math.sin(kx[i] * lx + kz[i] * lz + acc[i] - COMPONENTS[i].omega * t);
+    yWd += COMPONENTS[i].amp * s2;
+    qWd += CREST_COEF[i] * (1 - 2 * s2 * s2);
   }
-  const y = seaSwell * ySw + seaChop * yWd;
+  const y = waveMix(ySw, qSw, seaSwell) + waveMix(yWd, qWd, seaChop);
   const s = shoreSampler && shoreSampler(x, z);
   // the shore set is local wind-sea breaking on a beach — it rides the CHOP
   // band's state, never the far-travelled swell's
@@ -434,19 +702,25 @@ export function waveHeight(x, z, t) {
 // the normal always belongs to the surface being drawn.
 export function waveGradient(x, z, t) {
   const lx = x - originX, lz = z - originZ;
-  let sx = 0, sz = 0, wx2 = 0, wz2 = 0;
+  let sx = 0, sz = 0, hx = 0, hz = 0, wx2 = 0, wz2 = 0, jx = 0, jz = 0;
   for (let i = 0; i < NSWELL; i++) {
-    const c = COMPONENTS[i].amp * Math.cos(kx[i] * lx + kz[i] * lz
-      + acc[i] - COMPONENTS[i].omega * t);
-    sx += kx[i] * c; sz += kz[i] * c;
+    const p = kx[i] * lx + kz[i] * lz + acc[i] - COMPONENTS[i].omega * t;
+    const sn = Math.sin(p), cs = Math.cos(p);
+    const a = COMPONENTS[i].amp * cs, b = 4 * CREST_COEF[i] * sn * cs;
+    sx += kx[i] * a; sz += kz[i] * a; hx += kx[i] * b; hz += kz[i] * b;
   }
   for (let i = NSWELL; i < NWAVE; i++) {
-    const c = COMPONENTS[i].amp * Math.cos(kx[i] * lx + kz[i] * lz
-      + acc[i] - COMPONENTS[i].omega * t);
-    wx2 += kx[i] * c; wz2 += kz[i] * c;
+    const p = kx[i] * lx + kz[i] * lz + acc[i] - COMPONENTS[i].omega * t;
+    const sn = Math.sin(p), cs = Math.cos(p);
+    const a = COMPONENTS[i].amp * cs, b = 4 * CREST_COEF[i] * sn * cs;
+    wx2 += kx[i] * a; wz2 += kz[i] * a; jx += kx[i] * b; jz += kz[i] * b;
   }
-  const gx = seaSwell * sx + seaChop * wx2;
-  const gz = seaSwell * sz + seaChop * wz2;
+  // d/dx of -c cos(2 phi) is +2 c kx sin(2 phi), and sin(2 phi) = 2 sin cos —
+  // so the harmonic STEEPENS the gradient where it sharpens the crest, and it
+  // enters with a PLUS where the height entered with a minus. The finite
+  // difference clause in verify-waves is what holds that sign honest.
+  const gx = waveGradMix(sx, hx, seaSwell) + waveGradMix(wx2, jx, seaChop);
+  const gz = waveGradMix(sz, hz, seaSwell) + waveGradMix(wz2, jz, seaChop);
   const s = shoreSampler && shoreSampler(x, z);
   if (!s) return [gx, gz];
   const a = shoreOpenAtten(s.d);
@@ -457,17 +731,32 @@ export function waveGradient(x, z, t) {
   return [gx * a + gm * s.gx, gz * a + gm * s.gz];
 }
 
-// the band sums on their own — what the shader's per-band functions return,
-// so verify-waves can hold each half against its GLSL twin
+// the band sums on their own — what the shader's per-band functions return
+// (LINEAR sum, HARMONIC sum), unscaled by sea state, so verify-waves can hold
+// each half against its GLSL twin and waveMix can compose them
 export function waveBandHeight(band, x, z, t) {
   const lx = x - originX, lz = z - originZ;
-  let y = 0;
+  let y = 0, q = 0;
   const lo = band === 0 ? 0 : NSWELL, hi = band === 0 ? NSWELL : NWAVE;
   for (let i = lo; i < hi; i++) {
-    y += COMPONENTS[i].amp * Math.sin(kx[i] * lx + kz[i] * lz
-      + acc[i] - COMPONENTS[i].omega * t);
+    const s2 = Math.sin(kx[i] * lx + kz[i] * lz + acc[i] - COMPONENTS[i].omega * t);
+    y += COMPONENTS[i].amp * s2;
+    q += CREST_COEF[i] * (1 - 2 * s2 * s2);
   }
-  return y;
+  return [y, q];
+}
+// the same band's GRADIENT halves: [linear gx, linear gz, harmonic gx, harmonic gz]
+export function waveBandGrad(band, x, z, t) {
+  const lx = x - originX, lz = z - originZ;
+  let ax = 0, az = 0, bx = 0, bz = 0;
+  const lo = band === 0 ? 0 : NSWELL, hi = band === 0 ? NSWELL : NWAVE;
+  for (let i = lo; i < hi; i++) {
+    const p = kx[i] * lx + kz[i] * lz + acc[i] - COMPONENTS[i].omega * t;
+    const sn = Math.sin(p), cs = Math.cos(p);
+    const a = COMPONENTS[i].amp * cs, b = 4 * CREST_COEF[i] * sn * cs;
+    ax += kx[i] * a; az += kz[i] * a; bx += kx[i] * b; bz += kz[i] * b;
+  }
+  return [ax, az, bx, bz];
 }
 
 // ============================ THE EMITTED GLSL ============================
@@ -482,51 +771,110 @@ export function waveBandHeight(band, x, z, t) {
 //      Float32Array handed to the GPU, and the gate reads that array;
 //   3. the PARTITION is asserted structurally — the emitted loop bounds must
 //      equal NSWELL / NMID / NWAVE, so no component can be lit twice or lost.
-// `lp` is the LOCAL position (p - origin); `w` is one component's vec4.
-export const GLSL_WAVE_TERM = 'w.z * sin(w.x * lp.x + w.y * lp.y + w.w)';
-export const GLSL_WAVE_COS = 'w.z * cos(w.x * lp.x + w.y * lp.y + w.w)';
+// `lp` is the LOCAL position (p - origin); `w` is one component's vec4; `q` is
+// its Stokes harmonic coefficient out of uWaveQ.
+//
+// PHASE C SPLIT THESE INTO SUB-EXPRESSIONS, and deliberately. The second
+// harmonic needs cos(2 phi) = 1 - 2 sin(phi)^2, so the sin is computed ONCE into
+// a local and reused — which means the shared string can no longer be the whole
+// term. Each of the five strings below is the exact text the emitted block
+// contains, and verify-waves compiles each one as JS; verify-crest goes further
+// and transliterates the whole emitted block.
+export const GLSL_PHASE = 'w.x * lp.x + w.y * lp.y + w.w';
+export const GLSL_WAVE_SIN = `sin(${GLSL_PHASE})`;
+export const GLSL_WAVE_TERM = 'w.z * s';            // linear height, given s = sin(phi)
+export const GLSL_WAVE_COS = 'w.z * c';             // linear gradient factor, c = cos(phi)
+export const GLSL_CREST_TERM = 'q * (1.0 - 2.0 * s * s)';   // c_i cos(2 phi)
+export const GLSL_CREST_GRAD = '4.0 * q * s * c';           // d/dphi of -c_i cos(2 phi), /kx
 
 const sumLoop = (lo, hi) => `  for (int i = ${lo}; i < ${hi}; i++) {`
-  + ` vec4 w = uWave[i]; s += ${GLSL_WAVE_TERM}; }`;
+  + ` vec4 w = uWave[i]; float q = uWaveQ[i]; float s = ${GLSL_WAVE_SIN};`
+  + ` h += vec2(${GLSL_WAVE_TERM}, ${GLSL_CREST_TERM}); }`;
 const gradLoop = (lo, hi) => `  for (int i = ${lo}; i < ${hi}; i++) {`
-  + ` vec4 w = uWave[i]; float c = ${GLSL_WAVE_COS};`
-  + ' g += vec2(w.x * c, w.y * c); }';
+  + ` vec4 w = uWave[i]; float q = uWaveQ[i]; float p = ${GLSL_PHASE};`
+  + ` float s = sin(p); float c = cos(p);`
+  + ` float a = ${GLSL_WAVE_COS}; float b = ${GLSL_CREST_GRAD};`
+  + ' g += vec4(w.x * a, w.y * a, w.x * b, w.y * b); }';
 
 // The function block the ocean shader inlines (vertex AND fragment).
 // oWaveSwell / oWaveWind are the HEIGHT halves — the vertex shader's
-// displacement, and therefore the surface the hull is promised. oWaveWindLod
-// is the fragment's cheaper twin: on the plain tier the short components are
-// dropped from SHADING only (the existing wavelength LOD idiom — a 6 m ripple
-// is sub-pixel past 60 m anyway), never from the height the CPU agrees with.
-// oWaveGrad{Long,Mid,Short} are the three shading LOD bands, which must
-// partition the components exactly.
+// displacement, and therefore the surface the hull is promised, and the fragment's
+// too: there is no cheaper twin, and LOD_IS_SHADING_ONLY below says why there must
+// not be. oWaveGrad{Long,Mid,Short} are the three shading LOD bands, which must
+// partition the components exactly. Every one of the six is a function of (lp) and
+// the uniforms ALONE — no tier branch anywhere inside them.
+// a GLSL-legal float literal that round-trips exactly in float64 — the same
+// device glitter.js uses, so the shader's number IS the module's number and the
+// parity margin is not spent on rounding
+const n = (v) => {
+  const s = Number(v).toPrecision(17);
+  return /[.eE]/.test(s) ? s : `${s}.0`;
+};
+
 export function glslWaves() {
   return `
 uniform vec4 uWave[${NWAVE}];
+uniform float uWaveQ[${NWAVE}];
 uniform float uWaveLOD;
-float oWaveSwell(vec2 lp) { float s = 0.0;
+float oWaveMix(vec2 h, float g) { return g * h.x - g * g * h.y; }
+vec2 oWaveGradMix(vec4 d, float g) {
+  return vec2(g * d.x + g * g * d.z, g * d.y + g * g * d.w); }
+vec2 oWaveSwell(vec2 lp) { vec2 h = vec2(0.0);
 ${sumLoop(0, NSWELL)}
-  return s; }
-float oWaveWind(vec2 lp) { float s = 0.0;
+  return h; }
+vec2 oWaveWind(vec2 lp) { vec2 h = vec2(0.0);
 ${sumLoop(NSWELL, NWAVE)}
-  return s; }
-float oWaveWindLod(vec2 lp) { float s = 0.0;
-${sumLoop(NSWELL, NMID)}
-  if (uWaveLOD > 0.5) {
-${sumLoop(NMID, NWAVE)}
-  }
-  return s; }
-vec2 oWaveGradLong(vec2 lp) { vec2 g = vec2(0.0);
+  return h; }
+vec4 oWaveGradLong(vec2 lp) { vec4 g = vec4(0.0);
 ${gradLoop(0, NSWELL)}
   return g; }
-vec2 oWaveGradMid(vec2 lp) { vec2 g = vec2(0.0);
+vec4 oWaveGradMid(vec2 lp) { vec4 g = vec4(0.0);
 ${gradLoop(NSWELL, NMID)}
   return g; }
-vec2 oWaveGradShort(vec2 lp) { vec2 g = vec2(0.0);
-  if (uWaveLOD > 0.5) {
+vec4 oWaveGradShort(vec2 lp) { vec4 g = vec4(0.0);
 ${gradLoop(NMID, NWAVE)}
-  }
   return g; }
+`;
+}
+// EVERY EMITTED FUNCTION IS LOD-INDEPENDENT, and that is a promise rather than a
+// coincidence. There used to be an `if (uWaveLOD > 0.5)` inside oWaveGradShort and
+// an oWaveWindLod that dropped the sub-20 m components from the fragment's height,
+// and a cold review of Phase C found what that cost: the shader's break field is
+// built from the wind band's height AND its along-wind slope, so on the plain tier
+// BOTH of its inputs lost every component under 20 m — exactly the ones carrying
+// the steepness the criterion is made of. Measured, working breeze: mean field
+// 1.064% on fine against 0.262% on plain, with pointwise divergences up to 0.89.
+// The same square metre of water was fully breaking on one tier and dead flat on
+// the other, which makes "ONE field, both consumers" false on the cheap tier —
+// and it would have taken the wind cue away from exactly the players who cannot
+// afford to hunt for it. The LOD is now what its own uniform comment always said
+// it was: a SHADING lever, applied by ocean.js at the call site, where it fades a
+// sub-pixel ripple out of the NORMALS and touches nothing the criterion reads.
+export const LOD_IS_SHADING_ONLY = true;
+
+// ---- the break field's GLSL, generated from the SAME constants ----
+// Emitted as its own block so verify-crest can transliterate it whole and hold
+// it against breakWindow / breakOf / breakOpen / breakShore bit for bit. Every
+// expression form here is the twin's, term for term and in the same order —
+// do not tidy one side only (the glitter.js lesson, stated again where it
+// applies again).
+export function glslBreak() {
+  return `
+float oBreakWin(float d) {
+  float e = d - ${n(BREAK.lead)};
+  return 1.0 - smoothstep(0.0, e >= 0.0 ? ${n(BREAK.front)} : ${n(BREAK.trail)}, abs(e)); }
+float oBreak(float h, float gs, float kRef, float s0, float s1) {
+  float hk = h * kRef;
+  float env = sqrt(hk * hk + gs * gs);
+  float d = atan(hk, gs) - ${n(Math.PI / 2)};
+  d = d - ${n(TAU)} * floor((d + ${n(Math.PI)}) / ${n(TAU)});
+  return smoothstep(s0, s1, env) * oBreakWin(d); }
+float oBreakOpen(float h, float gs) {
+  return oBreak(h, gs, ${n(K_WIND)}, ${n(BREAK.s0 * BREAK.windRms)}, ${n(BREAK.s1 * BREAK.windRms)}); }
+float oBreakShore(float h, float gs, float sd) {
+  return oBreak(h, gs, ${n(K_SHORE)}, ${n(BREAK.shoreS0 * BREAK.shoreRms)}, ${n(BREAK.shoreS1 * BREAK.shoreRms)})
+    * (1.0 - smoothstep(${n(BREAK.surfIn)}, ${n(BREAK.surfOut)}, -sd)); }
+float oBreakFoam(float b) { return min(1.0, b * ${n(BREAK.foamGain)}); }
 `;
 }
 
@@ -537,6 +885,12 @@ export function glslWaveBounds() {
     swell: [0, NSWELL], wind: [NSWELL, NWAVE],
     long: [0, NSWELL], mid: [NSWELL, NMID], short: [NMID, NWAVE],
   };
+}
+// the emitted block must contain no LOD branch at all — the gate's instrument for
+// the promise above, because a `if (uWaveLOD` back inside a sum is exactly the
+// edit that would silently un-fix it
+export function glslWavesHasLodBranch() {
+  return /if\s*\(\s*uWaveLOD/.test(glslWaves());
 }
 
 // ---- the shore field's GLSL, generated from the SAME tables ----
