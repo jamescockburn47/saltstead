@@ -162,7 +162,25 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 1200);
 
     this.sky = new Sky(this.scene);
-    this.dayStart = DAY_LENGTH * 0.35; // spawn mid-morning
+    // SPAWN INTO THE GOLDEN HOUR, ON A NEAR-FULL MOON (2026-07-26). A new
+    // voyage used to open mid-morning (0.35) under a high sun — the one hour
+    // of the day where the sun's road on the water is weakest, so the first
+    // thing a player ever saw was the sea at its most ordinary.
+    //
+    // 5.68 days is TWO numbers at once, and both matter:
+    //  - the .68 is the hour: sun 24 deg and falling, so the glitter corridor
+    //    is already lit at the title-to-sea cut, deepens as she settles, and
+    //    the sun is down 2.2 minutes later (sunset is 0.755, the day is 30 s
+    //    short of half an hour).
+    //  - the 5 is the DAY, and it buys the moon. Phase runs on a 12-day month
+    //    (skymath MOON_MONTH_DAYS), so 5.68 days puts it at 0.473 — a hair
+    //    before full, which is the phase that rises just BEFORE the sun sets.
+    //    Measured: she comes up over the horizon 1.3 minutes in and is high
+    //    over dark water by the time the sun has gone. A new moon would have
+    //    been the same arithmetic and an empty night sky.
+    // So the opening sequence is: the sun's road, the moon rising into it,
+    // sunset, then the moon's own corridor — inside the first four minutes.
+    this.dayStart = DAY_LENGTH * 5.68;
 
     this.ocean = new Ocean(this.scene);
     this.ocean.setLens(this.camera.fov, this.renderer.domElement.height);
