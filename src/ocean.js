@@ -13,22 +13,30 @@
 // ISOTROPIC — no periodic ripple fields, no sin() in the detail bands.
 //
 // Light on the water, in order:
-//  - Phong's own specular from the real sun/moon DirectionalLights over the
-//    perturbed normal IS the glitter path now — it elongates toward a low
-//    sun because that is what specular over a rough sea does. The old
-//    per-facet corridor rig (aCentroid hash glints) died with the facets.
-//  - a sharp sparkle pass over the reflected ray adds the blinding
-//    pinpricks, twinkling by scrolling noise, scaled by lightrig's
-//    glitterSource amp (sun by day, the moon's blade by night).
+//  - THE GLITTER PATH (src/glitter.js, 2026-07-26): a slope-space Gaussian over
+//    the half-vector with Cox & Munk roughness and Schlick's Fresnel, broadened
+//    by whatever the pixel's own footprint cannot resolve. It replaces the
+//    pow(dot(R, sun), 260.0) mirror that shipped before — an exponent of 260 is
+//    a 2-degree pinpoint, and the corridor asks for 5 degrees of facet tilt at
+//    the horizon, so the road was never drawn and the owner had to hunt for the
+//    reflection with the camera. The lobe IS the sparkle pass, the corridor and
+//    the wake's wet sheen, all one term.
+//  - Phong's own specular from the real sun/moon DirectionalLights still runs
+//    over the perturbed normal; it is a narrow highlight near the source's
+//    mirror image and the glitter path is additive over it.
 //  - fresnel mixes toward the REAL sky gradient (horizon -> zenith along
 //    the reflected ray), not one flat colour: near water reads deep, far
 //    water mirrors the sky.
 //  - crests pass light: a subsurface-scatter tint lifts high water toward
 //    green-glass when you look through a crest toward the light.
 //  - froth: whitecaps ride the crests when the sea state is up (fbm-patchy,
-//    never a uniform dusting), and the wake's churn mask lays a white road
-//    astern that widens and fades. Foam kills specular and fresnel — churned
-//    water is matte.
+//    never a uniform dusting), and the wake's churn mask lays a road astern
+//    that widens and fades. Foam is ROUGH WATER, not paint: it keeps part of
+//    its specular and part of the sky, takes a broad sun-tracking sheen from
+//    the glitter lobe, and carries a forward-scatter term so the Kelvin V
+//    brightens as you look up-sun. It used to be flat albedo with specular and
+//    fresnel amputated, which is why it read as fake and disconnected from the
+//    sun.
 
 import * as THREE from 'three';
 import {
@@ -39,8 +47,16 @@ import {
 import { WAKEMAP_METRES } from './wakemaplayer.js';
 import { COASTMAP_METRES } from './coastmaplayer.js';
 import { glslOceanNoise } from './oceannoise.js';
+import { GLITTER, glslGlitter } from './glitter.js';
 
 const SIZE = 720, SEG = 180;
+
+// the lens default: a 62 degree vertical field over a 900 px canvas (main.js's
+// own camera on a laptop). It stands only for the frames before the first
+// setLens() — both consumers (main.js, titlescene.js) call it at construction
+// and on every resize, and main.js calls it again when the fps watchdog sheds
+// pixels.
+const DEFAULT_PIX_A = (2 * Math.tan((62 * Math.PI / 180) / 2)) / 900;
 
 // The decorative fbm. It USED to be the family one-liner inlined here, reading
 // the raw world lattice index through a fract-hash with 234/435 multipliers —
@@ -81,8 +97,18 @@ export class Ocean {
       // displacement — the surface the hull is promised — always runs the full
       // set, so parity is never the thing being traded.
       uWaveLOD: { value: 1 },
+      // the source's TRUE world direction, straight from lightrig's
+      // glitterSource().dir — never rebuilt from a scalar (see lightrig.js)
       uSunDirW: { value: new THREE.Vector3(0, 1, 0) }, // world, sun or moon
       uSparkle: { value: 0 },   // glitterSource amp × the quality lever
+      uGlitAmp: { value: 0 },   // glitterSource amp, TIER-INDEPENDENT (foam)
+      // the corridor's colour: warm for the sun, cold for the moon, leaning
+      // into the horizon's own hue as the source sinks (a low light is
+      // reddened by the air it crosses, and uHor already carries exactly that)
+      uGlitCol: { value: new THREE.Color(1, 0.95, 0.86) },
+      // the angular size of one pixel — the lobe's resolution model needs it
+      // to know how much of the sea a pixel is averaging over (glitter.js)
+      uPixA: { value: DEFAULT_PIX_A },
       uScatter: { value: 0 },   // crest translucency strength
       uFresnel: { value: 0.35 },
       uHor: { value: new THREE.Color(0x9ecbea) }, // sky gradient, driven live
@@ -175,6 +201,7 @@ vec2 oCoastGradW(vec2 p) {
       sh.fragmentShader = 'uniform float uTime;\nuniform vec2 uOrigin;\n'
         + 'uniform float uSwellL;\nuniform float uSwellS;\n'
         + 'uniform vec3 uSunDirW;\nuniform float uSparkle;\nuniform float uScatter;\n'
+        + 'uniform float uGlitAmp;\nuniform vec3 uGlitCol;\nuniform float uPixA;\n'
         + 'uniform float uFresnel;\nuniform vec3 uHor;\nuniform vec3 uZen;\nuniform float uDetailAmp;\n'
         + 'uniform sampler2D uWakeMap;\nuniform vec2 uWakeC;\n'
         + 'uniform sampler2D uCoastMap;\nuniform vec2 uCoastC;\n'
@@ -182,13 +209,15 @@ vec2 oCoastGradW(vec2 p) {
         + `const float O_MAXHL = ${MAX_SWELL_HEIGHT.toFixed(4)};\n`
         + `const float O_MAXHS = ${MAX_CHOP_HEIGHT.toFixed(4)};\n`
         + `const float O_MAXSH = ${MAX_SHORE_HEIGHT.toFixed(4)};\n`
-        + O_FBM + wakeSample + '\n' + coastSample + '\n'
+        + O_FBM + glslGlitter() + wakeSample + '\n' + coastSample + '\n'
         + sh.fragmentShader
           .replace('#include <color_fragment>', `#include <color_fragment>
   // ---- the water's own colour work (main-scope: later passes read these)
   float wx = vWPos.x; float wz = vWPos.z;
   vec2 oLP = vWPos.xz - uOrigin;   // the wave field's LOCAL frame (sea v2)
-  vec3 oV = normalize(cameraPosition - vWPos);
+  vec3 oEye = cameraPosition - vWPos;
+  float oDist = max(length(oEye), 0.05); // TRUE range (vVDist is depth, not range)
+  vec3 oV = oEye / oDist;
   // per-pixel wake: height + churn from the map, gradient from neighbours
   vec2 oWUv = oWakeUv(vWPos.xz);
   float oWIn = oWakeIn(oWUv);
@@ -279,10 +308,17 @@ vec2 oCoastGradW(vec2 p) {
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.10, 0.42, 0.40),
     oCrest * oCrest * oToward * uScatter);
   // foam takes the scene light like everything else: tinted BEFORE lighting;
-  // capped short of pure white so the sea always shows through the lace
-  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.95, 0.96), oFoam * 0.85);`)
+  // capped short of pure white so the sea always shows through the lace. The
+  // mix used to run to 0.85 and that flat white was ALL the wake had — the
+  // rest of its light response was amputated below. It is now one part of
+  // three (albedo here, forward scatter and a rough sheen in the light pass).
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.95, 0.96),
+    oFoam * ${GLITTER.foamAlbedo.toFixed(3)});`)
           .replace('#include <specularmap_fragment>', `#include <specularmap_fragment>
-  specularStrength *= 1.0 - 0.85 * oFoam; // churned water is matte`)
+  // churned water is ROUGH, not matte: a bubble raft has wet slopes in every
+  // direction and they glint. Killing specular outright (it was 0.85) is what
+  // made the Kelvin V a painted road.
+  specularStrength *= 1.0 - ${(1 - GLITTER.foamSpecKeep).toFixed(3)} * oFoam;`)
           .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
   // ---- the Marsstead idiom: exact analytic normal + per-pixel fbm detail.
   // Shading only, never displacement — the drawn surface stays the felt one.
@@ -321,22 +357,75 @@ vec2 oCoastGradW(vec2 p) {
   normal = normalize((viewMatrix * vec4(oNw, 0.0)).xyz);`)
           .replace('#include <opaque_fragment>', `
   // fresnel to the REAL sky: the reflected ray picks its own point on the
-  // horizon->zenith gradient. Foam is matte and opts out.
+  // horizon->zenith gradient. Foam is rougher, so it takes LESS of the sky —
+  // but it used to take none at all, which is part of why it read as paint.
   vec3 oR = reflect(-oV, oNw);
   float oFr = pow(1.0 - max(dot(oNw, oV), 0.0), 3.0);
   vec3 oSky = mix(uHor, uZen, pow(clamp(oR.y, 0.0, 1.0), 0.55));
-  outgoingLight = mix(outgoingLight, oSky, clamp(oFr * uFresnel, 0.0, 1.0) * (1.0 - oFoam));
-  // the sparkle pass: blinding pinpricks where the reflected ray finds the
-  // light, twinkling by scrolling noise — sun by day, the moon's blade by
-  // night (lightrig glitterSource feeds uSparkle for both)
-  float oGl = pow(max(dot(oR, uSunDirW), 0.0), 260.0);
-  float oTw = 0.6 + 0.4 * oVnoise(vWPos.xz * 2.3 + uTime * vec2(1.1, 0.7));
-  outgoingLight += uSparkle * oGl * oTw * vec3(1.0, 0.95, 0.85) * (1.0 - oFoam);
+  outgoingLight = mix(outgoingLight, oSky,
+    clamp(oFr * uFresnel, 0.0, 1.0) * (1.0 - ${(1 - GLITTER.foamSkyKeep).toFixed(3)} * oFoam));
+
+  // ---- THE GLITTER PATH (src/glitter.js) -----------------------------------
+  // The sea's own frame at this pixel: down-range (away from the eye), across
+  // the view ray, and up the surface normal. The corridor runs along the first
+  // of these, which is why looking at the source is looking down the road.
+  vec3 oRange = normalize(vec3(-oV.x, 0.0, -oV.z) + vec3(1e-5, 0.0, 1e-5));
+  vec3 oAcr = normalize(cross(oNw, oRange));
+  vec3 oAlg = cross(oAcr, oNw);
+  // the lobe's width: the unmodelled capillary sea (Cox & Munk) plus every
+  // drawn component this pixel's footprint cannot resolve. The footprint is
+  // long down-range and narrow across it at grazing incidence, so the lobe is
+  // slightly broader along the road than across it.
+  vec2 oFt = oGlFoot(oDist, max(oV.y, 0.0), uPixA);
+  // the plain tier drops the sub-20 m components from its shading entirely, so
+  // ITS lobe must carry them at every distance
+  float oCut = uWaveLOD > 0.5 ? 0.0 : ${GLITTER.plainCut.toFixed(1)};
+  // and no lobe may be narrower than half a pixel's own angle: on river water
+  // Cox & Munk's line clamps to zero and the drawn spectrum alone asks for a
+  // 6e-4 rad lobe, which is 0.03 of a pixel — an aliased reflection, not a sharp
+  // one, and in practice no reflection at all
+  float oSFlr = uPixA * 0.5;
+  float oSigA = oGlSigma(max(2.0 * oFt.y, oCut), uSwellL, uSwellS, oSFlr);
+  float oSigB = oGlSigma(max(2.0 * oFt.x, oCut), uSwellL, uSwellS, oSFlr);
+  // churn is rough water: the wake takes a BROAD lobe, not no lobe. This one
+  // line is what makes the Kelvin V answer the sun instead of ignoring it.
+  float oFS = ${GLITTER.foamSigma.toFixed(3)};
+  oSigA = mix(oSigA, max(oSigA, oFS), oFoam);
+  oSigB = mix(oSigB, max(oSigB, oFS), oFoam);
+  // the epsilon is not decoration: at twilight, at grazing range, looking away
+  // from a source that has just set, oV and uSunDirW can genuinely oppose and
+  // the sum goes to zero. This is the one normalize here whose inputs can.
+  vec3 oHalf = normalize(oV + uSunDirW + vec3(1e-6, 1e-6, 1e-6));
+  vec3 oHl = vec3(dot(oHalf, oAlg), dot(oHalf, oAcr), dot(oHalf, oNw));
+  float oGl = oGlLobe(oHl, oSigA, oSigB) * oGlFresnel(dot(oHalf, uSunDirW));
+  // the twinkle: CONTRAST ONLY, mean preserved, so the corridor's brightness
+  // is the lobe's and never the noise's. Hard near the eye where single facets
+  // are resolved, easing to the statistical average far off — which is exactly
+  // the difference between a shivering field of glints and a road of light.
+  float oTw = 1.0;
+  if (uDetailAmp > 0.001) {
+    float k = mix(${GLITTER.twNear.toFixed(3)}, ${GLITTER.twFar.toFixed(3)},
+      smoothstep(0.0, ${GLITTER.twFade.toFixed(1)}, oDist));
+    oTw = max(0.0, 1.0 + k * (2.0 * oVnoise(vWPos.xz * 2.3 + uTime * vec2(1.1, 0.7)) - 1.0));
+  }
+  outgoingLight += min(${GLITTER.clamp.toFixed(3)},
+    uSparkle * ${GLITTER.gain.toFixed(3)} * oGl * oTw) * uGlitCol;
+  // the churn's forward scatter: a bubble raft is a dense scattering medium and
+  // scattering has a direction — dazzling from the sunward side, merely pale
+  // from the antisolar one. Without this the wake was the same white whatever
+  // the sun was doing, which is the whole of "fake and disconnected".
+  vec3 oSunAz = normalize(vec3(uSunDirW.x, 0.0, uSunDirW.z) + vec3(1e-5, 0.0, 1e-5));
+  float oFwd = 0.5 + 0.5 * dot(oRange, oSunAz);
+  outgoingLight += oFoam * uGlitAmp * uGlitCol
+    * (${GLITTER.foamBack.toFixed(3)} + ${GLITTER.foamFwd.toFixed(3)} * oFwd * oFwd)
+    * (${GLITTER.foamElevFloor.toFixed(3)}
+      + ${(1 - GLITTER.foamElevFloor).toFixed(3)} * max(uSunDirW.y, 0.0));
 #include <opaque_fragment>`);
     };
-    mat.customProgramCacheKey = () => `saltstead-ocean-spectrum-${NWAVE}`;
+    mat.customProgramCacheKey = () => `saltstead-ocean-spectrum-${NWAVE}-glitter2`;
     this.step = SIZE / SEG;
     this.glitterScale = 1; // the tier lever: parked at 0 under Plain (invariant 5)
+    this._gc = new THREE.Color();  // scratch for the corridor's hue lean
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
@@ -345,6 +434,14 @@ vec2 oCoastGradW(vec2 p) {
   // hand over the live wake map (wakemaplayer.js render target)
   setWakeMap(texture) { this.uniforms.uWakeMap.value = texture; }
 
+  // the lens: the glitter lobe's resolution model needs to know how much sea
+  // one pixel covers, which is `distance * pixelAngle` across the view ray.
+  // Call it at start-up and on every resize.
+  setLens(fovYDeg, pxHeight) {
+    if (!(pxHeight > 0)) return;
+    this.uniforms.uPixA.value = (2 * Math.tan((fovYDeg * Math.PI / 180) / 2)) / pxHeight;
+  }
+
   // hand over the coast map (coastmaplayer.js). The layer owns uvCenter —
   // parked far away until the first bake lands, then the live snapped centre.
   setCoastMap(layer) {
@@ -352,7 +449,9 @@ vec2 oCoastGradW(vec2 p) {
     this.uniforms.uCoastC.value = layer.uvCenter;
   }
 
-  // glit: { ax, az, low, amp } from lightrig.glitterSource
+  // glit: lightrig.glitterSource() — { dir, ax, az, low, amp, moon }. This
+  //   body reads dir (the source's true unit direction), amp, low and moon;
+  //   ax/az are the same bearing in scalar form and are not used here.
   // zen: zenith colour for the fresnel sky gradient (falls back near uHor)
   // wakeC: the wake map's snapped centre (wakemaplayer.update's return)
   update(t, cx, cz, camPos, glit, horizon, swell = 1, zen = null, wakeC = null) {
@@ -379,15 +478,38 @@ vec2 oCoastGradW(vec2 p) {
     // the tier lever: Plain drops the sub-20 m components from the FRAGMENT's
     // shading loops (they are sub-pixel past 60 m and already fbm-patched and
     // distance-faded there). The vertex displacement keeps the full spectrum.
-    this.uniforms.uWaveLOD.value = this.glitterScale >= 0.5 ? 1 : 0;
+    const fine = this.glitterScale >= 0.5;
+    this.uniforms.uWaveLOD.value = fine ? 1 : 0;
     if (glit) {
-      // rebuild the light's world direction from the corridor drive: low is
-      // 1 - alt * 1.15 (lightrig), so invert; grazing light stays a whisker up
-      const y = Math.max(0.04, Math.min(1, (1 - glit.low) / 1.15));
-      const h = Math.sqrt(Math.max(0, 1 - y * y));
-      this.uniforms.uSunDirW.value.set(glit.ax * h, y, glit.az * h).normalize();
-      this.uniforms.uSparkle.value = glit.amp * this.glitterScale;
+      // THE SOURCE'S OWN DIRECTION, handed over whole. This used to be rebuilt
+      // from glit.low, which capped the elevation at 60.41 degrees and put the
+      // sparkle pass and the scene's DirectionalLight on two different suns —
+      // 29.6 degrees apart at noon (see lightrig.js glitterSource).
+      this.uniforms.uSunDirW.value.fromArray(glit.dir).normalize();
+      // THE GLITTER PATH IS NOT A FINE-TIER LUXURY. The lobe is arithmetic —
+      // two logs and two exps, no fbm — so Plain can afford the phenomenon
+      // even though it cannot afford the twinkle that breaks it into glints.
+      // Parking it at 0 there (invariant 5 read too literally) left the cheap
+      // tier with no sun on its water at all.
+      this.uniforms.uSparkle.value = glit.amp * (fine ? 1 : GLITTER.plainScale);
+      this.uniforms.uGlitAmp.value = glit.amp; // foam's light response: both tiers
       this.uniforms.uScatter.value = glit.amp * 0.55;
+      // the corridor's colour: warm sun, cold moon, leaning into the horizon's
+      // own hue as the source sinks — a low light really is reddened by the air
+      // it crosses, and uHor already carries exactly that reddening. HUE ONLY:
+      // the horizon sample is renormalised to unit LUMINANCE (not unit max
+      // channel — that left a dark night sky dimming the moon's road by a fifth)
+      // so the lean changes the colour of the road and never its brightness.
+      const c = this.uniforms.uGlitCol.value;
+      if (glit.moon) c.setRGB(0.70, 0.80, 1.0); else c.setRGB(1.0, 0.95, 0.86);
+      if (horizon) {
+        const hl = 0.2126 * horizon.r + 0.7152 * horizon.g + 0.0722 * horizon.b;
+        const cl = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+        if (hl > 1e-5) {
+          this._gc.copy(horizon).multiplyScalar(cl / hl); // same luminance as c
+          c.lerp(this._gc, 0.5 * glit.low);
+        }
+      }
     }
     this.uniforms.uDetailAmp.value = this.glitterScale;
     if (horizon) this.uniforms.uHor.value.copy(horizon);

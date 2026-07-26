@@ -67,6 +67,7 @@ export class TitleScene {
 
     this.sky = new Sky(this.scene);
     this.ocean = new Ocean(this.scene);
+    this.ocean.setLens(this.camera.fov, this.renderer.domElement.height);
     this.wakemap = new WakeMapLayer(this.renderer);
     this.ocean.setWakeMap(this.wakemap.rt.texture);
     this.ocean.uniforms.uFresnel.value = 0.45;
@@ -112,6 +113,7 @@ export class TitleScene {
       this.camera.aspect = innerWidth / innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(innerWidth, innerHeight);
+      this.ocean.setLens(this.camera.fov, this.renderer.domElement.height);
     };
     addEventListener('resize', this.onResize);
 

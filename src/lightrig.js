@@ -11,26 +11,50 @@ export function exposureTarget(dayness) {
 }
 
 // sol: solarState(t); lun: lunarState(t); moonBright: 0 new -> 1 full.
-// Returns { ax, az, low, amp }: corridor azimuth (unit xz), how low the light
-// stands (0 high -> 1 grazing; narrows the blade), and glitter amplitude.
+// Returns { dir, ax, az, low, amp, moon }:
+//   dir  — THE SOURCE'S TRUE UNIT WORLD DIRECTION. It exists because ocean.js
+//          used to REBUILD the direction from `low` (y = (1 - low)/1.15, floored
+//          at 0.04) and that reconstruction is lossy in two ways: `low` saturates
+//          at 0 once the altitude passes 1/1.15, so the rebuilt elevation had a
+//          hard ceiling of 60.41 degrees and disagreed with the real sun by
+//          29.6 degrees at noon; and the 0.04 floor held the source 2.3 degrees
+//          ABOVE the horizon while the real one was up to 4.3 below it. The
+//          sparkle pass and the scene's own DirectionalLight were therefore lit
+//          from two different suns whenever the sun was high. Hand over the
+//          vector and there is nothing to get wrong. (verify-glitter measures
+//          the agreement across a full cycle; it must stay at zero.)
+//   ax/az — the same bearing as a unit xz pair. NOTHING AT RUNTIME READS THEM
+//           any more: ocean.js took them until 2026-07-26 and now takes `dir`.
+//           They are kept because verify-light asserts them (unit length, and
+//           that the blade points at the sun), which is a cheap standing check
+//           that the source's azimuth is right — and because a bearing is what a
+//           future HUD or chart drive would want. Do not build geometry on them:
+//           they carry no elevation, which is how the 29.6-degree bug happened.
+//   low  — how low the source stands (0 high -> 1 grazing). NOT a direction:
+//          it drives colour temperature, nothing geometric.
+//   moon — which body owns the water, so the corridor can be cooled.
 export function glitterSource(sol, lun, moonBright) {
   if (sol.dayness > 0.12) {
     const len = Math.hypot(sol.dir[0], sol.dir[2]) || 1e-6;
     return {
+      dir: sol.dir,
       ax: sol.dir[0] / len, az: sol.dir[2] / len,
       low: Math.max(0, Math.min(1, 1 - sol.sunAlt * 1.15)),
       amp: 0.9 * sol.dayness,
+      moon: false,
     };
   }
   if (lun.alt > 0.05 && moonBright > 0.05) {
     const len = Math.hypot(lun.dir[0], lun.dir[2]) || 1e-6;
     return {
+      dir: lun.dir,
       ax: lun.dir[0] / len, az: lun.dir[2] / len,
       low: Math.max(0, Math.min(1, 1 - lun.alt * 1.15)),
       amp: 0.4 * moonBright,
+      moon: true,
     };
   }
-  return { ax: 0, az: 1, low: 0, amp: 0 };
+  return { dir: [0, 1, 0], ax: 0, az: 1, low: 0, amp: 0, moon: false };
 }
 
 export function moonBrightness(phase) {

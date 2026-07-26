@@ -182,6 +182,12 @@ try {
       }
       g.ocean.uniforms.uTime.value = FT;
       Wv.packWaveUniforms(FT, g.ocean.uniforms.uWave.value);
+      // NOTE (2026-07-26): uSparkle no longer drives a narrow pinprick pass.
+      // It is now the amplitude of the whole GLITTER PATH (src/glitter.js) — a
+      // broad slope-space lobe that also carries the wake's wet sheen — so the
+      // "- sparkle pass" lever below ablates considerably more than it used to,
+      // and its pixel difference should be read as "the corridor", not "the
+      // glints".
       g.ocean.uniforms.uSparkle.value = window.__sparkle0 * c.sparkle;
       g.ocean.uniforms.uDetailAmp.value = c.detail;
       g.ocean.uniforms.uFresnel.value = window.__fresnel0 * c.fresnel;
@@ -216,8 +222,9 @@ try {
     };
   }, [CAM_H, WIND]);
 
-  // remember the shader's own sparkle / fresnel levels so the levers scale
-  // them rather than invent them
+  // remember the shader's own glitter / fresnel levels so the levers scale them
+  // rather than invent them (uSparkle is the glitter path's amplitude since
+  // 2026-07-26, not the retired pinprick pass)
   await page.evaluate(() => {
     const g = window.saltstead;
     window.__sparkle0 = g.ocean.uniforms.uSparkle.value || 0.9;

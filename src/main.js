@@ -163,6 +163,7 @@ class Game {
     this.dayStart = DAY_LENGTH * 0.35; // spawn mid-morning
 
     this.ocean = new Ocean(this.scene);
+    this.ocean.setLens(this.camera.fov, this.renderer.domElement.height);
     this.wakemap = new WakeMapLayer(this.renderer);
     this.ocean.setWakeMap(this.wakemap.rt.texture);
     this.foam = new FoamLayer(this.scene, 220); // four emitters need the slots
@@ -398,6 +399,8 @@ class Game {
       this.camera.aspect = innerWidth / innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(innerWidth, innerHeight);
+      // the glitter lobe's roughness depends on how much sea one pixel covers
+      this.ocean.setLens(this.camera.fov, this.renderer.domElement.height);
     });
 
     this.hud = {
@@ -1335,6 +1338,9 @@ class Game {
       // a DPR-1 screen has no ratio to shed — go to three-quarters instead
       const cur = this.renderer.getPixelRatio();
       this.renderer.setPixelRatio(cur > 1 ? 1 : 0.75);
+      // fewer pixels means each one covers MORE sea, so the glitter lobe's
+      // resolution model has to hear about it (glitter.js)
+      this.ocean.setLens(this.camera.fov, this.renderer.domElement.height);
       this.say('Fewer pixels, truer wind — resolution eased for smooth sailing', 6);
     }
   }

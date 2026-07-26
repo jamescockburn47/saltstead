@@ -10,7 +10,7 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 - **[docs/DESIGN.md](docs/DESIGN.md)** — game identity, era-ladder progression, world
   model (1:250 land / gait-compressed ocean), phase plan, named risks.
 - `src/` modules are small and single-purpose; pure logic modules (waves, oceannoise,
- sailing,
+ glitter, sailing,
  shipphysics, shipframe, foam, earth, terraingen, shoredecor, flora, skymath,
  lightrig, woodgrain, legends, legendfx, combat, monsters, merchants, plunder,
  treasure, fleet, port, ports, shipyard, noise, searoute, shanties, whales;
@@ -38,9 +38,27 @@ assets, browser-first, deterministic, verify-gated**. Public client:
 
 ## Build & verify
 
-- `npm run verify` — the headless gate (63 checks). **Must be green before deploy.**
+- `npm run verify` — the headless gate (64 checks). **Must be green before deploy.**
  Add a verify script with every feature; prefer testing pure modules headlessly over
  eyeballing.
+- **LIGHT ON THE WATER IS PHYSICS, AND PHYSICS HAS A DATUM.** The sun/moon glitter
+ path lives in `src/glitter.js` (pure, emits its own GLSL, `verify-glitter.mjs`).
+ Its roughness sits on Cox & Munk's 1954 sea-surface slope fit, re-parameterised
+ through weather.js's own wind-to-chop map, because the drawn spectrum stops at a
+ 5.7 m component and carries under a third of a real sea's slope sd. Three lessons
+ the gate now holds: a lobe tuned by exponent (the retired `pow(..., 260.0)`) is a
+ 2-degree mirror and cannot draw a corridor that asks for 5; a light direction
+ REBUILT from a scalar is not the light direction (the old rebuild capped elevation
+ at 60.41° and stood 29.6° off the real sun at noon); and **a shader emitted from a
+ module is only guarded if the gate runs the ARITHMETIC, not the constants** —
+ verify-glitter transliterates the emitted GLSL into JS and holds it against the
+ twins bit-for-bit, with four mutations of the lobe as counter-examples, because a
+ string search cannot see a swapped sigma or a dropped Jacobian. Brightness is
+ bounded in BOTH directions (a contrast ratio rises as a corridor saturates, so it
+ cannot tell a bright road from a flooded one). `scripts/live-glitter.mjs` measures
+ the corridor in pixels from the DEFAULT camera at four sun/moon elevations, with a
+ uSparkle=0 ablation so the excess is attributed and not merely observed, and the
+ wake's answer to the sun by sailing her both ways past it.
 - **Shader arithmetic gets a gate too.** GPU floats are 32-bit and play happens
  15–80 km from the world origin, so anything that feeds a raw world coordinate into
  a `fract` hash loses its mantissa and the "noise" degenerates into world-axis
