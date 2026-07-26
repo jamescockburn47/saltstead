@@ -76,7 +76,10 @@ assets, browser-first, deterministic, verify-gated**. Public client:
  ashore mode stays retired; `scripts/live-whales.mjs` finds a real pod on the
  mid-Atlantic grounds and proves the animals hold a WORLD course while the ship
  manoeuvres, run the whole blow/cruise/sounding/absence cycle, and ride the
- swell (screenshots to `media/whale-*.png`).
+ swell (screenshots to `media/whale-*.png`); `scripts/live-wind.mjs` measures the
+ wind AND the sea at seven real places — doldrums, trades, horse latitudes, the
+ Channel, the forties, the fifties — and proves they differ (shots plus
+ `media/wind-by-latitude.json`).
 - Dev: `npm run dev` (port 5173). `window.saltstead` is the live Game handle
   (`.ship`, `.cam`, `.aground`, `.coastDist`, `.dayStart`, `.ocean.uniforms`).
   Wardens teleport by SHIFT-CLICKING the world chart (M) — the far writ drops

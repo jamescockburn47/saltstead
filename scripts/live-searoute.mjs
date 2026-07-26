@@ -127,8 +127,19 @@ try {
     }
     return null;
   });
-  await sleep(1200);
-  const stuck = await page.evaluate(() => window.saltstead.aground);
+  // POLL, DO NOT SLEEP. This was a flat 1200 ms, which was enough only while
+  // weather.js floored the wind at 10 m/s everywhere: she is dropped 0.015 deg
+  // (about 6.7 world m) short of the sand at 2 m/s, and once the wind became the
+  // real SHELTERED inshore value — 4.5 m/s on that coast, close-hauled — she
+  // creeps onto the beach in about 3.7 s instead of driving onto it in one.
+  // Measured, she grounds; the window was the only thing that failed. A poll is
+  // the right shape anyway: it does not need re-tuning the next time inshore
+  // speed changes, and it fails no slower than the timeout when grounding breaks.
+  let stuck = false;
+  for (let waited = 0; waited < 12000 && !stuck; waited += 400) {
+    await sleep(400);
+    stuck = await page.evaluate(() => window.saltstead.aground);
+  }
   ok(grounded !== null && stuck, `she takes the sand (beach at lon ${grounded && grounded.toFixed(2)})`);
   await page.evaluate(() => {
     const g = window.saltstead;

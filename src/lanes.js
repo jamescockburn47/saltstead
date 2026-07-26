@@ -12,6 +12,7 @@
 import { latLonToWorld, worldToLatLon, coastDistGame, gaitFactor, dxWrap, wrapX } from './earth.js';
 import { madeGoodFactor } from './sailing.js';
 import { windAt } from './wind.js';
+import { windProfile } from './weather.js';
 import { currentAt } from './currents.js';
 import { seaRoute, seaLeg } from './searoute.js';
 import { PORTS } from './ports.js';
@@ -91,10 +92,20 @@ export function segmentCost(ax, az, bx, bz) {
     const t = (i + 0.5) / n;
     const x = wrapX(ax + dx * t), z = az + (bz - az) * t;
     const ll = worldToLatLon(x, z);
-    const gait = gaitFactor(coastDistGame(ll.lat, ll.lon));
+    const coastDist = coastDistGame(ll.lat, ll.lon);
+    const gait = gaitFactor(coastDist);
     const w = windAt(x, z);
     const made = Math.max(0.12, madeGoodFactor(heading, w.from)); // VMG fraction along the course
-    const windFactor = clamp(w.speed / 8, 0.3, 2);
+    // THE ROUTER MUST COST THE WIND THE SHIP WILL ACTUALLY GET (2026-07-26).
+    // This read windAt's raw latitude field, skipping weather.js's inshore
+    // shelter and — the part that mattered — its FLOOR. While the floor was
+    // masking the whole field that was uniformly wrong and harmless; with a real
+    // wind field it became a STRUCTURED error, because the field runs to 0.6 m/s
+    // in the horse latitudes while the ship sailing there gets WIND_FLOOR. The
+    // router was clamping to 0.3 and pricing a calm belt at more than three
+    // times its true cost, so it detoured around belts the ship crosses
+    // perfectly well. Same coastDist the gait already sampled, so this is free.
+    const windFactor = clamp(windProfile(coastDist, w.speed) / 8, 0.3, 2);
     const cur = currentAt(x, z);
     const along = cur.vx * Math.sin(heading) + cur.vz * Math.cos(heading); // + = current with us
     const currentFactor = clamp(1 + along / 6, 0.4, 1.8); // a fair current is cheap, a foul one dear

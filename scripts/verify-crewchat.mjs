@@ -14,6 +14,9 @@ import { JETTISON_FRAC } from '../src/chase.js';
 import { RELOAD_CUT } from '../src/gundrill.js';
 import { SURVEY_RATE } from '../src/survey.js';
 import { RECORD_KM } from '../src/watchbill.js';
+import { WIND_FLOOR, WIND_LEE } from '../src/weather.js';
+import { windAt } from '../src/wind.js';
+import { latLonToWorld } from '../src/earth.js';
 
 let failed = 0;
 const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++; } };
@@ -80,6 +83,26 @@ ok(all.includes('six doubloons') && SURVEY_RATE === 6,
   'survey fact matches SURVEY_RATE');
 ok(all.includes('twenty kilometres') && RECORD_KM === 20,
   'record fact matches RECORD_KM');
+// THE WEATHER FACT WAS WRONG FOR A WHILE AND NOTHING NOTICED (2026-07-26). It
+// told the crew the wind "never falls below a workable ten metres a second"
+// — true only while weather.js's floor was masking the entire latitude field,
+// and still being said to players after the floor came down to 4.5. That is
+// exactly the drift this section exists to catch, so the wind now has guards
+// of its own: the floor, the shelter contrast, and the three belt magnitudes
+// the fact quotes.
+{
+  const beltAt = (lat) => windAt(latLonToWorld(lat, -40).x, latLonToWorld(lat, -40).z).speed;
+  ok(all.includes('four and a half') && WIND_FLOOR === 4.5,
+    `the weather fact quotes the wind floor (${WIND_FLOOR} m/s)`);
+  ok(all.includes('near double the inshore breeze') && Math.abs(1 / WIND_LEE - 1.9) < 1e-9,
+    `and the shelter contrast (${(1 / WIND_LEE).toFixed(2)}x)`);
+  ok(all.includes('nine metres') && Math.round(beltAt(16)) === 9,
+    `and the trade belt (${beltAt(16).toFixed(2)} m/s at 16 deg)`);
+  ok(all.includes('forties twelve') && Math.round(beltAt(44)) === 12,
+    `and the roaring forties (${beltAt(44).toFixed(2)} m/s at 44 deg)`);
+  ok(all.includes('fifties fifteen') && Math.round(beltAt(-54)) === 15,
+    `and the screaming fifties (${beltAt(-54).toFixed(2)} m/s at 54S)`);
+}
 
 // the new lore retrieves
 ok(hits('can we jettison the cargo overboard', null, 'jettison'), 'jettison question finds the bargain');

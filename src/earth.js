@@ -352,9 +352,10 @@ export function elevation(lat, lon) {
 // open-sea gait, two stages: 1x inshore so harbours and coastlines are sailed
 // at human scale, 5x once clear of the coast, then a second ramp to 10x in
 // true blue water. (Halved from 20x — the fair current now makes up part of the
-// difference; see currents.js.) The wind ALSO builds offshore (weather.js
-// windProfile), so the three stack: blue water is fast because the world
-// compresses, the wind fills in, and a favourable current sets you along.
+// difference; see currents.js.) The land ALSO shelters the wind, so it fills in
+// over the same distance (weather.js windProfile — a harbour keeps 1/1.9 of blue
+// water's), and the three stack: blue water is fast because the world compresses,
+// the wind fills in, and a favourable current sets you along.
 const smooth01 = (t) => { const c = Math.max(0, Math.min(1, t)); return c * c * (3 - 2 * c); };
 export const GAIT_MAX = 10;
 // The bands sit CLOSE in (playtest: the old 800/2200 m onsets left five dull

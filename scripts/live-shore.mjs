@@ -94,33 +94,145 @@ try {
     await sleep(5000); // coast map rebake + terrain and decor streaming
   };
 
-  // ---- 1. the Caribbean coast: palms, calm inshore water, breakers ----
-  await goCoast(17.94, -76.88); // the Palisadoes, off Port Royal
-  const carib = await page.evaluate(async () => {
+  // THE DESIGN'S FIRST LAW, MEASURED PROPERLY (rewritten 2026-07-26).
+  //
+  // These two clauses used to sample the game's wave field at the inshore spot
+  // and again 3 km away and demand the first be 0.85 of the second. That is a
+  // SAME-SEA-STATE comparison: the sea state is one pair of band scalars for
+  // wherever the SHIP is, so both samples were taken under the inshore ship's
+  // own sea. What it therefore measured was not "inshore versus blue water" but
+  // the shore field's local composition — the open set knocked down by
+  // shoreOpenAtten against the shore-parallel surf set riding in.
+  //
+  // Those two do not scale together. The open set follows the SWELL band, which
+  // the wind's inshore shelter, the fetch curve and shoreOpenAtten all reduce;
+  // the surf set has a fixed amplitude and follows the CHOP band only. So the
+  // ratio inverts whenever the inshore wind is light — which, once weather.js
+  // stopped flooring the whole world at 10 m/s (2026-07-26), it honestly is off
+  // a lee shore in the trades. The clause was propped up by the constant wind,
+  // and it fails on a correct game.
+  //
+  // The law it was reaching for is real, so it is now asserted exactly, from the
+  // game's own live position and coast distance through the game's own weather
+  // functions: the sea a ship GETS inshore against the sea a ship GETS in blue
+  // water — each with the sea state the game would actually give it there, which
+  // is the only comparison a player can ever experience. That holds at 0.35 here
+  // and 0.28 in the Solent. The WHOLE-WORLD form of it, swept over every latitude
+  // and every coast distance (which is where the marginal case lives — a calm
+  // belt, not a wind belt), is a headless clause in verify-weather. The live
+  // sampled field keeps a clause of its own, stating what sampling can honestly
+  // show: that the surf band which rides in does not run away.
+  //
+  // The open reference is SEARCHED FOR, not stepped to. The original clauses
+  // stepped a fixed 3 km along z and chose the sign per site — but 3 km of world
+  // metres is 6.8 DEGREES at this scale (M_PER_DEG 444), so the step overshoots
+  // whole ocean basins: 3 km north of the Palisadoes is the Bahama bank, 3 km
+  // south of the Solent is the French coast in Biscay, and both directions from
+  // the Solent land on land. Measured against those, the "open" denominator was
+  // itself sheltered water. So the helper sweeps for the most open water it can
+  // find within reach and reports how open that is, and the clause below checks
+  // it really is more open than the inshore point.
+  const shoreLaw = async () => page.evaluate(async () => {
     const g = window.saltstead;
-    // mean |height| at the teleport spot (inshore, FIXED — the ship may
-    // have sailed off it) vs 3 km out to sea, through the GAME's own
-    // waveHeight (g.waveAt — a dynamic import can land on a second,
-    // sampler-less module instance under dev-server HMR)
+    const { windAt } = await import('/src/wind.js');
+    const { windProfile, seaBandsFor } = await import('/src/weather.js');
+    const { significantHeight, shoreOpenAtten, shoreEnv, SHORE_WAVES } = await import('/src/waves.js');
+    const { worldToLatLon, coastDistGame, isLand, COAST_CAP } = await import('/src/earth.js');
+    const hsSw = significantHeight(0), hsCh = significantHeight(1);
+    // the shore-parallel set's own significant height at signed distance d
+    const surfHs = (d, chop) => {
+      const e = shoreEnv(d);
+      let v = 0;
+      for (const w of SHORE_WAVES) v += (w.amp * e * chop) ** 2 / 2;
+      return 4 * Math.sqrt(v);
+    };
+    // the whole sea a ship at (x, z) is given: its own wind, its own fetch, its
+    // own shore attenuation and its own surf. `cdOverride` asks the same
+    // question of open ocean at that latitude (COAST_CAP — out of the land's
+    // reach entirely), which is the law's honest comparator.
+    const seaFor = (x, z, cdOverride = null) => {
+      const ll = worldToLatLon(x, z);
+      const cd = cdOverride ?? coastDistGame(ll.lat, ll.lon);
+      const wind = windProfile(cd, windAt(x, z).speed);
+      const b = seaBandsFor(wind, cd);
+      const open = Math.hypot(hsSw * b.swell, hsCh * b.chop) * shoreOpenAtten(-cd);
+      return { cd, wind, ...b, hs: Math.hypot(open, surfHs(-cd, b.chop)) };
+    };
+    const p = window.__spot;
+    // the live field, both points under the ship's own sea state (a SHAPE
+    // measurement — see the note above)
     const mean = (x, z) => {
       let s = 0;
       for (let i = 0; i < 120; i++) s += Math.abs(g.waveAt(x, z, g.t + i * 0.41));
       return s / 120;
     };
-    const p = window.__spot;
+    // the most open water within reach of the ship — whichever bearing it lies on
+    let open = { x: p.x, z: p.z, cd: -1 };
+    for (let r = 600; r <= 4200; r += 300) {
+      for (let a = 0; a < 24; a++) {
+        const th = (a / 24) * Math.PI * 2;
+        const x = p.x + Math.sin(th) * r, z = p.z + Math.cos(th) * r;
+        const ll = worldToLatLon(x, z);
+        if (isLand(ll.lat, ll.lon)) continue;
+        const cd = coastDistGame(ll.lat, ll.lon);
+        if (cd > open.cd) open = { x, z, cd };
+      }
+    }
+    return {
+      sampledInshore: mean(p.x, p.z),
+      sampledOpen: mean(open.x, open.z),
+      openCoastDist: open.cd,
+      inshore: seaFor(p.x, p.z),
+      blue: seaFor(p.x, p.z, COAST_CAP), // open ocean at this latitude
+    };
+  });
+  const judgeShore = (tag, s, lawBound, runawayBound) => {
+    ok(s.inshore.hs < s.blue.hs * lawBound,
+      `${tag}: the coast lies quieter than blue water — significant height `
+      + `${s.inshore.hs.toFixed(3)} m inshore (wind ${s.inshore.wind.toFixed(1)} m/s, `
+      + `${s.inshore.cd.toFixed(0)} m off) against ${s.blue.hs.toFixed(3)} m in open ocean at `
+      + `this latitude (wind ${s.blue.wind.toFixed(1)}): ratio ${(s.inshore.hs / s.blue.hs).toFixed(3)}, `
+      + `bound ${lawBound}. THE DESIGN'S FIRST LAW`);
+    // the open sample must BE open, or the runaway clause below is measured
+    // against a second piece of sheltered water (the first version of this
+    // helper sampled the Solent's 3 km reference inland toward the mainland)
+    // 3 km of world metres is 6.8 degrees of latitude at this scale, so an
+    // ocean basin can easily be narrower than the step: what matters is only
+    // that the reference is far more open than the inshore point, not that it
+    // clears some absolute fetch.
+    ok(s.openCoastDist > Math.max(300, s.inshore.cd * 4),
+      `${tag}: the open reference really is more open — ${s.openCoastDist.toFixed(0)} m from the `
+      + `nearest coast against the inshore point's ${s.inshore.cd.toFixed(0)} m `
+      + '(needs 4x and at least 300 m)');
+    // A LOOSE TRIPWIRE ON PURPOSE, and the bound says why. This ratio is noisy
+    // between runs — the open reference is searched for rather than fixed, the
+    // ship drifts a little between the coast-map bake and the sample, and the
+    // mean is over a finite window of wave phase. Measured across runs: 0.90 to
+    // 1.54. Its job is to catch the surf becoming a WALL, nothing finer. The
+    // precise, deterministic, whole-world form of the law is the sweep in
+    // verify-weather, which is where a real regression will be convicted.
+    ok(s.sampledInshore < s.sampledOpen * runawayBound,
+      `${tag}: and in the live field, at one sea state, the surf that rides in is not a WALL `
+      + `— ${s.sampledInshore.toFixed(3)} m mean surface inshore against `
+      + `${s.sampledOpen.toFixed(3)} m open (ratio `
+      + `${(s.sampledInshore / s.sampledOpen).toFixed(2)}, tripwire ${runawayBound}, run-to-run `
+      + '0.90-1.54; the precise whole-world form of this is in verify-weather)');
+  };
+
+  // ---- 1. the Caribbean coast: palms, calm inshore water, breakers ----
+  await goCoast(17.94, -76.88); // the Palisadoes, off Port Royal
+  const carib = await page.evaluate(async () => {
+    const g = window.saltstead;
     return {
       field: !!g.coastMap.field,
       centerSet: g.coastMap.uvCenter.x < 1e8,
-      inshore: mean(p.x, p.z),
-      offshore: mean(p.x, p.z - 3000) || mean(p.x - 3000, p.z),
       decorMeshes: [...g.shoreDecor.cells.values()].filter((c) => c.mesh).length,
       terrainChunks: g.terrain.chunks.size,
       mode: g.mode,
     };
   });
   ok(carib.field && carib.centerSet, 'coast map baked and handed to the shader');
-  ok(carib.inshore < carib.offshore * 0.85,
-    `inshore water calmer than blue water (${carib.inshore.toFixed(3)} vs ${carib.offshore.toFixed(3)})`);
+  judgeShore('the Palisadoes', await shoreLaw(), 0.5, 1.8);
   ok(carib.decorMeshes > 0, `shore decoration built (${carib.decorMeshes} cells carry meshes)`);
   ok(carib.terrainChunks > 0, 'terrain streaming alive');
   await page.screenshot({ path: join(OUT, 'shore-caribbean.png') });
@@ -216,20 +328,13 @@ try {
   console.log('  shot - media/shore-england.png');
 
   // ---- 6. the Solent: a strait must lie CALM, not striped with surf ----
+  // Held tighter than the Caribbean on the law (a strait is sheltered twice
+  // over — by the coast field and by the strait gate) and looser on the
+  // runaway clause, because it is inside the surf envelope where the shore set
+  // is meant to be most of the water there is.
   await goCoast(50.51, -1.11); // between the Island and the mainland
   await sleep(3000);
-  const solent = await page.evaluate(async () => {
-    const g = window.saltstead;
-    const p = window.__spot;
-    const mean = (x, z) => {
-      let s = 0;
-      for (let i = 0; i < 120; i++) s += Math.abs(g.waveAt(x, z, g.t + i * 0.41));
-      return s / 120;
-    };
-    return { inshore: mean(p.x, p.z), offshore: mean(p.x, p.z + 3000) || mean(p.x + 3000, p.z) };
-  });
-  ok(solent.inshore < solent.offshore * 0.75,
-    `the Wight inshore water lies sheltered (${solent.inshore.toFixed(3)} vs ${solent.offshore.toFixed(3)} out to sea)`);
+  judgeShore('the Solent', await shoreLaw(), 0.4, 1.8);
   await page.screenshot({ path: join(OUT, 'shore-solent.png') });
   console.log('  shot - media/shore-solent.png');
 

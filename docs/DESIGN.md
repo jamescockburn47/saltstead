@@ -371,18 +371,28 @@ The scenery's laws (shoredecor.js + terraingen.js + earth.js):
   (mountainness > 0.35), so the silhouette behind a shore survives the cull
   and is already building if the view distance ever grows.
 
-## Real weather, real wind (the Moorstead weather-live pattern)
+## The wind, and the weather it makes
 
-Open-Meteo at the ship's REAL lat/lon: the Azores get Azores wind, today. The
-live sample eases into the wind base (never snaps the sails); WMO codes map
-to clear/overcast/rain/fog/storm, which dress the sky for real (skyfx.js:
-low-poly cumulus drifting downwind, rain streaking past the lens), grey the
-light and raise the swell. Two game-design overrides where truth loses to
-fun: the wind floors at 10 m/s EVERYWHERE (weather.js WIND_FLOOR — a real
-calm is true to the Atlantic but false to the game), and it BUILDS offshore
-(1x inshore -> 1.9x by ~1.5 km) regardless of the forecast, so crossings
-fly. Any fetch failure leaves the procedural wind machine in charge — live
-weather is a layer, never a dependency.
+The live Open-Meteo layer this section used to describe was **retired for
+determinism** (spec 2026-07-17): the wind is now wholly procedural. Weather STATE
+— clear/overcast/rain/fog/storm — comes from the cyclone field (`storms.js`) and
+dresses the sky through `weather.js skyDressing` (skyfx.js: low-poly cumulus
+drifting downwind, rain streaking past the lens), greys the light and raises the
+sea.
+
+**THE WIND'S SCALE (rebuilt 2026-07-26).** `wind.js WIND_BANDS` carries real
+surface-wind climatology — trades ~9 m/s, the roaring forties 12, the screaming
+fifties 15, doldrums and horse latitudes genuinely light — and `weather.js
+windProfile` shelters it inshore (a harbour keeps 1/1.9 of blue water's wind, full
+fill-in by ~1.5 km), so a crossing still flies. The floor is a light breeze,
+`WIND_FLOOR = 4.5` m/s: the sea is never becalmed to the point of being
+unsailable, and a true calm has the sweeps besides. That floor USED to be 10 m/s
+against a field whose global maximum was 9.19, so it beat the weather everywhere
+— every latitude on earth read 10.00 m/s and the swell that falls out of the wind
+was the same from the doldrums to the Southern Ocean. The geography of the wind is
+the point: the player should be able to feel where on earth she is from the water.
+`scripts/live-wind.mjs` measures it in the running game
+(`media/wind-by-latitude.json`).
 
 ## The navigator's craft (learn real things while you sail)
 

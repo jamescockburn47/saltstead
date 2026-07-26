@@ -71,7 +71,7 @@ import {
   latLonToWorld, worldToLatLon, coastDistGame, elevation, gaitFactor, COAST_CAP,
   encounterGait, ENCOUNTER_FAR, isLand, wrapX, dxWrap,
 } from './earth.js';
-import { windProfile, seaBandsFor, skyDressing } from './weather.js';
+import { windProfile, seaBandsFor, skyDressing, WIND_FLOOR } from './weather.js';
 import {
   setSeaBands, RIVER_STATE, setShoreSampler, easeWaveAxes, setWaveAxes,
   waveAxisFor,
@@ -2169,22 +2169,31 @@ class Game {
       * Math.min(1, dt * 2);
 
     // a living wind: direction breathes AROUND the base bearing (bounded, so
-    // it can never spin onto the bow and stall the game), strength gusts.
-    // The base itself is REAL weather when open-meteo answers (geo block
-    // below), and the wind BUILDS offshore: sheltered inshore, near double
-    // in blue water — stacked with the gait, a crossing genuinely flies.
-    // the wind field (wind.js): trades, westerlies, doldrums by latitude — but a
-    // storm's vortex (storms.js) overrides it wherever a cyclone has the ship
+    // it can never spin onto the bow and stall the game), strength gusts by
+    // +-45% on a ~90 s cycle. The base is the procedural wind field (wind.js):
+    // trades, westerlies, doldrums and horse latitudes by latitude, at real
+    // magnitudes since 2026-07-26. weather.js then SHELTERS it inshore — a
+    // harbour keeps 1/1.9 of blue water's wind — so stacked with the gait a
+    // crossing genuinely flies. A storm's vortex (storms.js) is laid over it
+    // wherever a cyclone has the ship
     const storm = stormWindAt(this.ship.x, this.ship.z, skyT); // skyT: storms persist across reload
     const wf = storm || windAt(this.ship.x, this.ship.z);
     this.wind.from = wf.from + 0.3 * Math.sin(t * 0.011) + 0.12 * Math.sin(t * 0.037);
     const gusts = 0.3 * Math.sin(t * 0.07) + 0.15 * Math.sin(t * 0.21);
     // over land the ship is on a river: sheltered inshore wind, not the
-    // blue-water build the raw sea-coast distance would claim. In a storm the
-    // gale IS the vortex speed (calm eye floored so she is never dead in irons).
-    this.wind.speed = storm
-      ? Math.max(10, wf.speed)
-      : windProfile(this.overLand ? 0 : this.coastDist, wf.speed * (1 + gusts));
+    // blue-water build the raw sea-coast distance would claim.
+    //
+    // THE STORM RIM IS A SEAM, so the gale is laid OVER the ambient wind
+    // instead of replacing it: storms.js runs the vortex speed to 0 at the eye
+    // AND at the rim, so `max(WIND_FLOOR, vortex)` dropped the wind to the floor
+    // exactly where the ship crosses into the storm. That was invisible while
+    // the floor was 10 and the whole world blew 10; with a real wind field it is
+    // a 15 m/s westerly going slack at the rim and filling again toward the
+    // eyewall. Taking the greater of the two makes the rim continuous in speed
+    // and keeps the eye a real lull — down to the ambient wind, not to nothing.
+    const ambient = windProfile(this.overLand ? 0 : this.coastDist,
+      windAt(this.ship.x, this.ship.z).speed * (1 + gusts));
+    this.wind.speed = storm ? Math.max(ambient, wf.speed) : ambient;
     // the Horn: the williwaws never stop — whatever the forecast says
     if (this.zone && STORM_ZONES.includes(this.zone.legend.id)) {
       this.wind.speed *= STORM_WIND_MULT;

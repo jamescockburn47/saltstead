@@ -131,7 +131,15 @@ export class ShoreDecorLayer {
     this.uniforms.uDecorTime.value = t;
     // blow TOWARD: the vegetation leans away from where the wind comes from
     this.uniforms.uWindDir.value.set(-Math.sin(from), -Math.cos(from));
-    this.uniforms.uWindStr.value = Math.max(0, Math.min(1, (speed - 2) / 16));
+    // RE-SCALED FOR THE REAL WIND FIELD (2026-07-26). The old (speed - 2) / 16
+    // map saturated at 18 m/s and was calibrated when weather.js floored the
+    // wind at 10 everywhere, so the fringe read a permanent 0.50 on every coast
+    // on earth. Coastal wind is now the SHELTERED value — around 4.8 m/s on a
+    // tropical shore, 7.9 in the fifties — and that old map would have frozen
+    // the palms at 0.17. Saturating at 11 m/s puts a tropical coast near 0.30
+    // and a Southern Ocean one near 0.65, so the vegetation reads its latitude
+    // like the water does.
+    this.uniforms.uWindStr.value = Math.max(0, Math.min(1, (speed - 2) / 9));
   }
 
   key(cx, cz) { return `${cx},${cz}`; }

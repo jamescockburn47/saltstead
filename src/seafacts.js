@@ -194,10 +194,12 @@ export const SEA_FACTS = [
   {
     id: 'weather', topic: 'navigation',
     keywords: ['weather', 'wind', 'storm', 'forecast', 'rain', 'gale'],
-    text: 'The weather is the REAL weather at the ship’s real coordinates '
-      + '— the Azores get Azores wind. It never falls below a workable ten '
-      + 'metres a second, and it builds offshore: blue water blows near '
-      + 'double the inshore breeze. Off Cape Horn the williwaws never stop.',
+    text: 'The wind is the world’s own: the trade belts blow nine metres a '
+      + 'second, the roaring forties twelve and the fifties fifteen, while '
+      + 'the doldrums and the horse latitudes lie light. It never falls '
+      + 'below a workable four and a half, and the land steals from it — '
+      + 'blue water blows near double the inshore breeze. Off Cape Horn the '
+      + 'williwaws never stop.',
   },
   {
     id: 'charts', topic: 'navigation',
