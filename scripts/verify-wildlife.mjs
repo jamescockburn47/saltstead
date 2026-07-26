@@ -1,9 +1,11 @@
 // verify-wildlife: every species is a navigation instrument — gulls mean
 // land, the albatross means blue water, the fin means warm shallows — and
 // the motion maths stays inside its envelopes.
+import { readFileSync } from 'node:fs';
 import {
   ambientSpecies, porpoiseY, porpoisePitch, circlePos, flapAngle, birdBeat,
   flockGate, podStation, frenzyPos, FRENZY_FINS, FRENZY_S,
+  flockAnchor, flockWander, GULL_TAU, ALBA_TAU, GULL_Y, ALBA_Y,
 } from '../src/wildlife.js';
 
 let failed = 0;
@@ -120,5 +122,70 @@ ok(flockGate(900) > 0.3 && flockGate(900) < 0.8, 'the flock gathers as land near
 ok(flockGate(350) === 1 && flockGate(0) === 1, 'the full clamour close inshore');
 ok(flockGate(800) > flockGate(1200), 'monotonic toward the coast');
 
+// ---------------------------------------------------------------------------
+// THE BIRDS HAVE WORLD POSITIONS — the whale's bug, in feathers
+// ---------------------------------------------------------------------------
+// wildlifelayer.js used to wheel the gulls about (sx, sz) at mastTop + 2 and the
+// albatross about (sx, sz) at 42 m, so both translated with the hull and neither
+// could ever be left behind. The v2 showcase had to DETACH the bodies to shoot
+// bare water, and reported it as a hazard in ordinary play too: a lens two
+// metres over the water gets a three-metre bird across it. They may still be
+// ATTRACTED — real seabirds work a vessel — but that has to be a behaviour in
+// world space, and these checks are what keep it one.
+{
+  const layer = readFileSync(new URL('../src/wildlifelayer.js', import.meta.url), 'utf8');
+  // 1. STRUCTURAL: the bird blocks must not read the hull's heading at all. A
+  // yaw inside a bearing is exactly what swung the whale round the ship like a
+  // fender on a warp, and it is the edit that would silently un-fix this.
+  const gullBlock = layer.slice(layer.indexOf('GULLS WORK THE SHIP'),
+    layer.indexOf('dolphins ride the bow wave'));
+  ok(gullBlock.length > 200, 'the gull/albatross block was found for inspection');
+  ok(!/yaw/.test(gullBlock), 'nothing in the bird block reads the hull heading');
+  ok(!/sx \+ c\.x|sz \+ c\.z/.test(gullBlock),
+    'and no bird is positioned as a rigid offset from the hull');
+  ok(/flockAnchor\(/.test(gullBlock) && /GULL_TAU/.test(gullBlock) && /ALBA_TAU/.test(gullBlock),
+    'both flocks chase a WORLD anchor with their own inertia');
+  ok(!/mastTop/.test(gullBlock), 'and at their own altitude, not the masthead position');
+
+  // 2. THE CHASE ITSELF. An exponential chase at tau trails a target moving at v
+  // by v*tau in the steady state — so the lag is a stated quantity, not a hope.
+  const run = (tau, v, secs, dt = 1 / 30) => {
+    let a = { x: 0, z: 0 }, sx = 0;
+    for (let i = 0; i < secs / dt; i++) { sx += v * dt; a = flockAnchor(a, sx, 0, dt, tau); }
+    return { lag: sx - a.x, sx };
+  };
+  const gull = run(GULL_TAU, 8, 240), alba = run(ALBA_TAU, 8, 900);
+  ok(Math.abs(gull.lag - 8 * GULL_TAU) < 8 * GULL_TAU * 0.05,
+    `a gull settles ${gull.lag.toFixed(0)} m astern of a hull making 8 m/s`
+    + ` (v*tau = ${(8 * GULL_TAU).toFixed(0)} m)`);
+  ok(alba.lag > gull.lag * 4,
+    `and an albatross ${alba.lag.toFixed(0)} m — she is going the same way, not following`);
+  // she catches up when the ship stops, and never overshoots
+  let a = { x: 500, z: 0 }, worst = 0;
+  for (let i = 0; i < 3000; i++) {
+    a = flockAnchor(a, 0, 0, 1 / 30, GULL_TAU);
+    worst = Math.min(worst, a.x);
+  }
+  ok(a.x < 1 && worst >= 0, 'and closes on a hove-to hull without overshooting'
+    + ` (${a.x.toFixed(3)} m out, worst ${worst.toFixed(3)})`);
+  // 3. DETERMINISM and rate-independence of the LIMIT
+  ok(flockAnchor({ x: 3, z: 4 }, 9, 9, 0.033, 9).x === flockAnchor({ x: 3, z: 4 }, 9, 9, 0.033, 9).x,
+    'the chase is deterministic');
+  const fine = (() => { let b = { x: 0, z: 0 }; for (let i = 0; i < 3000; i++) b = flockAnchor(b, 100, 0, 0.01, 9); return b.x; })();
+  const coarse = (() => { let b = { x: 0, z: 0 }; for (let i = 0; i < 300; i++) b = flockAnchor(b, 100, 0, 0.1, 9); return b.x; })();
+  ok(Math.abs(fine - coarse) < 0.01, `and frame-rate independent (${fine.toFixed(4)} at 100 Hz`
+    + ` vs ${coarse.toFixed(4)} at 10 Hz)`);
+  // 4. the wander is a course of their own, and bounded
+  let mx = 0;
+  for (let t = 0; t < 4000; t += 0.7) {
+    const w = flockWander(t, 26, 0.031, 1.3);
+    mx = Math.max(mx, Math.hypot(w.x, w.z));
+  }
+  ok(mx > 26 && mx < 26 * 1.5, `the flock's own wander is bounded (${mx.toFixed(1)} m of 26)`);
+  ok(GULL_Y > 6 && ALBA_Y > 6, 'and both fly well clear of a low lens on the water');
+}
+
 if (failed) { console.error(`verify-wildlife: ${failed} FAILED`); process.exit(1); }
-console.log('verify-wildlife: OK — species read the waters, porpoise arc sane, circles tangent, birds soar and beat in bouts, the flock gathers inshore');
+console.log('verify-wildlife: OK — species read the waters, porpoise arc sane, circles tangent,'
+  + ' birds soar and beat in bouts, the flock gathers inshore, and the birds fly a WORLD'
+  + ' course that CHASES the ship instead of being bolted to her');

@@ -68,6 +68,46 @@ export function porpoisePitch(phase) {
   return Math.atan2((s > 0 ? 2.1 : 0.25) * c, 3.5);
 }
 
+// ---------------------------------------------------------------------------
+// A BIRD HAS A WORLD POSITION (2026-07-26)
+// ---------------------------------------------------------------------------
+// This is the whale's bug again, in feathers. The gulls used to wheel about
+// (sx, sz) at mastTop + 2 and the albatross about (sx, sz) at a 42 m radius, so
+// both were RIGIDLY ATTACHED to the hull: they could never be left behind, they
+// translated with her at whatever gait the current was compressing, and a lens
+// two metres above the water a few metres off the ship got a three-metre bird
+// across it. The v2 showcase reported exactly that — a hazard in ordinary play,
+// not just in a publicity still — and had to DETACH the bodies to shoot bare
+// water.
+//
+// Real seabirds do follow vessels. So the attraction stays and the ATTACHMENT
+// goes: the flock keeps a world anchor that CHASES the ship with real inertia,
+// and the birds fly their own circuits about that anchor in world coordinates.
+// Put the helm hard over and they carry on the way they were going; make way and
+// they string out astern and have to catch up. Nothing here reads the ship's
+// heading — that is the whole point, and verify-wildlife holds it structurally.
+//
+// The lag is not a fudge: an exponential chase at time constant tau trails a
+// target moving at v by exactly v*tau in the steady state, so a gull at
+// GULL_TAU sits about seventy metres astern of a hull making eight metres a
+// second, and an albatross at ALBA_TAU is four hundred metres back — which is
+// why she reads as an animal that happens to be going the same way rather than
+// as a kite on a string.
+export const GULL_TAU = 9;    // seconds — gulls work a ship closely
+export const ALBA_TAU = 55;   // ...an albatross is barely interested
+export function flockAnchor(a, sx, sz, dt, tau) {
+  const k = 1 - Math.exp(-Math.max(0, dt) / Math.max(1e-6, tau));
+  return { x: a.x + (sx - a.x) * k, z: a.z + (sz - a.z) * k };
+}
+// and the flock's own slow wander about that anchor, so its centre is never
+// exactly over the hull. World metres, on the world clock, seeded by phase.
+export function flockWander(t, r, speed, phase = 0) {
+  return { x: Math.sin(t * speed + phase) * r, z: Math.cos(t * speed * 0.73 + phase) * r };
+}
+// their cruising altitude over MEAN sea level (y = 0 in world), which is what a
+// bird holds — it does not ride the swell the way a hull does
+export const GULL_Y = 13, ALBA_Y = 10;
+
 // steady circling: position + tangent heading on a circle of radius r
 export function circlePos(t, r, speed, phase = 0) {
   const a = t * speed + phase;

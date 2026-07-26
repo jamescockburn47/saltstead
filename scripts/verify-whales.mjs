@@ -15,7 +15,8 @@ import {
   memberLen, memberPhase, memberCycle, isCalf, whalePose, flukeTipY, bowTipY,
   churnGlow, stalkAnchor, whitePod,
   WHALE_CELL, POD_CHANCE, POD_MAX, POD_REACH, WHALE_STREAM_R, WHALE_SEA,
-  WHALE_PERIOD, WHALE_DEEP, WHALE_SEEN, BREATHS, PHASE, HALF_BEAM,
+  WHALE_PERIOD, WHALE_DEEP, BREATHS, PHASE, HALF_BEAM,
+  whaleTopY, submergedFade, WHALE_FADE, WHALE_GONE, WHALE_UP,
   BULL_LEN, COW_LEN, CALF_LEN, WHITE_LEN, WHITE_TAU,
 } from '../src/whales.js';
 import { SLOOP, GALLEON } from '../src/shipphysics.js';
@@ -377,5 +378,65 @@ const ok = (cond, msg) => { if (!cond) { console.error('  FAIL:', msg); failed++
   ok(Math.hypot(p1.x - p0.x, p1.z - p0.z) > 40, 'she is never at rest beside you');
 }
 
+// ---------------------------------------------------------------------------
+// SHE GOES UNDER THE WATER, NOT ONTO IT
+// ---------------------------------------------------------------------------
+// The v2 showcase found her drawn as "a flat slab lying ON the water rather than
+// under it". The sea is opaque, so a body drawn at full strength two metres down
+// showed only its intersection with the surface: a flat-topped grey shape with a
+// hard waterline edge. These checks hold the dissolve that replaces it.
+{
+  ok(submergedFade(0) === 1 && submergedFade(3) === 1,
+    'awash or clear of the water, she draws at full strength');
+  let prev = 1, mono = true;
+  for (let d = 0; d <= 20; d += 0.1) {
+    const f = submergedFade(-d);
+    if (f > prev + 1e-12) mono = false;
+    prev = f;
+  }
+  ok(mono, 'and fades monotonically with depth');
+  ok(submergedFade(-WHALE_FADE) < 0.38 && submergedFade(-WHALE_FADE) > 0.36,
+    `one e-folding depth leaves ${(submergedFade(-WHALE_FADE) * 100).toFixed(0)}% of her`);
+  // THE RANGE THAT MATTERS: a pale shadow at a metre, a rumour at four, gone by
+  // ten. Those three are the whole visual claim and they are numbers.
+  ok(submergedFade(-1) > 0.6, `a metre down she is still a shape (${submergedFade(-1).toFixed(2)})`);
+  ok(submergedFade(-4) < 0.35 && submergedFade(-4) > 0.15,
+    `four metres down a rumour (${submergedFade(-4).toFixed(2)})`);
+  ok(submergedFade(-10) < WHALE_GONE,
+    `and by ten she is not drawn at all (${submergedFade(-10).toFixed(3)} under ${WHALE_GONE})`);
+  // the cycle must actually USE that range: her top must cross the whole span
+  const len = BULL_LEN;
+  let sawUp = false, sawGhost = false, sawGone = false;
+  for (let i = 0; i < 800; i++) {
+    const f = submergedFade(whaleTopY(whalePose(i / 800, len), len));
+    if (f >= 1) sawUp = true;
+    if (f > WHALE_GONE && f < 0.6) sawGhost = true;
+    if (f <= WHALE_GONE) sawGone = true;
+  }
+  ok(sawUp && sawGhost && sawGone,
+    'and the sounding cycle runs the whole way: out of the water, a dissolving'
+    + ' shadow, and a real absence');
+  // the DISSOLVE has to be gradual — a pop is the thing this replaced. Walk the
+  // cycle at 30 Hz and hold the worst frame-to-frame step in opacity.
+  let worstStep = 0;
+  for (let i = 0; i < 6000; i++) {
+    const u0 = (i / 30) / WHALE_PERIOD, u1 = ((i + 1) / 30) / WHALE_PERIOD;
+    const a = submergedFade(whaleTopY(whalePose(u0, len), len));
+    const b = submergedFade(whaleTopY(whalePose(u1, len), len));
+    worstStep = Math.max(worstStep, Math.abs(a - b));
+  }
+  ok(worstStep < 0.06, `no pop anywhere in the cycle (worst opacity step at 30 Hz`
+    + ` ${worstStep.toFixed(4)})`);
+  ok(WHALE_UP > WHALE_GONE,
+    'and a ghost does not count as an animal SHOWING (the fair current is only'
+    + ' slackened for a whale you can actually see)');
+  // a CALF is a smaller animal, so she is under sooner at the same pose
+  const p = whalePose(0.30);
+  ok(whaleTopY(p, CALF_LEN) < whaleTopY(p, BULL_LEN),
+    'a calf shows less of herself than a bull at the same trim');
+}
+
 if (failed) { console.error(`verify-whales: ${failed} FAILED`); process.exit(1); }
-console.log('verify-whales: OK — world-anchored pods on their own courses, sized against the ladder, flukes clear of the water and a real absence in the deep');
+console.log('verify-whales: OK — world-anchored pods on their own courses, sized against'
+  + ' the ladder, flukes clear of the water, a real absence in the deep, and she DISSOLVES'
+  + ' into the sea as she goes down instead of lying on it as a slab');

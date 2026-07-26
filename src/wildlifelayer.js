@@ -9,10 +9,12 @@ import { dxWrap } from './earth.js';
 import {
   ambientSpecies, porpoiseY, porpoisePitch, circlePos, birdBeat, podStation,
   frenzyPos, FRENZY_FINS, FRENZY_S,
+  flockAnchor, flockWander, GULL_TAU, ALBA_TAU, GULL_Y, ALBA_Y,
 } from './wildlife.js';
 import {
   podsNear, podPose, whalePose, memberStation, memberLen, memberCycle,
-  churnGlow, stalkAnchor, whitePod, POD_MAX, WHALE_STREAM_R, WHALE_SEEN, BODY_R,
+  churnGlow, stalkAnchor, whitePod, POD_MAX, WHALE_STREAM_R, BODY_R,
+  whaleTopY, submergedFade, WHALE_GONE, WHALE_UP,
 } from './whales.js';
 
 const GREY = new THREE.MeshPhongMaterial({ color: 0x8fa3ad, flatShading: true });
@@ -208,9 +210,21 @@ function buildWhaleBody(scene) {
   const G = whaleGeometry();
   const g = new THREE.Group();
   const skin = [];
+  // HER MATERIALS ARE HER OWN NOW. They used to be four shared singletons, which
+  // was right while the only thing that animated was geometry — but the depth
+  // fade below is per-animal (every whale in a pod runs her own sounding cycle,
+  // so no two are at the same depth), and an opacity written on a shared
+  // material would put the shallowest animal's fade on the deepest one. Cloned
+  // ONCE at construction, POD_MAX x 4 x 2 of them, nothing allocated per frame.
+  const own = new Map();
+  const mine = (m) => {
+    let c = own.get(m);
+    if (!c) { c = m.clone(); own.set(m, c); }
+    return c;
+  };
   const add = (geo, dark, pale) => {
-    const m = new THREE.Mesh(geo, dark);
-    skin.push({ m, dark, pale });
+    const m = new THREE.Mesh(geo, mine(dark));
+    skin.push({ m, dark: mine(dark), pale: mine(pale) });
     g.add(m);
     return m;
   };
@@ -247,13 +261,36 @@ function buildWhaleBody(scene) {
   churn.visible = false;
   g.visible = false;
   scene.add(g, churn);
+  // the colour the sea closes over her with — ocean.js's own base water hue, so
+  // she dissolves INTO the water rather than into a grey fog
+  const SEA = new THREE.Color(0x175a7d);
   return {
     group: g, fluke, spout, spoutMats, churn, churnMat, skin,
-    pale: false, len: 0, phase: '', blow: 0, surf: 0,
+    pale: false, len: 0, phase: '', blow: 0, surf: 0, fade: 1,
     setPale(on) {
       if (on === this.pale) return;
       this.pale = on;
       for (const s of this.skin) s.m.material = on ? s.pale : s.dark;
+      this.fade = -1;                 // the new set has not been faded yet
+    },
+    // whales.js submergedFade: 1 awash, falling away as she goes down
+    setFade(f) {
+      if (Math.abs(f - this.fade) < 0.004) return;
+      this.fade = f;
+      const solid = f > 0.995;
+      for (const s of this.skin) {
+        const m = s.m.material;
+        m.transparent = !solid;
+        m.opacity = f;
+        // depthWrite off once she is a ghost, or her own far faces punch holes
+        // in her near ones through the alpha
+        m.depthWrite = f > 0.85;
+        // the hue is lerped from a REMEMBERED base, not from m.color — m.color
+        // IS the material's colour, so lerping it in place would compound every
+        // frame and she would be sea-coloured within a second of going down
+        if (!m.userData.baseColor) m.userData.baseColor = m.color.clone();
+        m.color.copy(m.userData.baseColor).lerp(SEA, (1 - f) * 0.8);
+      }
     },
   };
 }
@@ -283,6 +320,10 @@ export class WildlifeLayer {
     this.fin = buildFin();
     scene.add(this.fin);
     this.finDrift = { x: 0, z: 0 };
+    // the birds' WORLD anchors (wildlife.js flockAnchor) — null while the
+    // species is out of its water, so a flock never resumes an old berth
+    this.gullAnchor = null;
+    this.albaAnchor = null;
     // the frenzy pack: extra fins that only swim when a ship has gone down
     this.frenzy = [];
     for (let i = 0; i < FRENZY_FINS; i++) {
@@ -334,16 +375,26 @@ export class WildlifeLayer {
       f.rotation.y = p.heading;
     }
 
-    // gulls wheel about the masthead — land is close. Bouts of beating,
-    // stretches of soaring on flared wings (wildlife.js birdBeat), and each
-    // bird banks INTO her circle, harder while she glides — the flare-and-
-    // soar that makes a wheeling bird read as flight, not clockwork
+    // GULLS WORK THE SHIP, THEY ARE NOT BOLTED TO HER (wildlife.js flockAnchor).
+    // The flock keeps a WORLD anchor that chases the hull with nine seconds of
+    // inertia and wanders on its own about that, and each bird flies her own
+    // circuit around it in world coordinates at her own altitude over mean sea
+    // level. Nothing below reads sx/sz except through the anchor, and nothing
+    // reads the ship's yaw at all — put the helm over and the birds hold their
+    // course. Land is still what brings them (ambientSpecies).
+    if (spec.gulls) {
+      if (!this.gullAnchor) this.gullAnchor = { x: sx, z: sz };
+      this.gullAnchor = flockAnchor(this.gullAnchor, sx, sz, dt, GULL_TAU);
+    } else this.gullAnchor = null;
+    const gw = spec.gulls ? flockWander(t, 26, 0.031, 1.3) : null;
     for (let i = 0; i < GULLS; i++) {
       const b = this.gulls[i];
       b.group.visible = spec.gulls;
       if (!spec.gulls) continue;
       const c = circlePos(t, 7 + i * 2.5, 0.5 + i * 0.07, i * 1.9);
-      b.group.position.set(sx + c.x, mastTop + 2 + Math.sin(t * 0.7 + i) * 1.5, sz + c.z);
+      b.group.position.set(this.gullAnchor.x + gw.x + c.x,
+        GULL_Y + Math.sin(t * 0.7 + i) * 1.5,
+        this.gullAnchor.z + gw.z + c.z);
       b.group.rotation.set(0, c.heading, 0);
       const bb = birdBeat(t, i);
       b.group.rotateZ(0.18 + 0.2 * bb.glide); // the bank into the wheel
@@ -358,10 +409,19 @@ export class WildlifeLayer {
 
     // the albatross lives at the soaring end of the same rhythm: locked
     // wings for long minutes, the rare unhurried bout
+    // ...and the albatross barely notices the ship at all: fifty-five seconds of
+    // inertia is four hundred metres of lag behind a hull making way, so she
+    // reads as an animal that happens to be going the same way rather than as a
+    // kite on a string. Same world anchor idiom, a far longer tau.
     this.alba.group.visible = spec.albatross;
     if (spec.albatross) {
+      if (!this.albaAnchor) this.albaAnchor = { x: sx, z: sz };
+      this.albaAnchor = flockAnchor(this.albaAnchor, sx, sz, dt, ALBA_TAU);
+      const aw = flockWander(t, 90, 0.017, 4.1);
       const c = circlePos(t, 42, 0.09, 3.3);
-      this.alba.group.position.set(sx + c.x, 9 + Math.sin(t * 0.23) * 3.5, sz + c.z);
+      this.alba.group.position.set(this.albaAnchor.x + aw.x + c.x,
+        ALBA_Y + Math.sin(t * 0.23) * 3.5,
+        this.albaAnchor.z + aw.z + c.z);
       this.alba.group.rotation.set(0, c.heading, 0);
       const bb = birdBeat(t, 0, 0.85);
       this.alba.group.rotateZ(0.28 + 0.12 * bb.glide); // the soaring bank
@@ -371,7 +431,7 @@ export class WildlifeLayer {
         w.inner.rotation.z = w.side * -bb.angle;
         w.outer.rotation.z = -(bb.angle * 0.5 + 0.08 * bb.glide);
       }
-    }
+    } else this.albaAnchor = null;
 
     // dolphins ride the bow wave when you're making way offshore — stationed
     // in the SHIP's frame (podStation, verify-gated) so the leaps stay clear
@@ -469,8 +529,15 @@ export class WildlifeLayer {
       w.phase = pose.phase;
       w.blow = pose.blow;
       w.surf = surf;
-      w.group.visible = pose.y > WHALE_SEEN; // deeper, and she is simply gone
-      if (w.group.visible) up = true;
+      // SHE GOES UNDER THE WATER, NOT ONTO IT (whales.js submergedFade). The
+      // sea is opaque, so a body drawn at full strength two metres down showed
+      // only its intersection with the surface — a flat-topped grey slab with a
+      // hard waterline. Fading her by depth into the sea's own colour turns that
+      // edge into a dissolve, and by ten metres she is simply gone.
+      const fade = submergedFade(whaleTopY(pose, len));
+      w.group.visible = fade > WHALE_GONE;
+      w.setFade(fade);
+      if (fade > WHALE_UP) up = true;
       w.group.position.set(x, surf + pose.y, z);
       w.group.rotation.set(pose.pitch, p.heading, pose.roll, 'YXZ');
       // THE BLOW: the column stands with the jet and the spent plume widens
@@ -523,6 +590,7 @@ export class WildlifeLayer {
         x: w.group.position.x, y: w.group.position.y, z: w.group.position.z,
         len: w.len, phase: w.phase, blow: w.blow, surf: w.surf,
         visible: w.group.visible, flukeY: V.y, pitch: w.group.rotation.x,
+        fade: +w.fade.toFixed(3),
       });
     }
     return out;

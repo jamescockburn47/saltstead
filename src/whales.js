@@ -84,9 +84,14 @@ export const WHALE_STREAM_R = 2600;  // the layer bodies pods inside this
 // — a flat R + weave bound is FALSE and verify-whales sweeps every cell for it)
 export const POD_REACH = 1500 + 90 * Math.SQRT2;
 export const WHALE_SEA = 1500;       // game metres to the nearest coast, minimum
-// deeper than this she is out of sight and the layer stops drawing her — the
-// absence in the sounding cycle is a real absence
-export const WHALE_SEEN = -16;
+// RETIRED 2026-07-26, and the retirement IS the fix. This was the whole of the
+// old visibility rule: draw her at full strength until sixteen metres down, then
+// stop. The sea is opaque, so between nought and sixteen what the eye actually
+// got was the intersection of a twenty-metre body with the water plane — a
+// flat-topped grey slab with a hard waterline edge. submergedFade below replaces
+// it with a dissolve. Kept as a named tombstone rather than deleted, because the
+// number reads plausible and someone will otherwise re-invent it.
+export const WHALE_SEEN_RETIRED = -16;
 
 // A pod's whole life as numbers: where her circuit lies, how fast and which
 // way round she works it, how many animals, and the phase her cycle started
@@ -391,6 +396,39 @@ export function flukeTipY(pose, len) {
 }
 export function bowTipY(pose, len) {
   return pose.y - Math.sin(pose.pitch) * len * 0.5;
+}
+
+// ---------------------------------------------------------------------------
+// UNDER THE WATER (2026-07-26)
+// ---------------------------------------------------------------------------
+// THE DEFECT, from the v2 showcase: "a submerged whale is drawn as a flat slab
+// lying ON the water rather than under it... an animal a metre or two down reads
+// as a hard-edged grey shape on the surface with no refraction or depth fade."
+//
+// The cause is that the sea is OPAQUE and she was drawn at full strength until
+// forty-six metres down. So what the eye got was the INTERSECTION of a
+// twenty-metre body with the water plane: a flat-topped grey shape with a hard
+// waterline edge, which is exactly a slab. Nothing was fading, nothing was
+// hidden, and the shape had no depth cue of any kind.
+//
+// Three options were open — hide her the moment she is under, fade her with
+// depth, or draw her properly beneath the surface. The last needs the water to
+// become translucent, which is a whole rendering pass and would change every
+// frame of the game to fix one animal. The first is a pop. So: FADE, because it
+// is also what a deck actually sees. A dark body under open ocean goes by
+// Beer-Lambert, and the e-folding depth here is set so she is a pale shadow at a
+// metre, a rumour at four and gone by ten — which is a real sighting range for
+// a whale under a boat, and it turns the hard waterline edge into a dissolve.
+// She takes the SEA'S OWN COLOUR as she goes, not grey transparency, so what
+// closes over her is water and not fog.
+export const WHALE_FADE = 3.2;    // e-folding depth, metres
+export const WHALE_GONE = 0.045;  // below this she is not drawn at all
+export const WHALE_UP = 0.5;      // ...and above this she counts as SHOWING
+// her highest point relative to the local sea surface: the top of the trunk at
+// her own scale. Positive means part of her is out of the water.
+export function whaleTopY(pose, len) { return pose.y + len * BODY_R; }
+export function submergedFade(topY) {
+  return topY >= 0 ? 1 : Math.exp(topY / WHALE_FADE);
 }
 
 // the foam ring where an animal breaks the surface: strong through the blow
